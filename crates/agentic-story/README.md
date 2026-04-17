@@ -2,79 +2,107 @@
 
 ## What this crate is
 
-The **hero crate**. Defines what a story is: the `Story` type, its acceptance criteria, its lifecycle state machine, verdict records, and evidence format.
+The **hero crate**. Defines what a story is: the `Story` type, its acceptance structure (tests + UAT), pattern references, lifecycle state machine, proof-hash algorithm, verdict records, and evidence wiring.
 
-This is the primary entity in the entire system. Epics group stories. Phases execute story work. Agents produce story work. Nothing is "done" without a proven story.
+This is the primary entity in the entire system. Epics group stories. Phases execute story work. Agents produce story work. Nothing is "done" without a story in `tested` state.
 
 ## Why it's a separate crate
 
 Story is the domain center. Isolating it here means:
 
-1. Every other crate that touches stories must depend on this one. The compiler makes the dependency direction explicit — `agentic-work` (epics/phases) depends on stories, never the other way.
-2. Story format is stable and changes deliberately. Churn here ripples everywhere, so the crate is kept disciplined.
-3. Can be used standalone — e.g., a standalone linter or documentation generator for stories doesn't need to pull in the whole system.
+1. Every other crate that touches stories depends on this one. The compiler makes the dependency direction explicit — `agentic-work` (epics/phases) depends on stories, never the other way.
+2. Story format is stable and changes deliberately. Churn here ripples everywhere.
+3. Can be used standalone — a linter, doc generator, or corpus auditor doesn't need the full system.
 
 ## Public API sketch
 
 ```rust
 pub struct Story {
-    pub id: StoryId,
-    pub title: String,
-    pub outcome: String,          // plain-English value statement
-    pub status: Status,           // proposed | under_construction | proven | deprecated | archived
-    pub acceptance: Vec<Criterion>,
-    pub context: Context,         // epic, depends_on, touches
-    pub evidence_ref: EvidencePath,  // path to append-only evidence log
-    pub tags: Vec<String>,
-    pub notes: String,
+    pub id: StoryId,                // positive integer
+    pub title: String,              // label only, not part of proof hash
+    pub outcome: String,
+    pub status: Status,             // see state machine below
+    pub patterns: Vec<PatternId>,   // slug refs
+    pub acceptance: Acceptance,
+    pub guidance: String,
+    pub depends_on: Vec<StoryId>,   // scheduling concern, not part of proof hash
 }
 
-pub struct Criterion {
-    pub id: String,              // e.g., "ac-01"
-    pub given: String,
-    pub when: String,
-    pub then: String,
-    pub verify: VerifyCmd,       // executable: shell cmd or cargo test filter
+pub struct Acceptance {
+    pub tests: Vec<TestEntry>,      // 1-to-many; each has its own justification
+    pub uat: String,                // prose journey for a UAT agent
 }
 
-pub enum Status { Proposed, UnderConstruction, Proven, Deprecated, Archived }
-
-pub struct Verdict {
-    pub story_id: StoryId,
-    pub verdict: Pass | Fail,
-    pub commit: String,          // git commit hash
-    pub run_id: String,
-    pub timestamp: DateTime<Utc>,
-    pub trace_ref: PathBuf,
+pub struct TestEntry {
+    pub file: PathBuf,              // must exist at verify time, not parse time
+    pub justification: String,      // what THIS specific test proves
 }
 
-// Lifecycle transitions are enforced here:
+pub enum Status {
+    Proposed,
+    UnderConstruction,
+    Tested,        // set only by agentic-verify after Pass
+    Healthy,       // set only by agentic-verify after UAT pass
+    Deprecated,
+    Archived,
+}
+
+// Lifecycle transitions enforced in code:
 impl Story {
-    pub fn promote(&mut self, verdict: &Verdict) -> Result<(), LifecycleError>;
+    pub fn record_verdict(&mut self, v: &Verdict) -> Result<(), LifecycleError>;
+    // Constructing Status::Tested/Healthy is pub(crate) — only this crate can
+    // write those values via record_verdict(). Humans can't hand-edit the YAML
+    // to Tested/Healthy without being caught by the audit.
 }
 ```
 
+## Proof hash (load-bearing)
+
+Every verdict records a proof hash computed over the canonical serialization of:
+
+- `outcome`
+- `patterns` (array of IDs, sorted; each referenced pattern's content is hashed in too — editing a pattern invalidates proof for stories that reference it)
+- `acceptance.tests` (array of `{file, justification}` in document order)
+- `acceptance.uat`
+- `guidance`
+
+Explicitly **not** in the hash:
+
+- `title` — a label; renaming is cosmetic.
+- `status` — the thing we're proving, not the thing being proved.
+- `depends_on` — a scheduling concern; ordering does not change what the story delivers.
+- `id` — a name, same as title.
+
+On `agentic story audit`:
+
+- Current-hash computed from the YAML on disk (plus any referenced patterns).
+- Compared to the hash recorded in the latest Pass verdict for this story.
+- If equal: status stands.
+- If not equal: status auto-reverts to `under_construction`. Proof is for the old content, not the current content.
+
+Canonical serialization is deterministic (sorted keys in JSON; array order preserved where authored, sorted where set-like). The serialization algorithm is part of the contract — changing it requires a versioned hash scheme.
+
 ## Dependencies
 
-- Depends on: `agentic-events` (emits story-level events), `serde`, `chrono`
+- Depends on: `agentic-events` (emits story-level events), `serde`, `chrono`, `serde_yaml`
 - Depended on by: `agentic-work`, `agentic-verify`, `agentic-orchestrator`, `agentic-cli`, `agentic-store`
 
 ## Design decisions
 
-- **Story YAML is the primary artifact.** Stories live on disk under `stories/<id>.yml`. This crate defines the schema and parse/serialize.
-- **Acceptance criteria are executable.** Non-executable criteria are a parse error. This forces prove-it from day one.
-- **Evidence is append-only and external.** `evidence_ref` points to a directory of run records, not inlined. Avoids mutable-field concurrency bugs the legacy had with `last_pass_commit`.
-- **Lifecycle transitions are gated in code.** `Story::promote()` requires a valid `Verdict`; you cannot set `status = Proven` directly.
-- **No priority, no category, no test_status.** Legacy had too many axes. Add fields when a story can't be written without them.
+- **Story YAML is the primary artifact.** Stories live on disk under `stories/<id>.yml`. This crate defines the schema (via `schemas/story.schema.json`) and parse/serialize.
+- **Acceptance tests are executable and bound 1-to-1 to stories.** Each `TestEntry.file` is referenced by exactly one story. Orphan test files (unreferenced by any story) are flagged by audit.
+- **Evidence is append-only and external.** The Story type does not hold evidence; it holds a pointer convention (`evidence/runs/<id>/`). Evidence lives in `agentic-verify` and on disk; see `evidence/README.md`.
+- **Lifecycle transitions are gated in code.** `Story::record_verdict()` requires a valid `Verdict` constructed by `agentic-verify`. You cannot set `status = Tested` directly. The compiler enforces this.
+- **No priority, no category, no test_status, no `notes`.** Legacy had too many axes. We add fields only when a story can't be authored without them.
 
 ## Open questions
 
-- Should `evidence_ref` default to a convention (`evidence/runs/<story-id>/`) or be explicit per story?
-- How do we handle story rewrites after `proven`? New story ID, or re-enter `under_construction`?
-- Inline vs separate evidence: settled on separate for concurrency, but worth revisiting if it proves awkward.
+- How do we handle story rewrites after `tested`? **Settled:** edit → auto-revert to `under_construction` on next audit. No special flow for "minor edits."
+- Canonical-form versioning — if we ever change the hash algorithm, we need a `hash_version` field in the verdict. Defer until first migration.
 
 ## Stress/verify requirements
 
 - Round-trip parse/serialize for all checked-in stories without loss.
-- Lifecycle state machine rejects invalid transitions (property test via `proptest`).
+- Lifecycle state machine rejects invalid transitions under random sequences (property test via `proptest`).
+- Proof hash is stable across serializer versions and across whitespace-only YAML edits.
 - Concurrent verdict writes to the same story don't corrupt the evidence log.
