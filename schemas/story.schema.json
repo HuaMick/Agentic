@@ -54,7 +54,7 @@
               "file": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Path to a test file (relative to repo root). Must exist. Must be referenced by exactly one story (1-to-1 binding). Test files live under crates/*/tests/ or scripts/verify/."
+                "description": "Path to a test file (relative to repo root). Must exist at verify time (not at parse time — stories may be authored before their tests are written, in which case the implementing agent creates the file). Must be referenced by exactly one story (1-to-1 binding). Test files live under crates/*/tests/ or scripts/verify/."
               },
               "justification": {
                 "type": "string",

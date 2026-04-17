@@ -14,7 +14,7 @@
 # Contract
 # --------
 #   agentic-search.sh <terms...> [--field outcome|title|guidance|uat|all]
-#                                [--json] [--help]
+#                                [--json] [--quiet] [--help]
 #
 #   Inputs:
 #     <terms...>  Positional words (quote multi-word phrases). Case-insensitive.
@@ -23,6 +23,8 @@
 #                 title + outcome + guidance + acceptance.uat).
 #     --json      Machine-readable JSON array output.
 #                 Default is human format: "<id>  <title>  [matched_fields]".
+#     --quiet     Suppress non-error stderr output (e.g. the yq-fallback warning).
+#                 Useful for agents that log script output verbatim into reports.
 #
 #   Outputs:
 #     stdout:  Hits, ranked by (# terms matched DESC, id ASC).
@@ -55,7 +57,7 @@ set -euo pipefail
 
 print_usage() {
   cat <<'EOF'
-Usage: agentic-search.sh <terms...> [--field outcome|title|guidance|uat|all] [--json]
+Usage: agentic-search.sh <terms...> [--field outcome|title|guidance|uat|all] [--json] [--quiet]
 
 Searches stories/*.yml in the current repo. Matches are case-insensitive.
 
@@ -63,6 +65,7 @@ Options:
   --field F     Restrict search to one field. Default: all.
                 Valid: outcome, title, guidance, uat, all.
   --json        Emit JSON array: [{"id": N, "title": "...", "matched_fields": [...]}, ...]
+  --quiet       Suppress non-error stderr output (e.g. yq-fallback warning).
   --help, -h    Show this help.
 
 Exit codes:
@@ -292,6 +295,7 @@ get_field_any() {
 
 FIELD="all"
 JSON=false
+QUIET=false
 TERMS=()
 
 while (($#)); do
@@ -302,6 +306,10 @@ while (($#)); do
       ;;
     --json)
       JSON=true
+      shift
+      ;;
+    --quiet)
+      QUIET=true
       shift
       ;;
     --field)
@@ -364,7 +372,9 @@ if command -v yq >/dev/null 2>&1; then
   USE_YQ=true
 else
   USE_YQ=false
-  printf 'warning: yq not installed; falling back to grep/awk parser (handles `|` block scalars only)\n' >&2
+  if ! $QUIET; then
+    printf 'warning: yq not installed; falling back to grep/awk parser (handles `|` block scalars only)\n' >&2
+  fi
 fi
 
 # ---------------------------------------------------------------------------

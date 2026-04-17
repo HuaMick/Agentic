@@ -1,0 +1,182 @@
+id: 1
+title: "Verify a story end-to-end"
+
+outcome: |
+  A developer can run `agentic verify <id>` against a story YAML and receive a
+  trustworthy verdict (Pass or Fail) with evidence recorded to disk.
+
+status: proposed
+
+patterns: []
+
+acceptance:
+  tests:
+    - file: crates/agentic-verify/tests/verify_pass.rs
+      justification: |
+        Proves the happy path: given a story whose acceptance tests pass on a
+        clean working tree, `Verifier::verify` returns a Pass verdict, writes
+        exactly one evidence file under `evidence/runs/<story-id>/`, and the
+        evidence file records the git commit hash. Without this the gate
+        cannot green-light work at all.
+
+    - file: crates/agentic-verify/tests/verify_fail.rs
+      justification: |
+        Proves the failure path: given a story whose acceptance tests fail,
+        `Verifier::verify` returns a Fail verdict naming the failed test
+        files, writes an evidence file (failure is first-class and recorded),
+        and does NOT mutate the story's status field. Without this the gate
+        could silently drop Fails or, worse, promote a broken story.
+
+    - file: crates/agentic-verify/tests/verify_fail_closed_dirty_tree.rs
+      justification: |
+        Proves the fail-closed contract on a dirty git working tree: with
+        uncommitted changes present, `Verifier::verify` refuses to produce a
+        verdict, exits with a distinct error variant, and writes no evidence
+        file. Without this the signed-by-commit guarantee is forgeable —
+        someone could edit code post-Pass and claim the old verdict still
+        applies.
+
+    - file: crates/agentic-verify/tests/verify_standalone_resilience.rs
+      justification: |
+        Proves the "works when the orchestrator is broken" property: the
+        verifier is driven directly as a library with only `agentic-store`
+        and `agentic-events` available (no orchestrator, no runtime, no
+        agent spawning), and produces the same verdict shape as the CLI
+        path. Without this we cannot claim verify is the resilient layer;
+        it would be just another thing that breaks when the system breaks.
+
+    - file: crates/agentic-verify/tests/verify_bad_story_id.rs
+      justification: |
+        Proves clean failure on bad input: invoking `Verifier::verify` with
+        a non-existent story id returns a typed error, does not panic, and
+        writes no evidence file. Without this a typo or stale id could
+        produce a panic trace that looks like a system fault when it is
+        actually user error — eroding trust in the verdict when it matters.
+
+  uat: |
+    Goal: convince yourself that the prove-it gate produces a trustworthy
+    Pass, a trustworthy Fail, and refuses when the git tree is dirty.
+
+    Setup:
+      1. From a clean checkout of the repo on branch `main`, run `git status`
+         and confirm the working tree is clean.
+      2. Confirm `stories/1.yml` exists (this story) and at least one other
+         `stories/N.yml` exists whose acceptance tests are wired up and
+         currently pass. If no such story exists yet, stop — this UAT cannot
+         run until a second story is on disk. Note this in your UAT report.
+
+    Pass walkthrough:
+      3. Pick a passing story id `<pass-id>` (NOT story 1). Run
+         `agentic verify <pass-id>`. Observe:
+         - Process exits 0.
+         - stdout includes the string `Pass` and a commit hash that matches
+           `git rev-parse HEAD`.
+         - A new file appears under `evidence/runs/<pass-id>/` whose name
+           contains a timestamp and the commit hash.
+         - Open the evidence file; confirm it is valid JSON-lines and
+           contains per-test results.
+
+    Fail walkthrough:
+      4. Introduce a deliberate failure: edit one test file referenced by a
+         different story `<fail-id>` so that one of its asserts cannot hold
+         (e.g., `assert_eq!(1, 2)`). Commit that change so the tree is clean
+         again. Run `agentic verify <fail-id>`. Observe:
+         - Process exits non-zero but does not panic.
+         - stdout includes `Fail` and names the failing test file.
+         - A new evidence file is written under `evidence/runs/<fail-id>/`.
+         - The story file on disk is unchanged — no status was auto-written.
+
+    Dirty-tree walkthrough:
+      5. While still on the tree with the deliberate failure committed,
+         introduce an uncommitted change (`echo x >> README.md`). Without
+         committing, run `agentic verify <pass-id>` again. Observe:
+         - Process exits non-zero.
+         - stderr names the dirty tree as the cause; no verdict is printed.
+         - No new evidence file was created under `evidence/runs/<pass-id>/`.
+
+    Bad-id walkthrough:
+      6. Run `agentic verify 99999` (an id that does not exist). Observe:
+         - Process exits non-zero with a human-readable error.
+         - No panic / backtrace is shown.
+         - No evidence directory for `99999` is created.
+
+    Cleanup:
+      7. `git restore README.md` (remove the dirty-tree probe).
+      8. `git revert` the commit that introduced the deliberate test
+         failure, or `git reset --hard origin/main` if that is safe in
+         your workflow. Confirm `git status` is clean.
+      9. Delete any evidence files you created during the walkthrough under
+         `evidence/runs/<pass-id>/` and `evidence/runs/<fail-id>/` so the
+         repo returns to a pristine state. (They are append-only in normal
+         operation; deleting them by hand here is acceptable because no
+         verdict in this UAT is being claimed as authoritative.)
+
+guidance: |
+  This story delivers the prove-it gate and nothing else. It does not cover
+  orchestration, planning, agent spawning, or promotion from `tested` to
+  `healthy` (UAT-driven). Those belong to separate stories.
+
+  Architectural boundary — resilient by design:
+    The verifier must run as a library with dependencies limited to
+    `agentic-story`, `agentic-store`, and `agentic-events` (plus `git2` for
+    commit hashing). It must not pull in `agentic-orchestrator`,
+    `agentic-runtime`, `agentic-sandbox`, or the CLI. The test
+    `verify_standalone_resilience.rs` encodes this: if someone adds an
+    orchestrator dependency here, the test harness either fails to compile
+    or that test fails at link time. The point is that when the rest of the
+    system is in flames, `agentic verify` still issues a verdict.
+
+  Fail-closed on dirty tree:
+    Before doing any work, the verifier asks `git2` whether the working tree
+    is clean (no uncommitted changes, no unstaged changes, no untracked files
+    that would affect the build). If dirty, the verifier returns a distinct
+    `VerifyError::DirtyTree` variant, writes no evidence, and does not print
+    a verdict. This is not a warning that can be downgraded — it is a hard
+    gate. A Pass without a commit hash is worthless, so we refuse to
+    fabricate one.
+
+  Evidence file contract:
+    Each run writes exactly one file at
+    `evidence/runs/<story-id>/<ISO-8601-timestamp>-<short-commit>.jsonl`.
+    The file is JSON Lines so it can be appended to safely and parsed
+    incrementally. Minimum recorded fields: run_id (UUID v4), story_id,
+    commit (full hash), timestamp (RFC3339 UTC), verdict (`Pass` | `Fail`),
+    and per-test records `{file, outcome, duration_ms, stderr_tail}`.
+    Concurrent verifies on the same story write to distinct files because
+    the filename includes the timestamp and commit — no locking required.
+    A partial write from a crash leaves a truncated file on disk; subsequent
+    verifies must ignore malformed files when scanning history.
+
+  Verdict does not mutate the story file:
+    `agentic verify` writes evidence; it does NOT flip the story's `status`
+    field. Promotion (proposed/under_construction → tested) is a separate
+    concern handled by a higher layer (planned: `agentic story audit` or
+    the orchestrator). This keeps verify a pure function over (story,
+    working tree, environment) and removes a class of race conditions
+    where two verifies fight over the YAML.
+
+  Exit-code contract for the CLI entry point:
+    0  = Pass verdict issued.
+    1  = Fail verdict issued (a clean failure is still a real result).
+    2  = Could not produce a verdict (dirty tree, unknown story, I/O error).
+    The distinction between 1 and 2 matters: CI that runs
+    `agentic verify <id>` can treat 2 as "retry or alert", and 1 as "fix
+    the code under test".
+
+  Signing semantics:
+    "Signed by a commit" means the verdict records the commit hash and was
+    produced against that exact worktree state. We do not use GPG or
+    cryptographic signatures in this story. If stronger provenance is
+    needed later, extend the evidence format — do not change the gate's
+    public contract.
+
+  Test file locations:
+    All five tests live under `crates/agentic-verify/tests/` as Rust
+    integration tests. They construct a temporary git repo via
+    `tempfile` + `git2`, seed it with a minimal story fixture and a
+    corresponding test binary (or script), and invoke the verifier
+    directly. Nothing in these tests should shell out to the top-level
+    `agentic` binary — they exercise the crate as a library so the
+    standalone-resilience claim is self-enforcing.
+
+depends_on: []

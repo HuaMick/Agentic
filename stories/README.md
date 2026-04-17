@@ -2,25 +2,30 @@
 
 User stories. The **primary work artifact** of the system.
 
-One file per story: `<id>.yml` where ID is `story-NNNN-<slug>` (e.g., `story-0001-verify-story-end-to-end.yml`).
+One file per story: `<id>.yml` where `<id>` is a positive integer matching the story's `id` field (e.g., `stories/1.yml` for story 1).
 
 ## What a story is
 
 A unit of work defined by:
 
-1. **Outcome** — what value this delivers, in plain English.
-2. **Acceptance criteria** — executable Given/When/Then checks.
-3. **Evidence** — append-only log of verify runs (stored externally under `evidence/runs/<story-id>/`).
+1. **Outcome** — plain-English value statement.
+2. **Acceptance** — one or more executable tests (each with its own justification) plus a prose UAT walkthrough.
+3. **Guidance** — non-obvious rebuild-from-scratch context.
+4. **Patterns** — IDs of reusable design patterns this story applies (see `patterns/`).
+5. **Evidence** — append-only log of verify runs, stored externally under `evidence/runs/<id>/`.
 
 ## Lifecycle
 
 ```
-proposed → under_construction → proven → deprecated → archived
-                ↓ (fail)                       ↑
-         stays under_construction         (manually deprecated after proven)
+proposed → under_construction → tested → healthy → deprecated → archived
+                ↓ (fail)                  ↑
+         stays under_construction   (manually deprecated after tested/healthy)
 ```
 
-A story cannot transition to `proven` without a Pass verdict from `agentic-verify` including:
+- Humans (and the story-writer agent) write `proposed`, `under_construction`, `deprecated`, `archived`.
+- Only `agentic-verify` writes `tested` (acceptance tests pass) and `healthy` (UAT journey passes).
+
+A story cannot transition to `tested` without a Pass verdict from `agentic-verify` including:
 - A git commit hash (clean working tree required).
 - A trace reference (the actual evidence file).
 - A run ID (UUID).
@@ -29,10 +34,11 @@ A story cannot transition to `proven` without a Pass verdict from `agentic-verif
 
 See `schemas/story.schema.json`.
 
-## Template
+## Template & authoring guide
 
-See the story template in `docs/guides/story-template.md` (authored as part of Phase 1).
+- Template: `docs/guides/story-template.yml`
+- Authoring guide: `docs/guides/story-authoring.md`
 
 ## Phase 1 status
 
-Story template is being drafted. First concrete story will be `story-0001-verify-story-end-to-end.yml` — the meta-story that drives the verify system's own implementation.
+First story is `stories/1.yml` — the meta-story that drives the verify system's own implementation.
