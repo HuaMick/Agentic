@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic.dev/schemas/pattern.schema.json",
+  "title": "Pattern",
+  "description": "Reusable design or operational guidance referenced by stories. Stories point at patterns instead of redefining them, which keeps design decisions centralized and auditable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "summary", "when_to_use", "how_we_do_it", "trade_offs"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "minLength": 1,
+      "description": "Kebab-case slug. Must match the filename (patterns/<id>.yml)."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Short human-readable title."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One or two sentences defining what the pattern IS. Not when to use, not how to do it — just what it means."
+    },
+    "when_to_use": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Conditions where this pattern applies. Specific enough that a reader can decide yes/no for their situation."
+    },
+    "how_we_do_it": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Implementation convention in THIS codebase. Specific and local, not generic literature. Cite crates, paths, function names where useful."
+    },
+    "trade_offs": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What you give up for what you gain. Cases where this pattern is the wrong choice."
+    },
+    "related_patterns": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "description": "IDs of related or opposing patterns. Bidirectional by convention but not enforced."
+    }
+  }
+}

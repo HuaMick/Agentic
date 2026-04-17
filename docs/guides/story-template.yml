@@ -1,0 +1,34 @@
+# Story template — copy to stories/<id>.yml and fill in every field.
+#
+# Validated against schemas/story.schema.json at parse time.
+# Run `agentic story lint <id>` (once the CLI exists) to check without committing.
+#
+# Authoring rules (full guide: docs/guides/story-authoring.md):
+#   - outcome: why the story exists. Value, not implementation. One sentence, no conjunctions.
+#   - patterns: IDs of existing patterns this story applies. Reference, don't redefine.
+#   - acceptance.tests: one or more {file, justification} entries. Each test gets its own justification.
+#   - acceptance.uat: prose journey for a UAT agent. Include cleanup.
+#   - guidance: only what the agent would NOT derive on its own. No length cap.
+#   - status: humans write proposed/under_construction/deprecated/archived; agentic-verify writes tested/healthy.
+
+id: 0
+title: ""
+
+outcome: |
+
+status: proposed
+
+patterns: []
+
+acceptance:
+  tests:
+    - file: ""
+      justification: |
+    # Add more {file, justification} entries as the story needs them.
+    # Each test has its own justification — no aggregate rationale.
+
+  uat: |
+
+guidance: |
+
+depends_on: []

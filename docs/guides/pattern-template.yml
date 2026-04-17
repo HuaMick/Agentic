@@ -1,0 +1,26 @@
+# Pattern template — copy to patterns/<slug>.yml and fill in every field.
+#
+# Validated against schemas/pattern.schema.json at parse time.
+#
+# A pattern is reusable design/operational guidance referenced by stories.
+# If the same concept appears in 2+ stories' guidance sections, extract it
+# here and update those stories to reference it by ID.
+#
+# Authoring rules (full guide: docs/guides/pattern-authoring.md):
+#   - summary: what the pattern IS. Not when, not how — just what.
+#   - when_to_use: decidable conditions.
+#   - how_we_do_it: specific to THIS codebase. Cite crates/paths.
+#   - trade_offs: what you give up. When it's the wrong choice.
+
+id: ""
+title: ""
+
+summary: |
+
+when_to_use: |
+
+how_we_do_it: |
+
+trade_offs: |
+
+related_patterns: []

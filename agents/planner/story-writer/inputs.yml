@@ -1,0 +1,37 @@
+required_reading:
+  - path: schemas/story.schema.json
+    reason: Story schema — validate every draft against this.
+  - path: schemas/pattern.schema.json
+    reason: Pattern schema — validate every draft against this.
+  - path: docs/guides/story-authoring.md
+    reason: Field-by-field authoring rules for stories.
+  - path: docs/guides/pattern-authoring.md
+    reason: Field-by-field authoring rules for patterns.
+  - path: docs/guides/story-template.yml
+    reason: Copy-paste skeleton for new stories.
+  - path: docs/guides/pattern-template.yml
+    reason: Copy-paste skeleton for new patterns.
+  - path: CLAUDE.md
+    reason: Project-wide phase awareness and fallback conventions.
+
+context_to_scan:
+  - pattern: stories/*.yml
+    reason: Existing stories — ID sequencing, duplication check, house style.
+  - pattern: patterns/*.yml
+    reason: Existing patterns — reference from stories, extract when guidance duplicates.
+  - pattern: crates/*/README.md
+    reason: Know which crate owns which concern.
+
+required_inputs:
+  - name: objective
+    description: Plain-English description of what the user wants the story or pattern to deliver.
+    required_when: directed mode.
+    optional_when: audit mode (scope inferred from request or defaulted).
+
+preferred_commands:
+  - name: agentic-search
+    path: scripts/agentic-search.sh
+    purpose: |
+      Search stories by terms across title/outcome/guidance/uat. Run this BEFORE
+      writing any new story. Document the command used and the result in your summary.
+    invocation_example: "scripts/agentic-search.sh verify evidence"
