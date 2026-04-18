@@ -6,7 +6,7 @@ A Rust-based agent orchestration system built around story-driven development.
 
 ## What this is
 
-A rebuild of [AgenticEngineering](https://github.com/HuaMick/AgenticEngineering) in Rust, starting from first principles. The legacy Python system lives under `modules/legacy/AgenticEngineering/` as a git submodule for reference.
+A rebuild of [AgenticEngineering](https://github.com/HuaMick/AgenticEngineering) in Rust, starting from first principles. The legacy Python system lives under `legacy/AgenticEngineering/` as a git submodule for reference.
 
 ## Core philosophy
 
@@ -28,7 +28,7 @@ epics/             Epic folders (groups of stories with shared context)
 evidence/          Append-only verdict records (empty until verify runs)
 projects/          User-space: projects this harness is being used on
 docs/              Architecture notes, guides, Architecture Decision Records
-modules/legacy/    Old AgenticEngineering codebase (git submodule, reference only)
+legacy/            Old AgenticEngineering codebase (git submodule, reference only)
 tests/             Workspace-level integration tests (empty — Phase 2)
 xtask/             Custom cargo tasks (empty — Phase 2)
 scripts/           Human-facing convenience scripts (agentic-search.sh)

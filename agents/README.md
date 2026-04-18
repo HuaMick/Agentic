@@ -16,13 +16,9 @@ Each agent lives under `<category>/<agent-name>/` with three files:
 - `test/` — test-builder, test-audit, test-uat (validate implementations).
 - `teacher/` — teacher-update-guidance, teacher-update-assets (improve the system).
 
-## Shared inputs
-
-`shared/` holds transitive input layers referenced by multiple agents. DRY mechanism for common context (e.g., a future `planner-shared.yml` for fields every planner needs).
-
 ## Assets
 
-`assets/` holds definitions, guidelines, examples, templates referenced by agents at runtime. Schema-validated so agents don't silently miss fields.
+`assets/` holds definitions, guidelines, examples, templates referenced by agents at runtime. Schema-validated so agents don't silently miss fields. Anything that would be "shared between agents" lives here — there is no separate `shared/` directory.
 
 ## Claude Code pointer files
 

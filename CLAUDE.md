@@ -1,6 +1,6 @@
 # Agentic — Claude Code Instructions
 
-You are working on a Rust rebuild of the AgenticEngineering system. The legacy Python codebase lives under `modules/legacy/AgenticEngineering/` as a git submodule — **reference only, do not edit**.
+You are working on a Rust rebuild of the AgenticEngineering system. The legacy Python codebase lives under `legacy/AgenticEngineering/` as a git submodule — **reference only, do not edit**.
 
 ## Current state (Phase 1.5)
 
@@ -77,7 +77,7 @@ My (prior session's) lean: (1). Smallest surface, most foundational, gives `agen
 
 ## Reference: the legacy system
 
-The submodule at `modules/legacy/AgenticEngineering/` is the Python predecessor. Read it to understand what patterns worked and what bloated. **Do not port code directly** — this is a ground-up redesign, not a migration. Relevant lessons documented in ADRs under `docs/decisions/`.
+The submodule at `legacy/AgenticEngineering/` is the Python predecessor. Read it to understand what patterns worked and what bloated. **Do not port code directly** — this is a ground-up redesign, not a migration. Relevant lessons documented in ADRs under `docs/decisions/`.
 
 ## Fallback behaviour if things break
 
