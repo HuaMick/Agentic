@@ -26,3 +26,55 @@ publish = false
 # Store methods) while matching the shape every future consumer will read
 # and write.
 serde_json = "1"
+
+# surrealkv (0.21): added by story 5 as the durable embedded backend
+# behind the `Store` trait. ADR-0002 calls for "SurrealDB embedded" —
+# surrealkv is the pure-Rust LSM-tree storage engine that SurrealDB's
+# own `kv-surrealkv` feature wraps. We depend on it directly rather than
+# on the full `surrealdb` crate for two load-bearing reasons:
+#
+#   1. The full `surrealdb` crate pulls in `surrealdb-core` (the
+#      SurrealQL parser + planner + multi-engine kv layer), which is
+#      several hundred thousand lines of Rust and has been observed
+#      OOM-killing rustc on 4 GiB dev hosts during compilation. surrealkv
+#      alone is an order of magnitude smaller and compiles in seconds.
+#   2. Story 5 only pins the on-disk ACID kv subset of SurrealDB
+#      (upsert-by-key, append, scan+filter, durability across reopen).
+#      SurrealQL queries, graph edges, and live-queries are NOT in scope;
+#      ADR-0002 calls those out as "future" / "when a consumer demands
+#      it". Paying the surrealdb-core compile cost today buys capability
+#      nothing in this story or any shipped story actually uses — a
+#      slow-growth violation.
+#
+# If and when a story demands SurrealQL at the trait boundary we will
+# add `surrealdb` proper as a workspace dep; the `Store` trait keeps
+# that swap local to this crate.
+surrealkv = "0.21"
+
+# tokio (1): added by story 5 because surrealkv's `Transaction::commit`
+# is async. The public `Store` trait is sync (story 4), so
+# `SurrealStore` owns a private single-thread tokio runtime and
+# `block_on`s each commit. Features are the minimum the runtime +
+# surrealkv's own internal tokio usage need: `rt` for the runtime,
+# `sync` for the channels surrealkv uses internally, and `time` so the
+# runtime supports the timeouts surrealkv's `tokio/time` sub-feature
+# requires. We deliberately avoid `rt-multi-thread` / `full` — a
+# single-thread runtime bridged by `block_on` is sufficient for sync
+# trait methods.
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time", "macros"] }
+
+# tempfile (3): added by story 5 as a DEV-dependency only — every
+# SurrealStore test constructs its store rooted at a `TempDir` and
+# relies on its drop-cleans-up behaviour. Not a runtime dependency of
+# any crate.
+tempfile = "3"
+
+# Compile-time memory budget: even without surrealdb-core, the
+# surrealkv LSM stack is substantial. We turn off debuginfo for
+# dependencies in all profiles so rustc fits in memory on 4 GiB dev
+# hosts. Our own crates keep their default debuginfo via `inherits`.
+[profile.dev.package."*"]
+debug = 0
+
+[profile.test.package."*"]
+debug = 0

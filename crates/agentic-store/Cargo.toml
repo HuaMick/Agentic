@@ -9,5 +9,20 @@ publish.workspace = true
 # Story 4: document type for the Store trait. See workspace Cargo.toml.
 serde_json.workspace = true
 
+# Story 5: durable embedded storage engine behind the `Store` trait.
+# See workspace Cargo.toml for why we link against surrealkv directly
+# rather than through the full `surrealdb` crate (compile-time memory
+# budget + slow-growth: nothing in the current story set consumes
+# SurrealQL or live queries).
+surrealkv.workspace = true
+
+# Story 5: tokio runtime, needed to bridge surrealkv's async
+# `Transaction::commit` through the sync `Store` trait. See workspace
+# Cargo.toml for the minimum-feature rationale.
+tokio.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true
+# Story 5: tests root the SurrealStore at a temp dir for isolation and
+# drop-based cleanup.
+tempfile.workspace = true

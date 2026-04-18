@@ -36,35 +36,71 @@
 //! typed serde helpers without the trait taking a position on them.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::Value;
 
+mod surrealstore;
+pub use surrealstore::SurrealStore;
+
 /// Errors returned by [`Store`] operations.
 ///
-/// Story 4 does not require any failure modes beyond "the backend itself
-/// is broken" — all of the behavioural contracts it pins are expressed as
-/// successful returns (e.g. absence as `Ok(None)`, empty filter as
-/// `Ok(vec![])`). This enum is therefore intentionally minimal; story 5
-/// (SurrealDB) will add variants for its own failure modes.
+/// Story 4 pinned the minimum: one "backend is broken" catch-all so
+/// consumers can distinguish store failures from "not found" (which is
+/// typed absence via `Ok(None)`, not an error).
+///
+/// Story 5 adds [`StoreError::Open`] for the `SurrealStore::open` path,
+/// so deployment-time configuration mistakes (wrong path in an env var,
+/// pointing the store at a file instead of a directory) surface as a
+/// typed, pattern-matchable error at startup rather than as a panic
+/// halfway through the first write. The variant carries the offending
+/// path plus the underlying cause so logs name both without a consumer
+/// having to stringly-match.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StoreError {
     /// The backend's internal state became unreachable. In the in-memory
     /// implementation this only happens if a previous operation panicked
-    /// while holding the internal lock (poisoning the mutex).
+    /// while holding the internal lock (poisoning the mutex). In the
+    /// SurrealDB implementation this wraps a SurrealDB runtime error.
     Backend(String),
+
+    /// Opening the store failed. Carries the path the caller supplied so
+    /// a one-line "could not open store at <path>: <cause>" log is
+    /// trivial to produce, and the underlying cause so callers who want
+    /// deeper context can downcast it. See story 5's
+    /// `surrealstore_malformed_root_is_typed_error.rs` for the exact
+    /// failure shapes this variant covers.
+    Open {
+        /// The path the caller passed to `open`.
+        path: PathBuf,
+        /// The underlying cause. Typically an `std::io::Error` (path
+        /// does not exist, is a file, is not writable) or a
+        /// `surrealdb::Error` (engine-level failure).
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 }
 
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StoreError::Backend(msg) => write!(f, "store backend error: {msg}"),
+            StoreError::Open { path, source } => {
+                write!(f, "could not open store at {}: {}", path.display(), source)
+            }
         }
     }
 }
 
-impl std::error::Error for StoreError {}
+impl std::error::Error for StoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            StoreError::Backend(_) => None,
+            StoreError::Open { source, .. } => Some(source.as_ref()),
+        }
+    }
+}
 
 /// The persistence abstraction every runtime crate writes through.
 ///
