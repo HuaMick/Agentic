@@ -18,6 +18,12 @@ version = "0.1.0"
 [[package]]
 name = "agentic-dashboard"
 version = "0.1.0"
+dependencies = [
+ "agentic-store",
+ "agentic-story",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "agentic-store"

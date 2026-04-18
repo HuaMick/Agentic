@@ -4,3 +4,32 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dev-dependencies]
+# Story 3: the dashboard is a pure reader over the `Store` trait and the
+# `stories/` directory. Integration tests seed an in-memory `MemStore`
+# with the exact `test_runs` / `uat_signings` row shapes stories 2 and 1
+# write, then assert on what the dashboard renders. `MemStore` is the
+# canonical test fixture for `agentic-store` consumers (see
+# crates/agentic-store/tests/*.rs and crates/agentic-uat/tests/*.rs).
+agentic-store = { path = "../agentic-store" }
+
+# Story 3: fixture stories are materialised to a `TempDir` as real YAML
+# files so the dashboard exercises the same `StoryLoader` path every
+# other consumer uses. The test does not construct `Story` values
+# directly; it writes YAML and lets the library read it — the
+# malformed-yaml scaffold in particular depends on the library owning
+# the parse.
+agentic-story = { path = "../agentic-story" }
+
+# Story 3: the JSON-mode scaffold parses `Dashboard::render_json()`
+# output back with `serde_json::from_str` to assert the exact top-level
+# shape (`stories[]`, `summary{}`, full-40-char SHAs, null-able fields
+# emitted as JSON null). Workspace-pinned — same version every other
+# store consumer uses.
+serde_json.workspace = true
+
+# Story 3: every scaffold roots its fixture `stories/` directory under a
+# `TempDir` so the live `stories/` at repo root is never touched.
+# Matches the fixture idiom used by `agentic-uat`'s tests.
+tempfile.workspace = true
