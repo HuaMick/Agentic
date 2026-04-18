@@ -69,6 +69,21 @@ tokio = { version = "1", default-features = false, features = ["rt", "sync", "ti
 # any crate.
 tempfile = "3"
 
+# serde (1): added by story 6. The story loader deserializes
+# `stories/*.yml` into a typed `Story` struct; `#[derive(Deserialize)]`
+# is the minimum surface that gives us typed fields + structural
+# validation (unknown-field rejection via `deny_unknown_fields`) without
+# hand-rolling a parser. The `derive` feature is required for the
+# proc-macro; no other features are enabled.
+serde = { version = "1", features = ["derive"] }
+
+# serde_yaml (0.9): added by story 6. Story files are YAML; this is the
+# de-facto serde data format for YAML in the Rust ecosystem and is
+# already named as the expected parser in `crates/agentic-story/README.md`.
+# Used only by `agentic-story`; deserialization errors carry source
+# positions which the loader surfaces through its typed error enum.
+serde_yaml = "0.9"
+
 # Compile-time memory budget: even without surrealdb-core, the
 # surrealkv LSM stack is substantial. We turn off debuginfo for
 # dependencies in all profiles so rustc fits in memory on 4 GiB dev

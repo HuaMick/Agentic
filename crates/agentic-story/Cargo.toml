@@ -4,3 +4,16 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dependencies]
+# Story 6: typed deserialisation of `stories/*.yml` into a `Story`
+# struct. `serde` (with `derive`) provides the proc-macro for the
+# `Deserialize` derive; `serde_yaml` is the parser that feeds it.
+serde.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+# Story 6: integration tests root their fixture stories at a
+# `TempDir` so the live `stories/` directory at repo root is never
+# touched. `tempfile` is already a workspace dev-dep (story 5).
+tempfile.workspace = true
