@@ -21,6 +21,7 @@ version = "0.1.0"
 dependencies = [
  "agentic-store",
  "agentic-story",
+ "chrono",
  "serde_json",
  "tempfile",
 ]
@@ -171,6 +172,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]

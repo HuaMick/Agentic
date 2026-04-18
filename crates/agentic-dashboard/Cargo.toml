@@ -5,6 +5,21 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[dependencies]
+# Story 3: the dashboard reads from `agentic-store` to load test_runs and
+# uat_signings evidence for each story. MemStore is the test impl.
+agentic-store = { path = "../agentic-store" }
+
+# Story 3: the dashboard reads from `agentic-story` to load and validate
+# story YAML files. Uses the typed `Story` and `Status` enums.
+agentic-story = { path = "../agentic-story" }
+
+# Story 3: JSON output requires serialization of the dashboard snapshot.
+serde_json.workspace = true
+
+# Story 3: timestamp relative-age formatting (e.g. "3h ago").
+chrono.workspace = true
+
 [dev-dependencies]
 # Story 3: the dashboard is a pure reader over the `Store` trait and the
 # `stories/` directory. Integration tests seed an in-memory `MemStore`

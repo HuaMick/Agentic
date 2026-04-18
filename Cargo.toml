@@ -84,6 +84,11 @@ serde = { version = "1", features = ["derive"] }
 # positions which the loader surfaces through its typed error enum.
 serde_yaml = "0.9"
 
+# chrono (0.4): added by story 3 for relative-age timestamp formatting
+# (e.g. "3h ago" for the dashboard's `Healthy at` cell). Only the `serde`
+# feature is enabled for RFC3339 serialization in JSON mode.
+chrono = { version = "0.4", features = ["serde"] }
+
 # Compile-time memory budget: even without surrealdb-core, the
 # surrealkv LSM stack is substantial. We turn off debuginfo for
 # dependencies in all profiles so rustc fits in memory on 4 GiB dev
