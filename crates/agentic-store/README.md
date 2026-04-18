@@ -2,51 +2,120 @@
 
 ## What this crate is
 
-Persistence. Wraps SurrealDB embedded behind a `Store` trait. Handles reads, writes, queries, and (eventually) live-query subscriptions.
+Persistence. Defines the `Store` trait — the single point every runtime
+crate writes through — and ships both the in-memory `MemStore`
+implementation (used by tests and fast-path consumers) and, eventually, a
+SurrealDB-backed impl delivered by story 5.
 
 ## Why it's a separate crate
 
-1. **Swap-able backend.** If SurrealDB disappoints, we change one crate.
-2. **Testability.** The `Store` trait has a `MemStore` impl in `agentic-testkit` for fast tests.
-3. **Concentrates I/O.** Domain crates stay pure (no I/O); all disk/network touches funnel through here.
+1. **Swap-able backend.** The trait is the contract; backends are
+   implementation details. Local to cloud is a config change, not a code
+   change. See `memory/store_cloud_migration.md`.
+2. **Testability.** `MemStore` lives in this same crate so every
+   trait-level test doubles as a contract harness for story 5's
+   `SurrealStore` — no circular dev-dep graph via a separate testkit
+   crate.
+3. **Concentrates I/O.** Domain crates stay pure (no I/O); all disk /
+   network touches funnel through here.
 
-## Public API sketch
+## Current state (story 4 shipped)
+
+The trait and `MemStore` land in this crate. Five behavioural contracts
+are pinned as integration tests under `tests/`:
+
+1. **Upsert-by-key replaces.** Two upserts to the same `(table, key)`
+   leave exactly one row, equal to the second write.
+2. **Append-to-collection preserves.** N appends yield N rows in
+   insertion order; later writes do not mutate earlier ones.
+3. **Typed absence on `get`.** A read against a never-written
+   `(table, key)` returns `Ok(None)` — not an error, not a panic. Missing
+   tables and missing keys are indistinguishable at the trait level.
+4. **Empty query is not an error.** A filter matching zero rows, or a
+   query against an unknown table, returns `Ok(vec![])`.
+5. **Send + Sync at the trait-object level.** Consumers hold the store as
+   `Arc<dyn Store + Send + Sync>`; the trait is object-safe.
+
+Story 5 delivers the SurrealDB impl and reuses the same tests as its
+contract harness. That reuse is what proves the trait is a real
+abstraction rather than a one-impl stub.
+
+## Public API
 
 ```rust
-pub trait Store {
-    async fn get<T: DeserializeOwned>(&self, table: &str, id: &str) -> Result<Option<T>>;
-    async fn put<T: Serialize>(&self, table: &str, id: &str, value: &T) -> Result<()>;
-    async fn query<T: DeserializeOwned>(&self, q: Query) -> Result<Vec<T>>;
-    async fn live<T: DeserializeOwned>(&self, q: Query) -> Result<LiveStream<T>>;
-    async fn tx<F, R>(&self, f: F) -> Result<R>
-        where F: FnOnce(&mut Tx) -> Result<R>;
+pub trait Store: Send + Sync {
+    fn upsert(&self, table: &str, key: &str, doc: Value) -> Result<(), StoreError>;
+    fn append(&self, table: &str, doc: Value) -> Result<(), StoreError>;
+    fn get(&self, table: &str, key: &str) -> Result<Option<Value>, StoreError>;
+    fn query(
+        &self,
+        table: &str,
+        filter: &dyn Fn(&Value) -> bool,
+    ) -> Result<Vec<Value>, StoreError>;
 }
 
-pub struct SurrealStore { /* ... */ }
-impl Store for SurrealStore { /* ... */ }
+pub struct MemStore { /* ... */ }
+impl Store for MemStore { /* ... */ }
 ```
+
+Documents are `serde_json::Value` — schemaless by design (ADR-0002).
+Consumers layer their own typed `serde` helpers on top; the trait takes
+no position on the payload shape. Methods are sync; async vs sync was
+explicitly left open by story 4 and we picked sync as the simpler
+starting point. Later stories may revisit if a backend demands it.
+
+A single table is either a keyed map (written by `upsert`) or an append
+list (written by `append`); mixing the two on the same table is an error.
+Story 4 does not demand anything stronger; later stories can tighten the
+model if a consumer needs both shapes at once.
 
 ## Dependencies
 
-- Depends on: `surrealdb` (embedded feature), `serde`, `tokio`, `agentic-events` (for store-emitted events)
+- Depends on: `serde_json` (document shape).
 - Depended on by: `agentic-verify`, `agentic-orchestrator`, `agentic-cli`
+  and every other runtime crate that persists state.
 
 ## Design decisions
 
-- **SurrealDB embedded** — chosen for: schemaless by default (matches current preference), can add schema per table later without migration, built-in live queries (enables future streaming UI without refactor), real transactions (fixes legacy's concurrent-write crashes), single Rust library (no daemon).
-- **Schemaless by default.** We don't enforce schema in the DB layer. Story YAML is the source of truth for stories; the DB is a cache/index. Add schema per table only when a query needs it.
-- **Store trait is async.** SurrealDB is async; mocking in tests uses `tokio::test`.
-- **Transactions are closure-based.** Avoids easy-to-forget commit/rollback bugs.
+- **SurrealDB embedded** for the durable backend, chosen in ADR-0002:
+  schemaless by default, per-table schema later, live queries for a
+  future streaming UI, real transactions, single Rust library.
+- **Schemaless by default.** We don't enforce schema in the DB layer.
+  Story YAML is the source of truth for stories; the DB is a
+  cache/index. Add schema per table only when a query needs it.
+- **`Store` object-safe.** Methods take no type parameters so
+  `Arc<dyn Store>` is a first-class consumer-facing type. Serde layering
+  is a caller concern.
+- **Typed absence, not error, for "not found."** Consumers never have to
+  string-match "no such key" to know they got nothing.
+- **Empty filter returns empty Vec.** No special case for first-run
+  empty databases.
 
-## Open questions
+## Deliberately not pinned (yet)
 
-- Where does the DB file live? `~/.agentic/store.surreal` by default, with env override?
-- Do we use SurrealDB's schemafull mode for some tables (evidence, verdicts) where we want strong typing? Likely yes, later.
-- Backup strategy — rely on append-only evidence files and treat the DB as a rebuildable index?
+- **Transactions across tables.** Single-document writes only for now.
+  Story 5 will extend this when SurrealDB's transaction closure needs
+  pinning.
+- **Live queries / subscriptions.** Sketched below but no method yet.
+  Added when a consumer demands it.
+- **Durability.** `MemStore` is explicitly lossy. Story 5 pins
+  durability for the SurrealDB impl.
+- **Async.** Sync for now; revisit if a backend forces the issue.
 
-## Stress/verify requirements
+## Open questions (future stories)
+
+- Where does the SurrealDB file live? `~/.agentic/store.surreal` by
+  default, env override? (Story 5.)
+- Do we use SurrealDB's schemafull mode for some tables (evidence,
+  verdicts) where we want strong typing? Likely yes, later.
+- Backup strategy — rely on append-only evidence files and treat the DB
+  as a rebuildable index?
+
+## Stress/verify requirements (future)
 
 - 10k+ concurrent reads without contention.
 - Writes survive abrupt process kill (transaction durability).
-- Live queries deliver every committed change to subscribers within 100ms.
-- MemStore impl behaves identically to SurrealStore for the test suite.
+- Live queries deliver every committed change to subscribers within
+  100ms.
+- `MemStore` behaves identically to `SurrealStore` for the trait-level
+  test suite (this is what story 5 must prove).

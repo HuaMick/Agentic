@@ -1,0 +1,13 @@
+[package]
+name = "agentic-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Story 4: document type for the Store trait. See workspace Cargo.toml.
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

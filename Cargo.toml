@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agentic-store",
+    "crates/agentic-story",
+    "crates/agentic-uat",
+    "crates/agentic-ci-record",
+    "crates/agentic-dashboard",
+    "crates/agentic-cli",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+publish = false
+
+[workspace.dependencies]
+# Dependencies are added per-story when build-rust first needs them.
+# Slow-growth principle: no crate in Cargo.toml without a failing test
+# that demands it.
+#
+# serde_json (1): added by story 4. Chosen as the document type for the
+# Store trait because story 4 pins behaviour against schemaless JSON-shaped
+# values (see ADR-0002 "schemaless by default"), and storing docs as
+# serde_json::Value keeps the trait object-safe (no type parameters on
+# Store methods) while matching the shape every future consumer will read
+# and write.
+serde_json = "1"

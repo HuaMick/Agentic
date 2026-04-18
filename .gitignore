@@ -1,3 +1,8 @@
+# Rust / Cargo
+/target/
+/**/target/
+Cargo.lock.bak
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

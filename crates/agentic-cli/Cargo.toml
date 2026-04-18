@@ -1,0 +1,10 @@
+[package]
+name = "agentic-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "agentic"
+path = "src/main.rs"
