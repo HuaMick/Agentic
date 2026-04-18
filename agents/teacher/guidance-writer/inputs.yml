@@ -1,0 +1,37 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: schemas/agent-contract.schema.json
+    reason: Validate every agent's contract.yml against this.
+  - path: schemas/agent-inputs.schema.json
+    reason: Validate every agent's inputs.yml against this.
+  - path: schemas/agent-process.schema.json
+    reason: Validate every agent's process.yml against this.
+  - path: agents/README.md
+    reason: Roster of active agents and the three-file shape. Update when the roster changes.
+  - path: agents/assets/README.md
+    reason: Asset layer conventions (subdirectory semantics, extraction rule).
+
+context:
+  - pattern: agents/**/*.yml
+    reason: Existing agent specs — duplication check, cross-reference validation, drift detection.
+  - pattern: agents/assets/**/*.yml
+    reason: Existing assets — scan before extracting to avoid duplicate extraction.
+  - pattern: .claude/agents/*.md
+    reason: Pointer files — must stay in sync with their agent's contract.yml scope.name.
+
+parameters:
+  - name: objective
+    description: Plain-English description of the guidance improvement or audit scope.
+    required_when: directed mode. Optional in audit mode (scope inferred or defaulted).
+  - name: audit_scope
+    description: "For audit mode. One of `agents`, `assets`, `both`, or a specific agent slug."
+    required_when: audit mode (defaults to `both` if omitted).
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash

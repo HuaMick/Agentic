@@ -2,23 +2,30 @@
 
 Authored YAML agent definitions. **The product.**
 
-Each agent lives under `<category>/<agent-name>/` with three files:
+Each agent lives under `<category>/<agent-name>/` with three files, each enforced by its own JSON Schema under `schemas/`:
 
-- `manifest.yml` — identity: name, description, category, version, outputs, allowed tools.
-- `process.yml` — how the agent works: ordered steps, guidelines, anti-patterns, escalation rules.
-- `inputs.yml` — what context the agent needs: required reading, context scan globs, required inputs.
+- **`contract.yml`** (schema: `schemas/agent-contract.schema.json`) — **scope** (name, category, version, purpose, `owns`, `does_not_touch`, `authority`) and **outcome** (what the agent produces, success criteria). The "API surface" — read this first to decide if the agent is the right one for a task.
+- **`inputs.yml`** (schema: `schemas/agent-inputs.schema.json`) — everything the agent reads or uses: `required_reading`, `context` globs, caller-supplied `parameters`, Claude Code `tools` grant, preferred Bash `commands`.
+- **`process.yml`** (schema: `schemas/agent-process.schema.json`) — **workflow** (`session_start`, `steps` or named `modes`) and **guidance** (`rules`, `anti_patterns`, `escalation`). How the agent behaves.
+
+The schemas enforce exactly these five buckets (scope, outcome, inputs, workflow, guidance) and forbid top-level keys outside them. This is the same kind of enforcement stories get — so agents cannot quietly invent new categories of guidance to hide slop in.
 
 ## Categories
 
-- `orchestration/` — orchestration-planning, orchestration-executor (route work, execute phases).
-- `planner/` — epic-creator, planner-build, planner-test, planner-audit, **story-writer** (generate/maintain plans and stories).
-- `build/` — build-rust, build-docs-writer (implement code).
-- `test/` — test-builder, test-audit, test-uat (validate implementations).
-- `teacher/` — teacher-update-guidance, teacher-update-assets (improve the system).
+- `orchestration/` — orchestration-planning, orchestration-executor (route work, execute phases). None authored yet.
+- `planner/` — **story-writer** (active). epic-creator, planner-build, planner-test, planner-audit still to come.
+- `build/` — **build-rust** (active). build-docs-writer still to come.
+- `test/` — test-builder, test-audit, test-uat still to come.
+- `teacher/` — **guidance-writer** (active). Curates agent specs and the shared `assets/` layer.
 
 ## Assets
 
 `assets/` holds definitions, guidelines, examples, templates referenced by agents at runtime. Schema-validated so agents don't silently miss fields. Anything that would be "shared between agents" lives here — there is no separate `shared/` directory.
+
+Current content (see [`agents/assets/README.md`](assets/README.md) for the full layout and extraction rules):
+
+- `definitions/tools-base.yml` — canonical base toolset every agent needs.
+- `guidelines/reference-claude-md.yml` — when and why to read CLAUDE.md, so individual agents do not restate it.
 
 ## Claude Code pointer files
 
@@ -28,14 +35,15 @@ When you add a new agent here, add a matching pointer under `.claude/agents/` th
 
 ## Current state
 
-One agent is active:
+Three agents are active:
 
 - **`planner/story-writer/`** — curator of the story and pattern corpora. Search-and-edit is the default; writing new is the exception. Handles stories AND patterns (until a dedicated `pattern-writer` is warranted).
+- **`build/build-rust/`** — implements Rust code to make a story's acceptance tests green. Runs the full workspace test suite after every change to detect regressions; refuses to leave baseline-green tests red. Never promotes past `under_construction`.
+- **`teacher/guidance-writer/`** — curator of agent specs and the shared assets layer. Edit-first; extracts to assets only when 2+ agents would share. Keeps pointer files and READMEs in sync. Cannot author a new agent without explicit user authorization.
 
 Still to come (order roughly follows Phase 2 demand):
 
-- `build/build-rust` — implements crates against story acceptance tests.
-- `test/test-builder` — generates the test files an `agentic-story.acceptance.tests[].file` points at.
+- `test/test-builder` — generates the test files an `agentic-story.acceptance.tests[].file` points at (currently `build-rust` scaffolds them as a stop-gap).
 - `test/test-uat` — executes a story's UAT prose journey and emits the verdict that promotes `tested → healthy`.
 - `planner/planner-build` — plans a story's implementation phases.
 - `orchestration/orchestration-executor` — runs phases deterministically.

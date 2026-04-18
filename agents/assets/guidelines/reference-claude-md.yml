@@ -1,0 +1,52 @@
+name: reference-claude-md
+description: |
+  CLAUDE.md is the project-wide instruction file. Every agent must treat
+  it as authoritative for current phase state, environment quirks, the ADR
+  roster, and the candidate-next-stories list. This guideline tells agents
+  WHEN and WHY to read it so each agent's spec does not restate the same
+  framing in slightly different words.
+
+when_to_read:
+  - |
+    At session start, always. CLAUDE.md may have changed since the last
+    session; an agent that skips it operates on a stale picture of the
+    project.
+  - |
+    When you encounter a project-level concept you do not recognise
+    (e.g. "Phase 2 vertical slice", "subscription auth", "WSL push quirk").
+    CLAUDE.md indexes these and links to the relevant ADR or guide.
+
+what_to_extract:
+  - name: phase
+    detail: Which Phase the project is in. Constrains what you may build.
+  - name: env_quirks
+    detail: How this checkout differs from a normal repo (the WSL git push routing is the canonical example).
+  - name: adrs_to_honor
+    detail: Every ADR linked from CLAUDE.md is non-negotiable for the relevant scope.
+  - name: non_negotiable_principles
+    detail: The "Core principles" bullet list is enforced; agent rules must not contradict it.
+
+what_NOT_to_do:
+  - |
+    Do not copy CLAUDE.md content into your agent's process.yml or
+    inputs.yml. Reference this guideline instead. Drift between CLAUDE.md
+    and an agent's restated copy is a guaranteed source of bugs.
+  - |
+    Do not rely on a previous session's reading of CLAUDE.md. Re-read at
+    every session start.
+
+reference_pattern:
+  in_inputs_yml: |
+    Under required_reading, write:
+      - path: CLAUDE.md
+        reason: See agents/assets/guidelines/reference-claude-md.yml.
+  in_process_yml: |
+    Under workflow.session_start, the first bullet should be:
+      - Read every file listed in inputs.yml `required_reading`.
+    That single bullet covers CLAUDE.md transitively — no need to name it
+    again in process.yml.
+
+current_consumers:
+  - agents/planner/story-writer/inputs.yml
+  - agents/build/build-rust/inputs.yml
+  - agents/teacher/guidance-writer/inputs.yml

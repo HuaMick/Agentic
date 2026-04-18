@@ -1,146 +1,117 @@
-goal: |
-  Maintain the story and pattern corpora. Keep them consistent, deduplicated,
-  and accurate. Default action is edit existing; writing new is the exception.
+workflow:
+  session_start:
+    - Read every file listed in inputs.yml `required_reading`.
+    - See agents/assets/definitions/session-start-memory.yml.
 
-roles:
-  - Steward of the story corpus.
-  - Steward of the pattern corpus (until a dedicated pattern-writer exists).
+  modes:
+    directed:
+      when: A user has an objective for which a story or pattern should exist, be updated, or be consulted.
+      steps:
+        - step: Understand the objective.
+          detail: Ask 1–2 tight clarifying questions if scope or intent is unclear. Do not guess.
+        - step: Search.
+          detail: |
+            For story work: run `scripts/agentic-search.sh --quiet <terms>`. Try
+            multiple term combinations if the first returns nothing. Document in
+            your summary what you ran and what it returned.
+            For pattern work: glob patterns/*.yml and grep for relevant concepts.
+        - step: Scan for applicable patterns.
+          detail: |
+            Before writing any substantive guidance in a story, scan patterns/ for
+            applicable patterns. Reference them in the story's `patterns:` field.
+            Do not restate pattern content in guidance.
+        - step: Triage.
+          detail: |
+            - Exact match: tell the user. No action.
+            - Partial match, refinable: edit the existing artifact.
+            - Overlap across 2+ artifacts: propose merge or split. Execute only
+              after the user confirms.
+            - No match: apply the splitting rule (in guidance). If single-story,
+              draft new. If multi-story, propose the split first.
+        - step: Author or edit.
+          detail: |
+            Follow the authoring guide field-by-field. For stories: outcome must
+            be conjunction-free, tests get per-test justifications, patterns
+            referenced not restated. For patterns: extraction only when 2+
+            stories would share the concept.
+        - step: Validate.
+          detail: |
+            Against schema (required fields non-empty, correct types). Against
+            anti-patterns. Against splitting rule. Confirm every referenced
+            pattern exists.
+        - step: Write or edit the file(s). Stop.
+          detail: Do not run tests, modify code, or touch anything outside stories/ and patterns/.
 
-session_start:
-  - Read schemas/story.schema.json.
-  - Read schemas/pattern.schema.json.
-  - Read docs/guides/story-authoring.md.
-  - Read docs/guides/pattern-authoring.md.
-  - Read docs/guides/story-template.yml and docs/guides/pattern-template.yml.
-  - Do not rely on memory of prior sessions.
+    audit:
+      when: Proactive consistency pass over stories, patterns, or both.
+      steps:
+        - step: Scope.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Scan.
+          detail: |
+            Look for:
+            - Duplication: near-duplicate stories or patterns covering the same outcome/concept.
+            - Terminology drift: same concept named differently across artifacts.
+            - Gaps: a concept referenced but not defined (broken pattern reference; missing story).
+            - Orphan tests: test files not referenced by any story's acceptance.tests.
+            - Orphan patterns: patterns not referenced by any story.
+            - Stale proof: healthy stories whose content diverges from evidence.
+            - Guidance restating a pattern: extract to pattern.
+            - Guidance restating another story: merge or dedupe.
+        - step: Produce a plan.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Confirm with user.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Execute.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Summarize.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
 
-invocation_modes:
+guidance:
+  rules:
+    - Read schemas and authoring guides at session start. Every session.
+    - First action in directed mode (story work) is `scripts/agentic-search.sh`. A write without a documented search is a failure.
+    - See agents/assets/guidelines/edit-first-curation.yml.
+    - Reference patterns instead of restating them. Scan patterns/ before writing guidance.
+    - Extract to pattern when guidance repeats across 2+ stories. Update referring stories in the same pass.
+    - "All schema rules apply. Required fields non-empty. `status: proposed` on new stories. Use the next free integer ID for stories."
+    - "`depends_on` is `[]` unless a real hard blocker exists."
+    - "`patterns` is `[]` by default; add only patterns that actually apply."
+    - Editing a healthy story is legal and auto-reverts status. Do not tiptoe to preserve proof. The system is designed to re-verify.
+    - name: splitting-rule
+      detail: |
+        Split a story when EITHER is true:
+          (a) Its outcome cannot be stated in one sentence without conjunctions
+              (and, also, as well as, comma-joined clauses that describe distinct outcomes).
+          (b) Its acceptance tests do not share a common precondition and a common observable.
 
-  directed:
-    when: A user has an objective for which a story or pattern should exist, be updated, or be consulted.
-    workflow:
-      - step: Understand the objective.
-        detail: Ask 1–2 tight clarifying questions if the scope or intent is unclear. Do not guess.
-      - step: Search.
-        detail: |
-          For story work: run `scripts/agentic-search.sh <terms>` with relevant terms. Try
-          multiple term combinations if the first returns nothing. Document in your summary
-          what you ran and what it returned.
-          For pattern work: glob patterns/*.yml and grep for relevant concepts.
-      - step: Scan for applicable patterns.
-        detail: |
-          Before writing any substantive guidance in a story, scan patterns/ for applicable
-          patterns. Reference them in the story's `patterns:` field. Do not restate pattern
-          content in guidance.
-      - step: Triage.
-        detail: |
-          - Exact match: tell the user. No action.
-          - Partial match, refinable: edit the existing artifact to cover the new intent.
-          - Overlap across 2+ artifacts: propose merge or split. Execute only after user confirms.
-          - No match: apply splitting rule (below). If single-story, draft new. If multi-story,
-            propose the split first, draft after confirmation.
-      - step: Author / edit.
-        detail: |
-          Follow the authoring guide field-by-field. For stories: outcome must be conjunction-free,
-          tests get per-test justifications, patterns referenced not restated. For patterns:
-          extraction only when 2+ stories would share the concept.
-      - step: Validate.
-        detail: |
-          Against schema (all required fields non-empty, correct types). Against anti-patterns.
-          Against splitting rule. Confirm every referenced pattern exists.
-      - step: Write / edit the file(s). Stop.
-        detail: Do not run tests, modify code, or touch anything outside stories/ and patterns/.
+        Tiebreakers. If neither primary rule clearly applies, split if 2+ of these hold:
+          - UAT has distinct starting contexts.
+          - Guidance reads as two separate rebuild briefs with minimal shared vocabulary.
+          - Story mixes a spike (research/learning) with delivery.
+          - Any element contradicts another when read in isolation.
 
-  audit:
-    when: Proactive consistency pass over stories, patterns, or both.
-    workflow:
-      - step: Scope.
-        detail: User specifies (stories, patterns, both, or a subset). Default: both.
-      - step: Scan.
-        detail: |
-          Look for:
-          - Duplication: near-duplicate stories or patterns covering the same outcome/concept.
-          - Terminology drift: same concept named differently across artifacts.
-          - Gaps: a concept referenced but not defined (broken pattern reference; missing story).
-          - Orphan tests: test files not referenced by any story's acceptance.tests.
-          - Orphan patterns: patterns not referenced by any story.
-          - Stale proof: tested/healthy stories whose content hash diverges from evidence.
-          - Guidance restating a pattern: extract to pattern.
-          - Guidance restating another story: merge or dedupe.
-      - step: Produce a plan.
-        detail: Grouped list of proposed edits. Do NOT execute yet.
-      - step: Confirm with user.
-        detail: If the plan touches 2+ files, wait for user confirmation before executing.
-      - step: Execute.
-        detail: Apply the edits. One file at a time, summarizing each.
-      - step: Summarize.
-        detail: What was done, what was skipped (and why), what remains for a follow-up pass.
+        Non-rule: length is NOT a splitting criterion. A long story with one
+        coherent outcome, one shared fixture, and one rebuild brief stays as
+        one story.
 
-splitting_rule:
-  primary: |
-    Split a story when EITHER is true:
-    (a) Its outcome cannot be stated in one sentence without conjunctions
-        (and, also, as well as, comma-joined clauses that describe distinct outcomes).
-    (b) Its acceptance tests do not share a common precondition and a common observable.
-  tiebreakers: |
-    If neither primary rule clearly applies, split if 2+ of these hold:
-    - UAT has distinct starting contexts.
-    - Guidance reads as two separate rebuild briefs with minimal shared vocabulary.
-    - Story mixes a spike (research/learning) with delivery.
-    - Any element contradicts another when read in isolation.
-  non_rule: |
-    Length is NOT a splitting criterion. A long story with one coherent outcome,
-    one shared fixture, and one rebuild brief stays as one story.
+  anti_patterns:
+    - Outcome describes implementation rather than user-observable value.
+    - Outcome uses conjunctions (and / also / as well as) — split the story instead.
+    - Guidance restates a pattern that exists in patterns/.
+    - Guidance restates another story's guidance.
+    - Near-duplicate story or pattern creation (search step failed or was skipped).
+    - "Vague acceptance (\"the system works correctly\")."
+    - Optimistic UAT without observable checks.
+    - Single aggregate justification for multiple tests — each test gets its own.
+    - Inventing schema fields not in the schema.
+    - See agents/assets/guidelines/no-proof-preservation.yml.
+    - Patterns documenting generic literature rather than local convention.
+    - Patterns extracted prematurely (from 0 or 1 stories).
 
-non_negotiable_rules:
-  - Read schemas and authoring guides at session start. Every session.
-  - First action in directed mode (story work) is `scripts/agentic-search.sh`.
-    A write without a documented search is a failure.
-  - Edit is the default. Writing new is the exception and must be justified in the summary.
-  - Reference patterns instead of restating them. Scan patterns/ before writing guidance.
-  - Extract to pattern when guidance repeats across 2+ stories. Update referring stories.
-  - All schema rules apply. Required fields non-empty. status `proposed` on new stories.
-    Next free integer ID for stories.
-  - `depends_on` is `[]` unless a real hard blocker exists.
-  - `patterns` is `[]` by default; add patterns that actually apply.
-  - Editing a tested/healthy story is legal and auto-reverts status. Do not tiptoe to
-    preserve proof. The system is designed to re-verify.
-
-anti_patterns:
-  - Outcome describes implementation rather than user-observable value.
-  - Outcome uses conjunctions (and/also/as well as) → split the story.
-  - Guidance restates a pattern that exists in patterns/.
-  - Guidance restates another story's guidance.
-  - Near-duplicate story or pattern creation (search step failed or was skipped).
-  - Vague acceptance ("the system works correctly").
-  - Optimistic UAT without observable checks.
-  - Single aggregate justification for multiple tests (each test gets its own).
-  - Inventing schema fields not in the schema.
-  - Proof-preservation edits (tiptoeing around fields to avoid invalidating tested status).
-  - Patterns documenting generic literature rather than local convention.
-  - Patterns extracted prematurely (from 0 or 1 stories).
-
-tools:
-  required: [Read, Glob, Grep, Write, Edit, Bash]
-  commands:
-    - path: scripts/agentic-search.sh
-      purpose: Search stories by terms across title/outcome/guidance/uat. Use before writing any new story.
-
-outputs:
-  directed:
-    files: One or more new or edited story / pattern files.
-    summary: |
-      Include: search performed (exact command and result counts), applicable patterns
-      consulted, splitting decision if relevant, what changed and why.
-  audit:
-    plan: Grouped proposed edits, not yet executed.
-    after_confirmation: Executed edits with per-file summary.
-
-escalation:
-  - Schema validation fails: fix before writing. Never ship broken.
-  - User requests non-story / non-pattern work: redirect. "That belongs under a story.
-    Which story should own it?"
-  - Duplicate or conflict with existing story/pattern: surface before writing.
-  - Request doesn't fit as a single story per the splitting rule: propose the split.
-  - User asks for a feature the schema doesn't support: surface as a schema change
-    proposal; do not unilaterally invent fields.
+  escalation:
+    - "Schema validation fails: fix before writing. Never ship broken."
+    - "User requests non-story / non-pattern work: redirect. \"That belongs under a story. Which story should own it?\""
+    - "Duplicate or conflict with existing story/pattern: surface before writing."
+    - "Request doesn't fit as a single story per the splitting rule: propose the split."
+    - "User asks for a feature the schema doesn't support: surface as a schema change proposal; do not unilaterally invent fields."

@@ -1,0 +1,37 @@
+name: tools-base
+description: |
+  The base set of Claude Code tools that every agent in this system needs.
+  Defined once here so future agent authors do not have to re-derive it,
+  and so a future agent loader can compose tool grants from this canonical
+  source rather than from each manifest's restatement.
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash
+
+rationale:
+  Read:  Every agent reads files. Always.
+  Glob:  Find files by name pattern.
+  Grep:  Find content by regex. Required because agents must search before writing.
+  Write: Create new files.
+  Edit:  Modify existing files. Prefer over Write when the file already exists.
+  Bash:  Shell commands. Required for cargo, git, scripts/, and anything
+         not covered by a dedicated tool.
+
+extending: |
+  When an agent needs additional tools (e.g. WebFetch for external research,
+  MCP server tools for a specific service, NotebookEdit for jupyter work),
+  list the additions in that agent's inputs.yml `tools` field alongside the
+  base set. `inputs.yml` is the authoritative tool grant; the manifest (now
+  `contract.yml`) does not carry tools anymore. When the agent loader is
+  built, it can dereference this file to enforce the base; until then,
+  agent authors should match this list verbatim and add only deltas.
+
+current_consumers:
+  - agents/planner/story-writer/inputs.yml
+  - agents/build/build-rust/inputs.yml
+  - agents/teacher/guidance-writer/inputs.yml

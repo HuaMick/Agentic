@@ -12,9 +12,9 @@ required_reading:
   - path: docs/guides/pattern-template.yml
     reason: Copy-paste skeleton for new patterns.
   - path: CLAUDE.md
-    reason: Project-wide phase awareness and fallback conventions.
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
 
-context_to_scan:
+context:
   - pattern: stories/*.yml
     reason: Existing stories — ID sequencing, duplication check, house style.
   - pattern: patterns/*.yml
@@ -22,16 +22,23 @@ context_to_scan:
   - pattern: crates/*/README.md
     reason: Know which crate owns which concern.
 
-required_inputs:
+parameters:
   - name: objective
     description: Plain-English description of what the user wants the story or pattern to deliver.
-    required_when: directed mode.
-    optional_when: audit mode (scope inferred from request or defaulted).
+    required_when: directed mode. Optional in audit mode (scope inferred from request or defaulted).
 
-preferred_commands:
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash
+
+commands:
   - name: agentic-search
-    path: scripts/agentic-search.sh
+    invocation_example: scripts/agentic-search.sh --quiet verify evidence
     purpose: |
-      Search stories by terms across title/outcome/guidance/uat. Run this BEFORE
-      writing any new story. Document the command used and the result in your summary.
-    invocation_example: "scripts/agentic-search.sh verify evidence"
+      Search stories by terms across title/outcome/guidance/uat. Run BEFORE
+      writing any new story. Document the command used and result counts in
+      your summary.

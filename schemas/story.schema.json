@@ -25,8 +25,8 @@
     },
     "status": {
       "type": "string",
-      "enum": ["proposed", "under_construction", "tested", "healthy", "deprecated", "archived"],
-      "description": "Lifecycle state. Only agentic-verify may write `tested` or `healthy`; humans (and the story-writer agent) may write the others."
+      "enum": ["proposed", "under_construction", "healthy", "unhealthy"],
+      "description": "Lifecycle state. `proposed` and `under_construction` are written by the story-writer or humans. `healthy` is written only by `agentic uat` on a Pass verdict. `unhealthy` is computed by the dashboard from evidence and is never written to disk."
     },
     "patterns": {
       "type": "array",
@@ -83,7 +83,7 @@
         "type": "integer",
         "minimum": 1
       },
-      "description": "IDs of other stories that must reach `tested` before this story can start. Cycles are rejected at load time."
+      "description": "IDs of other stories that must reach `healthy` before this story can be marked `healthy`. Cycles are rejected at load time."
     }
   }
 }

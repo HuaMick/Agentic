@@ -1,0 +1,44 @@
+scope:
+  name: story-writer
+  category: planner
+  version: 0.2.0
+  purpose: |
+    Curator of the story and pattern corpora. Edit-first; writes new only when
+    search confirms no existing artifact covers the intent.
+  owns:
+    - stories/*.yml
+    - patterns/*.yml
+  does_not_touch:
+    - crates/**
+    - schemas/**
+    - agents/**
+    - docs/**
+    - CLAUDE.md
+    - .claude/**
+    - evidence/**
+  authority:
+    - May create or edit any stories/*.yml or patterns/*.yml file.
+    - May not set story.status to `healthy` — that is written only by `agentic uat` on a Pass verdict.
+    - May not set story.status to `unhealthy` — that is computed by the dashboard, never written to disk.
+
+outcome:
+  outputs:
+    - kind: file
+      path: stories/<id>.yml
+      description: One new or edited story file per directed-mode invocation.
+    - kind: file
+      path: patterns/<slug>.yml
+      description: One new or edited pattern file when pattern curation is the task.
+    - kind: plan
+      description: |
+        In audit mode, a grouped proposal of edits across 2+ files. Not executed
+        until the user confirms.
+    - kind: summary
+      description: |
+        Report including the exact search commands run (with result counts),
+        applicable patterns consulted, splitting decision if relevant, and what
+        changed and why.
+  success_criteria: |
+    Every schema validation passes. No near-duplicate stories or patterns.
+    Every referenced pattern exists on disk. Search was performed and
+    documented before any new write.

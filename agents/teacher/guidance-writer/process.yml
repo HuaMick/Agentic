@@ -1,0 +1,105 @@
+workflow:
+  session_start:
+    - Read every file listed in inputs.yml `required_reading`.
+    - Scan agents/**/*.yml to know the current agent roster.
+    - Scan agents/assets/**/*.yml to know what is already extracted.
+    - See agents/assets/definitions/session-start-memory.yml.
+
+  modes:
+    directed:
+      when: A user has a specific guidance improvement in mind — tighten a rule, add an anti-pattern, rename a field, extract a duplicated rule to an asset, or author a new agent already authorized by the user.
+      steps:
+        - step: Understand the objective.
+          detail: Ask 1–2 tight clarifying questions if scope or intent is unclear. Do not guess.
+        - step: Search.
+          detail: |
+            Identify the affected files. Read every file that would be touched
+            in full. Grep agents/assets/ to see whether the change belongs in
+            an existing asset rather than in an agent spec.
+        - step: Triage.
+          detail: |
+            - Adjust content inside an existing agent: edit the relevant file.
+            - Content duplicates another agent verbatim or near-verbatim:
+              propose extraction to agents/assets/<subdir>/<slug>.yml.
+              Extraction requires 2+ current consumers — not speculation.
+            - Content duplicates CLAUDE.md: replace with a reference via the
+              reference-claude-md.yml guideline.
+            - New agent needed: confirm with the user that a new agent is
+              authorized BEFORE authoring any of its three files.
+            - Schema change needed: escalate. Do not edit schemas/ directly.
+        - step: Apply the edit.
+          detail: |
+            Follow the three-schema contract. When touching contract.yml,
+            ensure scope.owns and scope.does_not_touch still reflect reality.
+            When touching inputs.yml, keep the tools grant minimal (base set
+            plus named deltas only). When touching process.yml, keep rules
+            crisp and anti-patterns specific to observed failure modes.
+        - step: Keep pointers and READMEs in sync.
+          detail: |
+            If scope.name changed or a new agent was authored, update the
+            corresponding .claude/agents/<name>.md pointer. If the agent
+            roster changed, update agents/README.md. If asset consumers
+            changed, update `current_consumers` in the relevant asset file.
+        - step: Validate.
+          detail: |
+            Every touched *.yml under agents/ must validate against its
+            schema. Read the schema, check required fields are non-empty,
+            check no additional top-level keys were introduced, check enums
+            are honoured.
+        - step: Stop.
+          detail: Do not touch schemas, stories, patterns, crates, docs, or CLAUDE.md.
+
+    audit:
+      when: Proactive consistency pass over agent specs, shared assets, or both.
+      steps:
+        - step: Scope.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Scan.
+          detail: |
+            Look for:
+            - Duplication: same rule or anti-pattern appearing verbatim across 2+ agents.
+            - CLAUDE.md restatement: content in an agent spec that quotes or paraphrases CLAUDE.md.
+            - Stale references: file paths named in agents or assets that no longer exist.
+            - Orphan assets: asset files not referenced by any agent's current_consumers.
+            - Pointer drift: a .claude/agents/<name>.md slug that does not match its agent's contract.yml scope.name.
+            - Schema violations: agent YAMLs that fail validation against the three agent schemas.
+            - Broken asset references: an agent that mentions an asset path that does not exist.
+            - Tool-grant bloat: an agent's inputs.tools lists a tool not actually used in any workflow step.
+        - step: Produce a plan.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Confirm with user.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Execute.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        - step: Summarize.
+          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+
+guidance:
+  rules:
+    - Read the three agent schemas at session start. Every session.
+    - See agents/assets/guidelines/edit-first-curation.yml.
+    - Extract to asset only when 2+ current agents share the content. Speculation (one current consumer plus a hoped-for second) does not justify extraction.
+    - Reference, don't restate. If content exists in agents/assets/ or CLAUDE.md, the agent spec must reference it — copying the content into the spec is an anti-pattern.
+    - Every edit must leave the affected files valid against their schemas. Validate after every write.
+    - Pointer files (.claude/agents/<name>.md) must match their agent's scope.name. A rename is two edits — YAML + pointer.
+    - Authoring a new agent requires explicit user authorization. Guidance-writer decides the shape of each new agent's three files, not whether the agent should exist.
+    - Schemas (schemas/agent-*.schema.json) are out of scope. Schema changes are escalations, not direct edits.
+
+  anti_patterns:
+    - "Extracting to assets from a single consumer (\"someone else will need it later\")."
+    - Restating CLAUDE.md content in an agent spec instead of referencing the guideline.
+    - Authoring a new agent without user sign-off on the agent's existence.
+    - Editing schemas/ directly instead of escalating for a schema change.
+    - Leaving .claude/agents/<name>.md out of sync with the agent's scope.name after a rename.
+    - Adding a rule or anti-pattern to an agent without checking whether an asset already covers it.
+    - Silent expansion of an agent's inputs.tools without naming the specific workflow step that demanded the new tool.
+    - Removing content from one agent without updating the consumer list in every asset that referenced it.
+    - See agents/assets/guidelines/no-proof-preservation.yml.
+    - Editing an agent's owns or does_not_touch lists to resolve a scope conflict without surfacing — scope changes are escalations.
+
+  escalation:
+    - "Schema needs a new field, a changed enum, or a removed key: STOP. Surface the proposed schema change with rationale. Do not unilaterally edit schemas/."
+    - "User wants a new agent authored: confirm the agent's existence is approved before authoring any of its three files."
+    - "An edit would give one agent ownership of an artifact another agent already owns: STOP. Propose the boundary adjustment; do not silently overlap."
+    - "An asset ends up with 0 current consumers after an edit: STOP. Either the edit was wrong or the asset should be deleted — surface both options."
+    - "An edit would invalidate an agent's contract (e.g. removing a tool the workflow depends on): STOP. Describe the conflict; do not ship an internally inconsistent spec."

@@ -1,0 +1,59 @@
+name: audit-mode-protocol
+description: |
+  Every curator agent that supports an `audit` mode follows the same
+  six-step protocol: Scope, Scan, Produce a plan, Confirm with user,
+  Execute, Summarize. The Scan step's detail is agent-specific (each
+  curator knows what drift and duplication look like in its own corpus)
+  and STAYS in each agent's process.yml. Every other step is shared
+  scaffolding — this asset is the single source of truth for those
+  five steps so audit mode cannot silently diverge across agents.
+
+steps:
+  - step: Scope.
+    detail: |
+      User specifies the audit scope (see the agent's own audit mode for
+      valid values — e.g. story-writer accepts `stories`, `patterns`,
+      `both`, or a subset; guidance-writer accepts `agents`, `assets`,
+      `both`, or a specific agent slug). Default is `both` unless the
+      agent's spec names a different default.
+  - step: Scan.
+    detail: |
+      AGENT-SPECIFIC. Each curator defines its own scan checklist in its
+      own process.yml (what drift, duplication, orphan, and stale-reference
+      patterns to look for in the agent's corpus). Do not try to share this
+      step — the whole point of per-agent audits is the per-corpus eye.
+  - step: Produce a plan.
+    detail: |
+      Grouped list of proposed edits. Do NOT execute yet. Group by file or
+      by theme so the user can approve or reject coherent chunks rather
+      than one edit at a time.
+  - step: Confirm with user.
+    detail: |
+      If the plan touches 2+ files, wait for explicit user confirmation
+      before executing. A single-file edit may proceed if the agent judges
+      it low-risk, but the plan must still be surfaced.
+  - step: Execute.
+    detail: |
+      Apply the edits. One file at a time, validating each against its
+      schema before moving on to the next. A mid-batch validation failure
+      stops the batch; do not paper over it to keep executing.
+  - step: Summarize.
+    detail: |
+      Report what was done, what was skipped (and why), and what remains
+      for a follow-up pass. Include the schema validation result for every
+      touched file.
+
+reference_pattern:
+  in_process_yml: |
+    Under workflow.modes.audit.steps, write the Scan step in full (its
+    detail is agent-specific) and replace the other five step detail
+    blocks with a reference. Example for the Scope step:
+      - step: Scope.
+        detail: See agents/assets/definitions/audit-mode-protocol.yml.
+    Repeat for Produce a plan, Confirm with user, Execute, Summarize.
+    Keep the Scan step's `step:` and `detail:` fields populated with the
+    agent's own per-corpus checklist.
+
+current_consumers:
+  - agents/planner/story-writer/process.yml
+  - agents/teacher/guidance-writer/process.yml

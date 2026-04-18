@@ -1,0 +1,34 @@
+name: session-start-memory
+description: |
+  Agents in this system are stateless across sessions. Each invocation is a
+  fresh Claude Code subagent with no recollection of prior runs, prior
+  conversations, or prior tool calls. This asset exists so agent specs do not
+  each restate the same do-not-trust-memory clause in slightly different
+  words — reference it from every agent's `workflow.session_start`.
+
+rule: |
+  Do not rely on memory of prior sessions. Read every file listed in
+  `inputs.yml required_reading` at the start of every session, even if you
+  believe you have seen it before. Re-read before acting; do not assume a
+  file's contents are unchanged from a previous run.
+
+rationale:
+  - Subagent sessions are ephemeral. What "you" remember is actually the
+    parent's context, which may be stale, truncated, or from a different agent.
+  - CLAUDE.md, schemas, and agent specs all drift across sessions. The only
+    safe assumption is that everything has changed.
+  - A bug caused by acting on stale memory is expensive to debug because the
+    trigger is invisible in the transcript — the agent simply "knew" something
+    that was no longer true.
+
+reference_pattern:
+  in_process_yml: |
+    Under workflow.session_start, include a bullet:
+      - See agents/assets/definitions/session-start-memory.yml.
+    The preceding bullet in every agent should still be:
+      - Read every file listed in inputs.yml `required_reading`.
+
+current_consumers:
+  - agents/planner/story-writer/process.yml
+  - agents/build/build-rust/process.yml
+  - agents/teacher/guidance-writer/process.yml

@@ -1,0 +1,41 @@
+name: edit-first-curation
+description: |
+  Curator agents (story-writer, guidance-writer, and any future catalog
+  curator) operate on growing corpora. Left unchecked, they will prefer
+  authoring new files over finding and extending existing ones, and the
+  corpus will bloat with near-duplicates that quietly contradict each
+  other. This guideline names the default so every curator's spec can
+  reference it instead of restating it.
+
+rule: |
+  Edit is the default. Writing a new artifact (story, pattern, agent,
+  asset, or any other unit the curator owns) is the exception and must be
+  justified in the agent's summary. The justification answers: what search
+  terms were run, what the closest existing artifact was, and why editing
+  that existing artifact was not the right move.
+
+rationale:
+  - Duplicate artifacts split authority — a consumer does not know which
+    one to trust, and the curator must then spend energy reconciling them.
+  - An edit keeps the revision history and evidence chain attached to the
+    original artifact. A new file orphans both.
+  - The search-before-write discipline is the cheapest duplication defence
+    we have; this rule enforces it by making "I didn't know this existed"
+    an unacceptable answer.
+
+scope_hint:
+  Curators may scope the parenthetical to their own corpus when referencing
+  this guideline in their rules list (e.g. story-writer's corpus is stories
+  and patterns; guidance-writer's is agent specs and assets). The core rule
+  — edit is default, writing new is the justified exception — is universal.
+
+reference_pattern:
+  in_process_yml: |
+    Under guidance.rules, write a single-line rule that points here:
+      - See agents/assets/guidelines/edit-first-curation.yml.
+    Do not restate the rule inline; agents that disagree with the default
+    should surface a proposal to revise this asset, not quietly diverge.
+
+current_consumers:
+  - agents/planner/story-writer/process.yml
+  - agents/teacher/guidance-writer/process.yml

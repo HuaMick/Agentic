@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic.dev/schemas/agent-process.schema.json",
+  "title": "AgentProcess",
+  "description": "Workflow and guidance for an agent. Lives at agents/<category>/<name>/process.yml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workflow", "guidance"],
+  "properties": {
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_start"],
+      "oneOf": [
+        { "required": ["session_start", "steps"], "not": { "required": ["modes"] } },
+        { "required": ["session_start", "modes"], "not": { "required": ["steps"] } }
+      ],
+      "properties": {
+        "session_start": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Preconditions and reads at the start of every session."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step", "detail"],
+            "properties": {
+              "step": { "type": "string", "minLength": 1 },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          },
+          "description": "Ordered main workflow. Use for agents with a single mode."
+        },
+        "modes": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["when", "steps"],
+              "properties": {
+                "when": { "type": "string", "minLength": 1 },
+                "steps": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["step", "detail"],
+                    "properties": {
+                      "step": { "type": "string", "minLength": 1 },
+                      "detail": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "description": "Named modes with distinct workflows. Use when an agent has 2+ modes (e.g. story-writer's directed vs audit)."
+        }
+      }
+    },
+    "guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules", "anti_patterns"],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "detail"],
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+                  "detail": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
+          },
+          "description": "Non-negotiable principles. Each item is a single-line string OR a {name, detail} object for complex rules that need a name (e.g. 'splitting-rule')."
+        },
+        "anti_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Known failure modes. Each entry describes one specific failure to avoid."
+        },
+        "escalation": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string", "minLength": 1 },
+          "description": "When to stop and surface instead of proceeding. Each entry is one condition + expected action."
+        }
+      }
+    }
+  }
+}

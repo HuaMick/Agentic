@@ -1,0 +1,78 @@
+id: standalone-resilient-library
+title: "Standalone-resilient library with thin CLI shim"
+
+summary: |
+  A crate is structured as a library that depends only on a minimal,
+  load-bearing set of other crates (typically `agentic-store`,
+  `agentic-events`, and at most one or two domain crates). The CLI
+  subcommand is a thin wrapper that parses arguments, calls the library,
+  and maps its result to an exit code. The library can be exercised
+  end-to-end by an integration test that imports it directly, with no
+  orchestrator, runtime, sandbox, or top-level `agentic` binary in scope.
+
+when_to_use: |
+  Apply when ALL of the following hold:
+
+  - The crate is on the critical "prove the system still works" path
+    (verify, uat, store-write, evidence-record). When the rest of the
+    system is in flames, this crate must still produce a correct result.
+  - The functionality is meaningful as a library call (a single function
+    or trait method that returns a typed result), not only as a pipeline.
+  - We can credibly assert "no orchestrator dependency" without losing
+    real capability — i.e. the library does not need the runtime to do
+    its job.
+
+  Do NOT apply to crates whose entire purpose is orchestration (e.g.
+  `agentic-orchestrator`, `agentic-runtime`); those crates are allowed
+  to depend on the world.
+
+how_we_do_it: |
+  Three concrete conventions, all enforced by tests rather than docs:
+
+  1. **Dependency floor.** The library's `Cargo.toml` lists only the
+     minimal crates it needs. Forbidden by convention: `agentic-cli`,
+     `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`. A
+     dependency review during code review catches accidental additions;
+     the standalone-resilience test catches them at build time.
+
+  2. **Standalone-resilience test.** Each such crate ships an
+     integration test named `*_standalone_resilience.rs` under
+     `crates/<crate>/tests/`. The test constructs the crate's primary
+     entry point with only its declared dependencies wired up (typically
+     a `MemStore` from `agentic-store` plus an in-memory event sink),
+     drives one full happy-path call, and asserts the result shape
+     matches what the CLI path would produce. If someone adds a
+     forbidden dependency, the test either fails to compile (because
+     the test only links against the allowed set) or fails at link time.
+
+  3. **CLI shim is dumb.** The CLI subcommand under `crates/agentic-cli`
+     does three things and only three things: parse args into the
+     library's input type, call the library, map the typed result to an
+     exit code per the crate's documented contract. No business logic,
+     no fallback paths, no "if the library is unavailable then..."
+     branches. If the library can't be loaded, the CLI failed to build.
+
+  Canonical example: `crates/agentic-uat` (see `stories/1.yml`) and
+  `crates/agentic-ci-record` (see `stories/2.yml`).
+
+trade_offs: |
+  **Given up.** Some convenience features that would naturally live
+  inside the library — progress bars, rich terminal output, retry
+  policies tied to specific schedulers — have to live in the CLI shim
+  or a separate orchestrator-aware crate. This sometimes means a small
+  amount of glue code is duplicated between the CLI and the orchestrator
+  when both invoke the same library.
+
+  **Wrong choice when.** The functionality is inherently orchestrative
+  (spawning multiple agents, coordinating between sandboxes, managing
+  long-running pipelines). Forcing those crates into a standalone-
+  resilient shape produces awkward APIs and fake "library-only" tests
+  that don't reflect real use.
+
+  **Drift risk.** If a crate that should be standalone-resilient
+  silently grows an orchestrator dependency through a transitive path,
+  the test catches it only if the test itself stays honest about which
+  crates it links against. The audit pass over `Cargo.toml` files is
+  the human backstop.
+
+related_patterns: []

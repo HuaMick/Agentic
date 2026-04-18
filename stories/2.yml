@@ -1,0 +1,216 @@
+id: 2
+title: "Record per-story test results to test_runs on every CI run"
+
+outcome: |
+  After each acceptance-test run, the system has a single up-to-date row
+  per story in the `test_runs` table that the dashboard can read to
+  surface which stories' tests are currently red.
+
+status: proposed
+
+patterns:
+  - standalone-resilient-library
+
+acceptance:
+  tests:
+    - file: crates/agentic-ci-record/tests/record_pass.rs
+      justification: |
+        Proves the happy path: given a passing acceptance-test run for
+        story id `<n>`, `Recorder::record` upserts a row to `test_runs`
+        with `story_id=<n>`, `verdict=pass`, `failing_tests=[]`,
+        `commit` set to HEAD's SHA, and `ran_at` set to now (RFC3339).
+        Without this the dashboard cannot distinguish "tests pass" from
+        "we never ran them," which is the whole reason we're recording.
+
+    - file: crates/agentic-ci-record/tests/record_fail.rs
+      justification: |
+        Proves the failure path: given a failing acceptance-test run
+        for story id `<n>` where two test files failed,
+        `Recorder::record` upserts a row with `verdict=fail` and
+        `failing_tests` containing exactly those two test file
+        basenames (no paths, no extensions stripped — basename only,
+        e.g. `verify_pass.rs`). Without this the dashboard's
+        `Failing tests` column has nothing to render and "fell from
+        grace" detection in story 3 cannot name what fell.
+
+    - file: crates/agentic-ci-record/tests/record_replaces_not_appends.rs
+      justification: |
+        Proves upsert-by-story_id semantics: after recording a Pass
+        for story `<n>` and then a Fail for the same story, a query
+        of `test_runs` filtered by `story_id=<n>` returns exactly one
+        row (the Fail), not two. Without this the table grows
+        unboundedly per CI run and the dashboard would have to choose
+        a "latest" row by timestamp at read time — moving correctness
+        from a write-time invariant to a read-time computation we'd
+        get wrong eventually.
+
+    - file: crates/agentic-ci-record/tests/record_malformed_input_preserves_row.rs
+      justification: |
+        Proves the corruption-resistance contract: given an existing
+        Pass row for story `<n>`, when `Recorder::record` is invoked
+        with malformed test-runner output (e.g. truncated JSON,
+        missing required fields, empty input), it returns
+        `RecordError::MalformedInput` and the existing row in
+        `test_runs` is unchanged. Without this, a flaky CI step that
+        emitted garbage could silently overwrite a known-good row
+        with an empty or corrupt one, and the dashboard would
+        misreport the story's health.
+
+    - file: crates/agentic-ci-record/tests/record_standalone_resilience.rs
+      justification: |
+        Proves the standalone-resilient-library claim: the recorder
+        library is driven directly with only `agentic-store`,
+        `agentic-events`, and `git2` wired up (no orchestrator, no
+        runtime, no sandbox), and produces the same row shape as the
+        CLI / CI hook path. Without this the recorder becomes
+        coupled to whatever invokes it; we want the CI hook, a
+        future local pre-commit hook, and the orchestrator to all be
+        valid callers of the same library.
+
+  uat: |
+    Goal: convince yourself that one CI run produces exactly one row per
+    story in `test_runs`, that Pass and Fail rows look right, and that
+    a malformed input does not corrupt an existing row.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status` and
+         confirm the working tree is clean.
+      2. Confirm at least two stories with executable acceptance tests
+         exist on disk (story 1 and story 2 themselves do not yet —
+         pick two whose tests are wired up by the time you run this).
+         If only one such story exists, this UAT cannot exercise the
+         "one row per story" property; stop and note in the report.
+      3. Confirm `agentic-store` is reachable and contains no prior
+         `test_runs` rows for the chosen story ids (drop and recreate
+         the local DB if needed; UAT signings are not affected).
+
+    Pass walkthrough:
+      4. Run the CI hook for a story `<pass-id>` whose tests pass. This
+         is `agentic ci record <pass-id>` (or whatever the CI shim is
+         named). Observe:
+         - Process exits 0.
+         - Query `test_runs` for `story_id=<pass-id>` (use the
+           dashboard `--json` mode from story 3, or a `surreal sql`
+           shell). Exactly one row exists. `verdict=pass`,
+           `failing_tests=[]`, `commit` matches `git rev-parse HEAD`,
+           `ran_at` is within the last minute.
+
+    Fail walkthrough:
+      5. For a different story `<fail-id>`, deliberately break two of
+         its acceptance test files (e.g. `assert_eq!(1, 2);`). Commit
+         those changes so the tree is clean. Run
+         `agentic ci record <fail-id>`. Observe:
+         - Process exits non-zero (the recorder records the failure
+           but propagates the underlying test runner's non-zero exit
+           so CI itself goes red).
+         - Query `test_runs` for `story_id=<fail-id>`: exactly one
+           row, `verdict=fail`, `failing_tests` lists the two broken
+           test file basenames in some order, `commit` matches HEAD.
+
+    Replace-not-append walkthrough:
+      6. Revert the deliberate breakage from step 5 with
+         `git revert <hash>`. Re-run `agentic ci record <fail-id>`.
+         Observe:
+         - Query `test_runs` for `story_id=<fail-id>`: still exactly
+           one row, but now `verdict=pass` and `failing_tests=[]`.
+           The earlier Fail row is gone, not preserved alongside.
+
+    Malformed-input walkthrough:
+      7. Capture a Pass row state for `<pass-id>` (note its
+         `commit` and `ran_at`). Then run the recorder with input
+         that simulates a corrupted test-runner output — the exact
+         mechanism depends on the implementation, but a supported
+         path is `agentic ci record <pass-id> --raw-input /dev/null`
+         or piping empty JSON into the input flag. Observe:
+         - Process exits non-zero with a message naming the
+           malformed-input failure mode.
+         - Query `test_runs` for `story_id=<pass-id>`: the row is
+           UNCHANGED — same `commit`, same `ran_at`, same
+           `verdict=pass`. The bad input did not overwrite the
+           good row.
+
+    Cleanup:
+      8. `git restore` and/or `git revert` any commits you made to
+         introduce test failures. Confirm `git status` is clean.
+      9. If you want a pristine `test_runs` table, drop and recreate
+         the local store DB. The `uat_signings` table from story 1
+         is independent and not affected.
+
+guidance: |
+  This story's recorder is the writer side of the continuous test-
+  health bookkeeping. The reader side is story 3's dashboard. The
+  UAT promotion gate (story 1) is independent and writes to a
+  different table.
+
+  Architectural boundary — see the standalone-resilient-library
+  pattern. Allowed dependencies for `agentic-ci-record`:
+  `agentic-store`, `agentic-events`, `git2`. Forbidden: anything
+  in `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`,
+  or the CLI crate. The standalone-resilience test enforces this.
+  The CI hook itself is a thin caller that reads a test-runner's
+  output, parses it into the recorder's input type, and calls
+  `Recorder::record`.
+
+  `test_runs` row contract.
+    Schemaless table per ADR-0002. Upsert by `story_id` (which is
+    the primary key). Minimum fields:
+      - `story_id`: integer, the primary key.
+      - `verdict`: `"pass"` | `"fail"` (lowercase string).
+      - `commit`: full git SHA of HEAD at recording time.
+      - `ran_at`: RFC3339 UTC timestamp of when the run completed.
+      - `failing_tests`: array of strings. Empty `[]` on Pass.
+        On Fail, populated with test file BASENAMES (not paths,
+        not stripped of extension). E.g.
+        `["uat_pass.rs", "record_fail.rs"]`. Basename keeps the
+        dashboard column readable while still uniquely
+        identifying the file within its crate (collisions across
+        crates are tolerated for now; if they become a problem
+        we'll switch to `<crate>::<basename>` and the dashboard
+        formatting in story 3 changes accordingly — record this
+        when it happens).
+
+  Upsert semantics.
+    The recorder upserts on `story_id`. There is no history; the
+    old row is replaced atomically. We deliberately do NOT keep
+    a per-run history table here — that would grow unboundedly
+    and the dashboard does not need it. If we ever want
+    historical trend data, that is a separate later story with
+    its own table and its own retention policy.
+
+  Malformed-input contract.
+    The recorder validates its input BEFORE touching the store.
+    Validation checks: the test-runner output parses, every
+    reported failure has a non-empty file path, the verdict is
+    one of `pass` | `fail`. On any validation failure return
+    `RecordError::MalformedInput` with the offending field
+    named, do not open a write transaction, do not modify any
+    row. This is what makes "malformed input doesn't corrupt
+    an existing row" a write-time invariant rather than a
+    hope.
+
+  Future direction — store location.
+    The `agentic-store` ADR currently mandates local SurrealDB
+    embedded. A later phase moves the store to a cloud target.
+    The recorder should not assume local-only — i.e. do not
+    hard-code filesystem paths inside the recorder; route all
+    access through the `Store` trait so the cloud swap is a
+    configuration change rather than a code change. Do not
+    pre-build cloud sync logic in this story; just keep the
+    door open.
+
+  Test file locations.
+    All five tests live under `crates/agentic-ci-record/tests/`
+    as Rust integration tests. They use the `MemStore` impl
+    from `agentic-store` (no real DB), construct a temporary
+    git repo via `tempfile` + `git2`, and invoke the library
+    directly. None of them shell out to the top-level
+    `agentic` binary or to the CI shim.
+
+  Relationship to story 1.
+    Story 1 writes to `uat_signings`. This story writes to
+    `test_runs`. The two tables are independent at the storage
+    layer; the join happens in story 3's dashboard. There is
+    no runtime ordering constraint — recording a test result
+    neither requires nor invalidates a prior UAT signing.
+
+depends_on: []

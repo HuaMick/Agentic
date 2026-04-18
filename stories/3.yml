@@ -1,0 +1,325 @@
+id: 3
+title: "Render the four-status story-health dashboard"
+
+outcome: |
+  A developer runs `agentic stories health` and sees a single table
+  showing every story's current health so unhealthy stories cannot hide
+  behind unrelated work.
+
+status: proposed
+
+patterns: []
+
+acceptance:
+  tests:
+    - file: crates/agentic-dashboard/tests/health_proposed.rs
+      justification: |
+        Proves the proposed-classification rule: a story whose YAML
+        has `status: proposed` renders as `proposed` in the table
+        regardless of whether any `test_runs` or `uat_signings` rows
+        exist for it. Without this, recording a test result for a
+        story we haven't started would inadvertently promote it past
+        the proposed gate.
+
+    - file: crates/agentic-dashboard/tests/health_under_construction.rs
+      justification: |
+        Proves the under-construction rule: a story whose YAML has
+        `status: under_construction` AND has never had a
+        `uat_signings.verdict=pass` row renders as `under_construction`,
+        whether `test_runs` is currently pass, fail, or absent.
+        Without this, a never-passed story whose tests happen to be
+        red would be misreported as "fell from grace" — but it never
+        rose in the first place.
+
+    - file: crates/agentic-dashboard/tests/health_healthy.rs
+      justification: |
+        Proves the healthy-classification rule: a story whose YAML
+        has `status: healthy`, whose latest `uat_signings.verdict=pass`
+        commit equals current HEAD, AND whose latest
+        `test_runs.verdict=pass`, renders as `healthy` with a
+        `Healthy at` cell showing the short SHA and a relative age
+        ("3h ago"). Without this the only path to `healthy` (story 1)
+        produces no observable signal in the dashboard.
+
+    - file: crates/agentic-dashboard/tests/health_unhealthy_fell_from_grace.rs
+      justification: |
+        Proves the fell-from-grace rule under both triggers: (a) a
+        story with a historical `uat_signings.verdict=pass` whose
+        latest `test_runs.verdict=fail` renders as `unhealthy`, AND
+        (b) a story with a historical UAT pass whose latest UAT
+        commit no longer equals HEAD also renders as `unhealthy`.
+        The `Failing tests` cell is populated from `test_runs.failing_tests`.
+        Without this the whole point of the dashboard — surfacing
+        was-healthy-now-broken — is missing.
+
+    - file: crates/agentic-dashboard/tests/health_sort_and_truncation.rs
+      justification: |
+        Proves rendering correctness independent of classification:
+        rows sort `unhealthy` → `under_construction` → `proposed` →
+        `healthy`, titles longer than the truncation limit (~35
+        chars) are truncated with an ellipsis, and the `Failing tests`
+        cell is empty for `proposed` and `healthy` rows. Without this
+        the most-important rows (unhealthy) can sink below noise and
+        long titles can break terminal layouts.
+
+    - file: crates/agentic-dashboard/tests/health_json_mode.rs
+      justification: |
+        Proves the `--json` contract: emits an object with
+        `stories[]` and `summary{}` keys, includes FULL commit SHAs
+        (not truncated), preserves the same data as the table mode,
+        and is parseable by `serde_json` round-trip. Without this
+        downstream tooling (CI status checks, future web UI) cannot
+        consume the dashboard programmatically without scraping the
+        TTY output.
+
+    - file: crates/agentic-dashboard/tests/health_drilldown.rs
+      justification: |
+        Proves the single-story drill-down: `agentic stories health <id>`
+        returns an expanded view including the list of currently
+        failing test file basenames (when unhealthy) and the latest
+        signing's commit and timestamp. Without this an operator
+        sees `unhealthy` in the table but has no path from there to
+        "which test, which commit?" without leaving the tool.
+
+    - file: crates/agentic-dashboard/tests/health_malformed_yaml_renders_error_row.rs
+      justification: |
+        Proves the dashboard does not crash on bad input: given one
+        story file that fails YAML parse or schema validation, the
+        dashboard renders that story's row with health `error` and
+        a short reason in the `Failing tests` cell, AND continues to
+        render every other story correctly. Without this, a single
+        malformed story file would blank the entire dashboard —
+        making the worst case (we can't see what's broken) coincide
+        with the moment we most need to see what's broken.
+
+  uat: |
+    Goal: convince yourself the dashboard correctly classifies the four
+    statuses, surfaces `unhealthy` first, drills down on a specific
+    story, and refuses to crash when one story file is malformed.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status` and
+         confirm the working tree is clean.
+      2. Confirm at least four stories exist on disk so the table has
+         visible variety. If fewer exist, this UAT can still run but
+         only some classifications will be observable; note in the
+         report which were exercised.
+      3. Confirm `agentic-store` is reachable. Drop and recreate the
+         local DB so `test_runs` and `uat_signings` start empty.
+
+    Four-status walkthrough:
+      4. Set up four stories such that one matches each classification:
+         - `<proposed-id>`: leave `status: proposed` on disk; do not
+           record any test runs or signings.
+         - `<uc-id>`: edit `status: under_construction` on disk; record
+           a Pass `test_runs` row for it via story 2's recorder.
+         - `<healthy-id>`: drive it through `agentic uat <healthy-id>`
+           (story 1) so `status: healthy` is on disk and a
+           `uat_signings.verdict=pass` row exists at HEAD; also record
+           a Pass `test_runs` row.
+         - `<unhealthy-id>`: drive it through `agentic uat <unhealthy-id>`
+           on commit `C1`, then make a code change and commit as `C2`,
+           then break one of its acceptance tests and record a Fail
+           `test_runs` row at `C2`. (You may also exercise the second
+           trigger — UAT commit != HEAD without test failure — by
+           making a no-op commit instead of breaking a test.)
+      5. Run `agentic stories health`. Observe:
+         - Output is a single table with a header row matching:
+           `ID | Title | Health | Failing tests | Healthy at`.
+         - Row order: `<unhealthy-id>` first, then `<uc-id>`, then
+           `<proposed-id>`, then `<healthy-id>`.
+         - `<healthy-id>`'s `Healthy at` cell shows a 7-char SHA and
+           a relative age string ("just now", "5m ago", etc.).
+         - `<unhealthy-id>`'s `Failing tests` cell shows the broken
+           test file's basename.
+         - `<proposed-id>`'s and `<healthy-id>`'s `Failing tests`
+           cells are empty.
+         - Any title longer than the truncation limit appears
+           truncated with an ellipsis; no row wraps onto two lines.
+
+    Drill-down walkthrough:
+      6. Run `agentic stories health <unhealthy-id>`. Observe:
+         - Output is an expanded single-story view, NOT the table.
+         - It names every failing test file's basename.
+         - It shows the latest UAT signing's commit (full or short
+           is acceptable as long as it's unambiguous in this view)
+           and timestamp.
+
+    JSON walkthrough:
+      7. Run `agentic stories health --json | jq .`. Observe:
+         - Output parses as JSON.
+         - Top-level keys include `stories` (array) and `summary`
+           (object).
+         - Commit fields are FULL SHAs (40 hex chars), not the
+           truncated form shown in the table.
+         - Counts under `summary` add up: number of `unhealthy` +
+           `under_construction` + `proposed` + `healthy` (+ any
+           `error` rows) equals the length of `stories`.
+
+    Malformed-yaml walkthrough:
+      8. Pick a story id `<bad-id>` that you do NOT mind temporarily
+         corrupting (or copy a valid story to `stories/9999.yml`
+         first to avoid risking real content). Edit it to be invalid
+         YAML (e.g. unbalanced quotes) or invalid against the schema
+         (e.g. `status: nonsense`). Save. Run `agentic stories health`.
+         Observe:
+         - Process exits 0 (the dashboard does NOT crash on one bad
+           file).
+         - The `<bad-id>` row appears with `Health` = `error` and a
+           short reason in the `Failing tests` cell ("yaml parse" or
+           "schema: status").
+         - Every OTHER story still renders correctly.
+
+    Cleanup:
+      9. Revert the corrupted file from step 8 (`git checkout
+         stories/<bad-id>.yml` or delete the throwaway `9999.yml`).
+      10. Revert any `status: under_construction` / `status: healthy`
+          edits you made for step 4 if you do not want to keep them.
+      11. Drop and recreate the local store DB to clear the
+          synthetic `test_runs` and `uat_signings` rows.
+
+guidance: |
+  This story owns the read-side of the four-status model. It does not
+  write to `test_runs` (story 2 owns that), it does not write to
+  `uat_signings` and it does not promote any story (story 1 owns that).
+  The dashboard is a pure reader.
+
+  Why no standalone-resilient-library pattern.
+    The `standalone-resilient-library` pattern applies when "the system
+    is in flames and we still need a verdict." The dashboard is the
+    opposite: when the store is unreachable, the right behavior is to
+    fail loudly with a clear error, not to produce a degraded reading
+    that an operator might misinterpret. So the dashboard is allowed
+    to depend on whatever it needs to render well.
+
+  Health computation rules — the four cases.
+    Compute per story by joining its YAML against the latest
+    `test_runs` row (one per story) and the full `uat_signings`
+    history for that story (append-only). The rules:
+
+      - `proposed` ⇔ `story.status == proposed`. (No store lookup
+        needed; the YAML wins.)
+
+      - `under_construction` ⇔ `story.status == under_construction`
+        AND no historical `uat_signings.verdict == pass` exists for
+        this story_id. A story that has never been UAT-passed cannot
+        "fall from grace"; it just hasn't risen yet.
+
+      - `healthy` ⇔ latest `uat_signings.verdict == pass` for this
+        story AND latest `test_runs.verdict == pass` AND the latest
+        UAT signing's commit == current HEAD. Strict equality on the
+        commit is intentional for now; a future story may relax this
+        to "HEAD touches no related files" once stories declare
+        `related_files`. Encode the strict rule today; the relaxation
+        is a separate later story.
+
+      - `unhealthy` ⇔ any historical `uat_signings.verdict == pass`
+        exists for this story AND (latest `test_runs.verdict == fail`
+        OR latest UAT commit != current HEAD). This is the
+        "fell-from-grace" classifier. Note: a story missing from
+        `test_runs` entirely but with a healthy UAT against current
+        HEAD is `healthy` (test absence is not failure); a story
+        missing both rows is `under_construction` if its YAML says
+        so or `proposed` if its YAML says so.
+
+    A row that doesn't fit any of the above (e.g. YAML says
+    `healthy` but no UAT signing exists for it — which should be
+    structurally impossible after story 1 lands but is possible
+    today via hand-editing) renders as `error` with reason
+    "status-evidence mismatch". This is the same `error` rendering
+    used for malformed YAML.
+
+  Table format.
+    Columns in order: `ID | Title | Health | Failing tests | Healthy at`.
+    Sort: `unhealthy` first, then `under_construction`, then
+    `proposed`, then `healthy`. `error` rows sort to the very top
+    (above unhealthy) because they signal we cannot trust the rest
+    of the picture for that story. Within a status group, sort by
+    ascending story id for stable output.
+
+    `Title` truncates at ~35 visible chars with a single-character
+    ellipsis (`…`), not three dots, to keep column widths tight on
+    narrow terminals.
+
+    `Failing tests` is a comma-separated list of test file basenames
+    (matching the basenames written by story 2's recorder). Empty
+    for `proposed` and `healthy` rows. For `under_construction`
+    rows it shows the basenames if `test_runs.verdict == fail`,
+    otherwise empty. For `error` rows it shows the short reason
+    string.
+
+    `Healthy at` shows `<short-sha> <relative-age>` (e.g.
+    `a1b2c3d 3h ago`) only for `healthy` rows. Empty for all
+    other classifications. Relative age uses the same formatter
+    we'll standardize on across the CLI (rough buckets: just now,
+    Nm ago, Nh ago, Nd ago); precision finer than minute is
+    not useful here.
+
+  `--json` contract.
+    Top-level shape:
+      ```json
+      {
+        "stories": [
+          { "id": 1, "title": "...", "health": "healthy",
+            "failing_tests": [],
+            "uat_commit": "<full-40-char-sha>",
+            "uat_signed_at": "<rfc3339>",
+            "test_run_commit": "<full-40-char-sha>",
+            "test_run_at": "<rfc3339>" }
+        ],
+        "summary": {
+          "healthy": 0, "unhealthy": 0,
+          "under_construction": 0, "proposed": 0, "error": 0,
+          "total": 0
+        }
+      }
+      ```
+    Full SHAs (not short) so downstream tooling can match exactly.
+    Null-able fields (uat_*, test_run_*) are emitted as JSON null
+    when absent rather than omitted, so consumers don't have to
+    distinguish "missing key" from "key with null value."
+
+  Drill-down: `agentic stories health <id>`.
+    When called with an id, the dashboard renders an expanded
+    single-story view instead of the table. Includes: every field
+    shown in the table for that story, the full commit SHA of the
+    latest UAT signing, the full RFC3339 timestamp, the full list
+    of failing test basenames (no truncation), and the relevant
+    block of the story YAML's `outcome` field for context.
+    Unknown id → exit non-zero with "no such story id" — distinct
+    from "story exists but is in error state".
+
+  Failure modes the dashboard tolerates.
+    A single malformed story YAML must not crash the dashboard.
+    Implementation: parse stories one at a time, catch parse and
+    schema errors per file, render that story as an `error` row
+    with the short reason in `Failing tests`, and continue. Never
+    swallow the original error silently — when `--json` is set,
+    the per-story object includes a `parse_error` field with the
+    full message; in the table view it's truncated to fit.
+
+    Failure modes the dashboard does NOT tolerate (it's allowed to
+    fail loudly): the `agentic-store` is unreachable, the
+    `stories/` directory does not exist, the user passed an
+    unparseable flag. Exit non-zero with a clear message; the
+    dashboard's job is to report the truth, and the truth is
+    sometimes "I can't read the data."
+
+  Test file locations.
+    All eight tests live under `crates/agentic-dashboard/tests/`
+    as Rust integration tests. They use the `MemStore` impl from
+    `agentic-store`, seed it with synthetic `test_runs` and
+    `uat_signings` rows, point the dashboard at a temporary
+    `stories/` directory with fixture YAMLs, and assert on the
+    rendered string (table mode) or the parsed JSON value (json
+    mode). They do not shell out to the top-level binary.
+
+  Relationship to stories 1 and 2.
+    This story READS what stories 1 and 2 write. It does not
+    require either to exist as code at the moment of authoring —
+    the row contracts in stories 1 and 2 are sufficient to write
+    these tests against `MemStore`. At runtime, however, the
+    dashboard is only useful once stories 1 and 2 have shipped.
+    `depends_on` therefore lists both.
+
+depends_on: [1, 2]

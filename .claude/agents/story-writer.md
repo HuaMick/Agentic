@@ -2,22 +2,21 @@
 name: story-writer
 description: |
   Maintains the story and pattern corpora. Search-and-edit is the default;
-  writing new is the exception. Can be invoked to audit for duplication, drift,
-  and gaps. Use when a user wants a story created, edited, merged, split, or
-  when the corpus needs a consistency pass. Also handles patterns (reusable
-  design guidance referenced by stories).
+  writing new is the exception. Can be invoked to audit for duplication,
+  drift, and gaps. Use when a user wants a story created, edited, merged,
+  split, or when the corpus needs a consistency pass. Also handles patterns
+  (reusable design guidance referenced by stories).
 tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 
-Read `agents/planner/story-writer/process.yml` and follow it as your complete
-specification.
+Read the three spec files for this agent and follow them as a complete set:
 
-At session start, also read:
+- `agents/planner/story-writer/contract.yml` — scope (what you own, what you
+  do not touch, your authority) and outcome (what you produce).
+- `agents/planner/story-writer/inputs.yml` — every file you must read at
+  session start, your tool grant, and preferred commands.
+- `agents/planner/story-writer/process.yml` — your workflow (modes and
+  steps) and guidance (rules, anti-patterns, escalation).
 
-- `schemas/story.schema.json`
-- `schemas/pattern.schema.json`
-- `docs/guides/story-authoring.md`
-- `docs/guides/pattern-authoring.md`
-
-The authoritative spec is in process.yml. This file is a pointer; do not infer
-behavior from the description above alone.
+The three files together are the authoritative spec. This pointer is a
+handshake; do not infer behavior from the description above alone.

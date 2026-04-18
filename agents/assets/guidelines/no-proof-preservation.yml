@@ -1,0 +1,44 @@
+name: no-proof-preservation
+description: |
+  Some artifacts in this system (stories, agent specs) carry a status or a
+  verdict that was expensive to earn — a story reached `healthy`, an agent
+  spec passed an audit. The temptation, when editing, is to tiptoe around
+  fields so the existing status is not disturbed. That is proof
+  preservation, and it is banned. The system is designed to re-verify; an
+  edit that degrades status is a feature, not a bug.
+
+anti_pattern: |
+  Proof-preservation edits — tiptoeing around fields, softening prose, or
+  refusing to correct a genuinely wrong line because doing so would
+  invalidate a previously issued verdict (story `healthy`, agent audit
+  pass, or any similar gate). If the edit is correct, ship it; the
+  verification layer will re-run and re-issue the verdict. Tiptoeing is
+  how incorrect content survives.
+
+rationale:
+  - Verdicts are cheap to re-issue. The verification layer (`agentic-verify`,
+    audits, CI) exists so that status can be recomputed on demand.
+  - A proof-preserving edit leaves the artifact wrong AND the verdict
+    untrustworthy, because the verdict now attests to text that has been
+    softened to avoid invalidating it. Two falsehoods, not one.
+  - The honest path is to make the correct edit, accept the status
+    regression, and let the next verification pass promote it again
+    (or not, if the edit actually broke something real).
+
+scope_hint: |
+  The flavour of "proof" differs per curator. Story-writer guards against
+  preserving a story's `healthy` status. Guidance-writer guards against
+  preserving any audited agent-spec state. Both reduce to the same rule:
+  correctness beats preserved verdict. Referencing agents may add a short
+  parenthetical naming their specific flavour; they must not contradict
+  this core.
+
+reference_pattern:
+  in_process_yml: |
+    Under guidance.anti_patterns, write a single-line entry that points here:
+      - See agents/assets/guidelines/no-proof-preservation.yml.
+    Do not restate the anti-pattern inline.
+
+current_consumers:
+  - agents/planner/story-writer/process.yml
+  - agents/teacher/guidance-writer/process.yml

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic.dev/schemas/agent-contract.schema.json",
+  "title": "AgentContract",
+  "description": "The scope-and-outcome contract for an agent. Lives at agents/<category>/<name>/contract.yml. Answers: what is this agent for, what can it write, what is forbidden, and what does it produce.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scope", "outcome"],
+  "properties": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "category", "version", "purpose", "owns", "does_not_touch"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Agent slug. Must match the parent directory name (agents/<category>/<name>/) and the corresponding .claude/agents/<name>.md pointer."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["orchestration", "planner", "build", "test", "teacher"],
+          "description": "Parent category. Must match the directory under agents/ that contains this agent."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "SemVer. Bump on contract-shape changes."
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-line answer to 'what is this agent for?' Used by routers and humans to decide whether to spawn this agent."
+        },
+        "owns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Artifact path patterns the agent may write or modify. Globs allowed (e.g. 'stories/*.yml', 'crates/<name>/src/**')."
+        },
+        "does_not_touch": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Explicit forbid list. Paths the agent must never write, even though other agents might. Empty array is permitted but agents SHOULD specify — implicit forbids become slop."
+        },
+        "authority": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Special permissions that qualify `owns` (e.g. 'may flip story.status from proposed to under_construction but no further')."
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outputs"],
+      "properties": {
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "description"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["file", "directory", "status_update", "summary", "plan", "code"],
+                "description": "Shape of this output."
+              },
+              "path": {
+                "type": "string",
+                "description": "For file/directory/code/status_update outputs: the path pattern (e.g. 'stories/<id>.yml')."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "description": "Every kind of output the agent produces in a successful run."
+        },
+        "success_criteria": {
+          "type": "string",
+          "description": "Optional: plain-English statement of what 'done' looks like, beyond the per-output description."
+        }
+      }
+    }
+  }
+}
