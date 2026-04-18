@@ -41,6 +41,13 @@ dependencies = [
 [[package]]
 name = "agentic-uat"
 version = "0.1.0"
+dependencies = [
+ "agentic-store",
+ "agentic-story",
+ "git2",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "ahash"

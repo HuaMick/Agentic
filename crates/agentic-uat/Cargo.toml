@@ -4,3 +4,33 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dev-dependencies]
+# Story 1: integration tests drive the `Uat` library directly against an
+# in-memory `Store` to avoid a real DB. `MemStore` is the canonical test
+# fixture for `agentic-store` consumers (see crates/agentic-store/tests/*.rs).
+agentic-store = { path = "../agentic-store" }
+
+# Story 1: tests load story fixtures through the real `StoryLoader` so the
+# scaffolds exercise the same parse path the library will — no bespoke
+# story-YAML parsing in the tests themselves.
+agentic-story = { path = "../agentic-story" }
+
+# Story 1: `uat_signings` rows are read back from the in-memory store as
+# `serde_json::Value`; tests assert the exact field shape named in the
+# story's guidance (`id`, `story_id`, `verdict`, `commit`, `signed_at`).
+serde_json.workspace = true
+
+# Story 1: every test roots its fixture stories at a `TempDir` so the live
+# `stories/` directory at repo root is never mutated. Matches the fixture
+# idiom used by `agentic-story`'s own tests.
+tempfile.workspace = true
+
+# Story 1: the tests init a minimal git repo inside the `TempDir`, commit a
+# seed, and (for the dirty-tree scaffold) leave an uncommitted change, so
+# the fail-closed contract can be exercised without touching the real repo
+# the test suite runs inside. `git2` is already the workspace choice of
+# libgit2 binding (see crates/agentic-ci-record/Cargo.toml); pinned to the
+# same version and with `default-features = false` for the same reason
+# named there.
+git2 = { version = "0.19", default-features = false }
