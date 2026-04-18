@@ -6,7 +6,7 @@ outcome: |
   commit-signed Pass or Fail verdict that is the only path by which a
   story's status on disk becomes `healthy`.
 
-status: proposed
+status: under_construction
 
 patterns:
   - standalone-resilient-library

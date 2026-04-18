@@ -5,6 +5,38 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[dependencies]
+# Story 1: UAT writes `uat_signings` rows and reads stories through the
+# `Store` trait. ADR-0002 pins schemaless document writes through this
+# crate; we never touch a DB backend directly.
+agentic-store = { path = "../agentic-store" }
+
+# Story 1: the library loads `stories/<id>.yml` through the real
+# `StoryLoader` so the parse shape is shared with every other consumer
+# and UnknownStory is a typed outcome of the same path story 6 defined.
+agentic-story = { path = "../agentic-story" }
+
+# Story 1: `commit` on a `uat_signings` row is the full SHA of HEAD at
+# signing time; the fail-closed-on-dirty-tree gate is also a `git2`
+# `statuses()` query. Same pin as `agentic-ci-record` (story 2).
+git2 = { version = "0.19", default-features = false }
+
+# Story 1: signing rows are schemaless JSON documents handed to
+# `Store::append`; matches the shape every other store consumer uses.
+serde_json.workspace = true
+
+# Story 1: the promotion rewrite parses `stories/<id>.yml` through
+# `serde_yaml` to locate the `status:` line; the library writes back a
+# surgical line-level edit to preserve every other field (block scalars,
+# comments, key order) as the story's promotion contract requires.
+serde_yaml.workspace = true
+
+# Story 1: each signing row carries a time-sortable `id`. UUIDv7 is the
+# simplest way to get one without pulling a separate ULID crate; the
+# `v7` feature enables the timestamp-based variant. `std` is the
+# default RNG source for `Uuid::now_v7()`.
+uuid = { version = "1", features = ["v7"] }
+
 [dev-dependencies]
 # Story 1: integration tests drive the `Uat` library directly against an
 # in-memory `Store` to avoid a real DB. `MemStore` is the canonical test
