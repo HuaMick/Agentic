@@ -32,34 +32,55 @@ workflow:
         For each SCAFFOLD entry, create the file. For a `crates/*/tests/*.rs`
         path, write a Rust integration test whose single `#[test]` function
         is named from a snake_case reduction of the first sentence of the
-        justification, and whose body is:
-            panic!("red: {first-line-of-justification}");
-        preceded by any setup comments inferred from the justification. The
-        scaffold must compile — prefer `panic!(..)` over `unimplemented!()`
-        so the failure is reportable and deliberate, not an accident of
-        missing trait bounds. For a `scripts/verify/*.sh` path, write a
-        POSIX-sh file that prints the justification's first line to stderr
-        and exits 1.
-        Never add a `#[ignore]` attribute. Never add `assert!(true)`. A
-        scaffold that passes is a defect.
-
-    - step: Prove compilation.
-      detail: |
-        Run `cargo check --workspace --tests`. If it fails, the shape of
-        the scaffold is wrong — the crate's `tests/` directory may need a
-        different module layout, or a dev-dependency is genuinely missing.
-        If missing dev-dependency, STOP and escalate (you may not add it).
-        Otherwise fix the scaffold shape and re-check. Do not proceed to
-        evidence until `cargo check` is clean.
+        justification. The body is the real test: real setup, real
+        assertions derived from the justification — no trailing `panic!`
+        guard, no `unimplemented!()` stub, no unreachable guard, no
+        `assert!(true)` contrivance. The test reads as the test it will be
+        once the implementation lands.
+        Red comes from one of two natural paths — pick whichever the story
+        produces:
+          - Compile-red: the scaffold imports a type, function, or module
+            that does not yet exist (the common case for new types — the
+            crate's `src/` does not yet declare them, so `cargo check`
+            fails with a rustc error). Valid red.
+          - Runtime-red: the scaffold compiles (the types exist, a new
+            capability is being added) but an assertion evaluates false,
+            or a method panics because its behaviour is unimplemented.
+            `cargo test` runs and the test fails on its own merits. Valid
+            red.
+        For a `scripts/verify/*.sh` path, write a POSIX-sh file whose body
+        invokes the real check the justification names; it exits non-zero
+        because the artefact under test is missing or wrong, not because
+        of an unconditional `exit 1`.
+        Never add a `#[ignore]` attribute. Never add `assert!(true)`.
+        Never add a trailing `panic!("red: ...")` after assertions — that
+        renders the test uncodifiable. A scaffold that passes on a fresh
+        checkout is a defect.
 
     - step: Prove red state.
       detail: |
-        For each freshly written Rust scaffold, run
-        `cargo test --package <crate> --test <test> -- --nocapture`. Confirm
-        each one fails. Capture the first line of the panic message as the
-        scaffold's diagnostic. For each shell scaffold, run `bash <path>`
-        and confirm non-zero exit plus the expected stderr line.
-        A scaffold that passes is a defect — stop and diagnose; do not
+        Either red path (compile-red or runtime-red) is a valid red
+        observation. Per Rust scaffold, run `cargo check --workspace --tests`
+        first.
+          - If `cargo check` fails: the scaffold is compile-red. Capture
+            the first line of the rustc error (typically
+            `error[EXXXX]: <summary>`, or the first `error: ...` line if
+            unnumbered) as the scaffold's diagnostic. Confirm the failure
+            attributes to a missing symbol the scaffold references, not
+            to an unrelated crate-level breakage — if the latter, STOP
+            and escalate (the failure is not yours to claim as red
+            evidence). If a dev-dependency is the genuine missing piece,
+            STOP and escalate (you may not add it).
+          - If `cargo check` succeeds: the scaffold must be runtime-red.
+            Run `cargo test --package <crate> --test <test> -- --nocapture`
+            and confirm it fails. Capture the first line of the panic
+            message as the scaffold's diagnostic.
+        For each shell scaffold, run `bash <path>` and confirm non-zero
+        exit; capture the first line of stderr as the diagnostic.
+        Record per scaffold which red path applied (`compile` or `runtime`
+        for Rust; shell scaffolds always behave like runtime).
+        A scaffold that passes — Rust compiling AND test running green,
+        or shell exiting zero — is a defect. Stop and diagnose; do not
         record evidence for a green scaffold.
 
     - step: Record red-state evidence.
@@ -74,12 +95,12 @@ workflow:
              "commit": "<hex>",
              "timestamp": "<iso-8601>",
              "verdicts": [
-               {"file": "<path>", "verdict": "red", "diagnostic": "<first-panic-line>"},
+               {"file": "<path>", "verdict": "red", "red_path": "compile|runtime", "diagnostic": "<first-error-or-panic-line>"},
                ...
              ]}
         The file name is new per run; do not overwrite a prior red-state
         artefact. Preserved entries appear in the verdicts array with
-        `"verdict": "preserved"` and no diagnostic.
+        `"verdict": "preserved"` and no `red_path` or `diagnostic` field.
 
     - step: Stop.
       detail: |
@@ -92,11 +113,11 @@ guidance:
   rules:
     - The first observable check of every session is `git status --porcelain`. Non-empty output is a fail-closed condition — the red-state record is only meaningful if it is a committable atomic, and a dirty tree forfeits that claim.
     - Read each file listed in required_reading every session. See agents/assets/definitions/session-start-memory.yml.
-    - A scaffold that does not fail is a defect. Never suppress with `#[ignore]`, `#[cfg(..)]`, `assert!(true)`, or unreachable code guards.
+    - "A scaffold that does not fail is a defect. Never suppress with `#[ignore]`, `#[cfg(..)]`, `assert!(true)`, unreachable code guards, or a trailing `panic!(\"red: ...\")` after real assertions (the trailing-panic pattern is what makes a scaffold uncodifiable — even a perfect implementation cannot make it stop firing)."
     - Never edit an existing test file. An acceptance.tests[].file that already has content is preserved and reported — it is not your authority to re-redden what the implementer has already worked on.
     - Never write production source. `crates/*/src/**` is explicitly forbidden in contract.yml and that is the whole point of this agent — authoring tests without being able to make them pass.
     - Never add a dev-dependency. If a scaffold genuinely needs one, escalate. Do not edit `Cargo.toml` under any pretext.
-    - A test's name and its panic message both derive from the acceptance.tests[].justification. The goal is that a failed test run reads the justification back to a human with no extra context — that is what makes red-state evidence self-describing.
+    - The test's name and its red-state diagnostic (panic message for runtime-red, compile error for compile-red) both derive from the acceptance.tests[].justification. The goal is that a failed test run reads the justification back to a human with no extra context — that is what makes red-state evidence self-describing.
     - "Preserved entries still appear in the red-state evidence file, with `verdict: preserved`. Build-rust and `agentic uat` need to see the full shape of the acceptance.tests[] array, not only the subset you wrote."
     - name: pre-adr-0005-scaffolds
       detail: |
@@ -112,11 +133,12 @@ guidance:
     - Writing any file under `crates/*/src/**`. That crosses the red-green line and the whole contract collapses.
     - Adding `#[ignore]` or `#[cfg(all(test, never))]` to a scaffold "just to make cargo check quiet." The scaffold must fail when run; muting it is the legacy failure mode in a new skin.
     - Using `assert!(true)` or `#[test] fn _() {}` as a placeholder. A scaffold is not a placeholder — it is the red evidence.
+    - "Appending a trailing `panic!(\"red: ...\")` after real assertions in a scaffold. The trailing panic guarantees the test stays red even after a correct implementation lands, which makes the scaffold uncodifiable. Red comes from the natural failure path (compile error or assertion failure), not from a guard."
     - Overwriting an existing test file because "mine is better." Existing content is preserved without inspection; improvements are a story-writer concern.
     - Deriving a test name from the file path instead of the justification. The justification is the contract; the path is a location.
     - Adding a dev-dependency to make a scaffold compile. Escalate instead; dev-dependency choices belong to build-rust or an ADR.
     - Skipping the `git status --porcelain` precheck. Red-state evidence on a dirty tree is forgeable and the whole artefact is then worthless.
-    - Recording red-state evidence for a scaffold you did not actually run. Every verdict row corresponds to a real `cargo test` or `bash` invocation in this session.
+    - Recording red-state evidence for a scaffold you did not actually exercise. Every verdict row corresponds to a real `cargo check`, `cargo test`, or `bash` invocation in this session whose failure attributes to the scaffold under test.
     - Running `cargo test --workspace` to produce evidence. That is build-rust's baseline concern; you run each scaffold in isolation so per-test diagnostics are clean and attributable.
     - Writing the evidence file to a path other than `evidence/runs/<story-id>/<timestamp>-red.jsonl`. Downstream agents grep by that shape — deviating renames the handshake.
 
@@ -124,6 +146,6 @@ guidance:
     - "Dirty working tree detected: STOP. Report the paths with pending changes and wait. Do not run any further steps."
     - "Justification is thin (empty, a single token, or a TODO/TBD marker): STOP. Surface the offending test's index, file, and justification text to story-writer. Do not write any scaffolds for this story — the contract is that story-writer authors substantive justifications before test-builder runs."
     - "A scaffold requires a dev-dependency not already in the crate's Cargo.toml: STOP. Report the crate, the proposed dep, and the scaffold demanding it. Do not add it yourself."
-    - "`cargo check --workspace --tests` fails and the fix is not a scaffold-shape problem: STOP. Likely signals a crate-level issue that belongs to build-rust or a schema change."
-    - "A scaffold you just wrote passes when run: STOP. Diagnose — the justification may name a guarantee the existing code already satisfies, in which case the story either needs revision or the scaffold's observable is wrong. Do not record evidence until the scaffold fails deliberately."
+    - "`cargo check --workspace --tests` fails on a path the scaffold did not introduce — i.e. an unrelated crate-level breakage rather than a missing symbol the scaffold references: STOP. Likely signals a crate-level issue that belongs to build-rust or a schema change."
+    - "A scaffold you just wrote both compiles AND passes when run on a fresh checkout (or, for shell, exits zero): STOP. Diagnose — the justification may name a guarantee the existing code already satisfies, in which case the story either needs revision or the scaffold's observable is wrong. Do not record evidence until the scaffold fails deliberately via the natural compile-red or runtime-red path."
     - "An acceptance.tests[].file path falls outside `crates/*/tests/**` and `scripts/verify/**`: STOP. The path is outside this agent's authority. Surface to story-writer."

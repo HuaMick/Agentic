@@ -1,7 +1,7 @@
 scope:
   name: test-builder
   category: test
-  version: 0.1.0
+  version: 0.2.0
   purpose: |
     Writes the failing test scaffolds that a story's acceptance.tests[].file
     entries point at, and records the red-state evidence that proves the
@@ -38,18 +38,26 @@ outcome:
       path: crates/*/tests/<name>.rs, scripts/verify/<name>.sh
       description: |
         One failing test scaffold per missing acceptance.tests[].file entry.
-        Rust scaffolds compile cleanly under `cargo check --workspace` and
-        fail deterministically with a panic message that reads the test's
-        justification back to the reader. Shell scaffolds exit non-zero with
-        an analogous message.
+        Rust scaffolds are real tests with real assertions derived from the
+        justification; they fail deterministically on a fresh checkout via
+        either of two natural red paths:
+          - compile-red: scaffold imports a symbol that does not yet exist,
+            so `cargo check` fails with a rustc error;
+          - runtime-red: scaffold compiles but an assertion evaluates false
+            or a method panics because its behaviour is unimplemented.
+        No trailing `panic!` guard, no `assert!(true)`, no `#[ignore]`.
+        Shell scaffolds exit non-zero by exercising the artefact under test,
+        not via an unconditional `exit 1`.
     - kind: file
       path: evidence/runs/<story-id>/<timestamp>-red.jsonl
       description: |
         Append-only JSON-lines artefact recording the red-state run. One row
         with run_id (UUID v4), story_id, commit hash (HEAD on a clean tree),
         ISO-8601 timestamp, and per-test verdicts — each verdict keyed by
-        test file path with value `red` and a short diagnostic captured from
-        the scaffold's failing output.
+        test file path with value `red`, a `red_path` of `compile` or
+        `runtime`, and a short diagnostic captured from the scaffold's
+        failing output (first line of the rustc error for compile-red, first
+        line of the panic message for runtime-red).
     - kind: summary
       description: |
         Per-story report covering: which files were created, which were

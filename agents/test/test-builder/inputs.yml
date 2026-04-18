@@ -65,15 +65,17 @@ commands:
   - name: cargo-check-workspace
     invocation_example: cargo check --workspace --tests
     purpose: |
-      Confirm every scaffold compiles, including `tests/` targets. Run
-      after writing any Rust scaffold and before recording red-state
-      evidence — a scaffold that does not compile cannot prove anything
-      was red.
+      Probe each Rust scaffold's red state. A non-zero exit with a rustc
+      error attributable to a symbol the scaffold references is the
+      compile-red path — capture the first error line as the diagnostic
+      and proceed to evidence. A clean check means the scaffold must be
+      runtime-red; fall through to `cargo test` per scaffold.
   - name: cargo-test-single
     invocation_example: cargo test --package <crate> --test <test_file> -- --nocapture
     purpose: |
-      Run one scaffold in isolation to confirm it fails, capturing its
-      panic output for the evidence row's diagnostic field.
+      For runtime-red scaffolds (those that compile cleanly), run one in
+      isolation to confirm it fails, capturing its panic output for the
+      evidence row's diagnostic field.
   - name: git-status-porcelain
     invocation_example: git status --porcelain
     purpose: |
