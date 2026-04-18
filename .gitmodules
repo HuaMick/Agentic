@@ -1,3 +1,4 @@
 [submodule "legacy/AgenticEngineering"]
 	path = legacy/AgenticEngineering
 	url = https://github.com/HuaMick/AgenticEngineering.git
+	ignore = dirty
