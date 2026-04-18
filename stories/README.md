@@ -17,15 +17,17 @@ A unit of work defined by:
 ## Lifecycle
 
 ```
-proposed → under_construction → tested → healthy → deprecated → archived
-                ↓ (fail)                  ↑
-         stays under_construction   (manually deprecated after tested/healthy)
+proposed → under_construction → healthy
+                 ↑
+                 └── (edit invalidates proof, auto-revert)
 ```
 
-- Humans (and the story-writer agent) write `proposed`, `under_construction`, `deprecated`, `archived`.
-- Only `agentic-verify` writes `tested` (acceptance tests pass) and `healthy` (UAT journey passes).
+- `proposed` — default on new stories. Written by the story-writer agent or by humans.
+- `under_construction` — written by the implementing agent (`build-rust`) when it picks up a `proposed` story, or auto-reverted by the story-writer when an edit invalidates a prior Pass verdict.
+- `healthy` — written only by `agentic uat` on a Pass verdict.
+- `unhealthy` — computed by the dashboard from evidence signals; never written to disk.
 
-A story cannot transition to `tested` without a Pass verdict from `agentic-verify` including:
+A story cannot transition to `healthy` without a Pass verdict from `agentic uat` including:
 
 - A full git commit hash (clean working tree required).
 - A trace reference (the actual evidence file).

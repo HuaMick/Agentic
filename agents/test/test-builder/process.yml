@@ -97,7 +97,7 @@ guidance:
     - Never write production source. `crates/*/src/**` is explicitly forbidden in contract.yml and that is the whole point of this agent — authoring tests without being able to make them pass.
     - Never add a dev-dependency. If a scaffold genuinely needs one, escalate. Do not edit `Cargo.toml` under any pretext.
     - A test's name and its panic message both derive from the acceptance.tests[].justification. The goal is that a failed test run reads the justification back to a human with no extra context — that is what makes red-state evidence self-describing.
-    - Preserved entries still appear in the red-state evidence file, with `verdict: preserved`. Build-rust and `agentic uat` need to see the full shape of the acceptance.tests[] array, not only the subset you wrote.
+    - "Preserved entries still appear in the red-state evidence file, with `verdict: preserved`. Build-rust and `agentic uat` need to see the full shape of the acceptance.tests[] array, not only the subset you wrote."
     - name: pre-adr-0005-scaffolds
       detail: |
         Stories that were `under_construction` before ADR-0005 was accepted

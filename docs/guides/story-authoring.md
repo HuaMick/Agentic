@@ -30,12 +30,13 @@ Plain English. What value this delivers, who benefits, what's now possible. **Mu
 
 ### `status` — enum, required
 
-One of `proposed`, `under_construction`, `tested`, `healthy`, `deprecated`, `archived`.
+One of `proposed`, `under_construction`, `healthy`, `unhealthy`.
 
-Humans (and the story-writer agent) may write: `proposed`, `under_construction`, `deprecated`, `archived`.
-Only `agentic-verify` may write: `tested`, `healthy`.
+- `proposed` and `under_construction` may be written by the story-writer, by humans, or by `build-rust` (which is permitted the single flip `proposed → under_construction` on picking up a story).
+- `healthy` is written only by `agentic uat` on a Pass verdict.
+- `unhealthy` is computed by the dashboard from evidence signals and is never written to disk.
 
-Attempting to hand-write `tested` or `healthy` is rejected on commit via the audit.
+Attempting to hand-write `healthy` or `unhealthy` is rejected on commit via the audit.
 
 ### `patterns` — array of pattern IDs, required (default `[]`)
 
@@ -49,7 +50,7 @@ One or more entries of `{file, justification}`. A story has a one-to-many relati
 
 Each entry:
 
-- **`file`** — path to the test file, relative to repo root. Must exist (enforced at verify time). Test files live under `crates/*/tests/` (Rust integration tests) or `scripts/verify/` (shell-based). **1-to-1 binding:** each test file is referenced by exactly one story. When the story is archived, its tests go with it. Orphan tests (unreferenced by any story) are flagged by audit.
+- **`file`** — path to the test file, relative to repo root. Must exist (enforced at verify time). Test files live under `crates/*/tests/` (Rust integration tests) or `scripts/verify/` (shell-based). **1-to-1 binding:** each test file is referenced by exactly one story. If a story is removed, its tests are removed with it. Orphan tests (unreferenced by any story) are flagged by audit.
 - **`justification`** — what THIS specific test proves and why it's sufficient for its scope. Each test gets its own justification. No aggregate rationale across multiple tests.
 
 For a story with multiple tests, the set of tests together must cover the outcome; individually, each test's justification explains its slice.
@@ -86,7 +87,7 @@ The rebuild-from-scratch context. Non-obvious technical detail that an agent wou
 
 ### `depends_on` — array of integers, optional (default `[]`)
 
-Story IDs that must reach `tested` before this story can start. Cycles are rejected at load time. Unknown IDs are rejected at load time. Keep sparse.
+Story IDs that must reach `healthy` before this story can be marked `healthy`. Cycles are rejected at load time. Unknown IDs are rejected at load time. Keep sparse.
 
 ## Splitting rule
 
@@ -107,21 +108,18 @@ Story IDs that must reach `tested` before this story can start. Cycles are rejec
 ## Lifecycle in detail
 
 ```
-proposed ──────► under_construction ──┬─► tested ─────► healthy
-                                       │     │
-                                       └─────┴─► (edit invalidates, auto-revert to under_construction)
-                                                   │
-                                                   ▼
-                                                deprecated ──► archived
+proposed ──► under_construction ──► healthy
+                   ↑                    │
+                   │                    │
+                   └─ (edit invalidates proof, auto-revert) ─┘
 ```
 
 - Start state: `proposed` (file exists, nothing run).
-- First verify attempt (pass or fail) moves it to `under_construction`.
-- Pass → `tested`.
-- UAT pass (on a `tested` story) → `healthy`.
-- Editing `outcome`, `patterns`, `acceptance.tests`, `acceptance.uat`, or `guidance` invalidates proof. The story reverts to `under_construction` on the next audit.
+- `proposed → under_construction` is written by the implementing agent (`build-rust`) when it picks up a story; the story-writer may also flip to `under_construction` as an auto-revert when a proof-invalidating edit lands on a previously healthy story.
+- `under_construction → healthy` is written only by `agentic uat` on a Pass verdict with a clean working tree, a signed commit hash, and an evidence file.
+- Editing `outcome`, `patterns`, `acceptance.tests`, `acceptance.uat`, or `guidance` invalidates proof; a `healthy` story auto-reverts to `under_construction` on the next audit.
 - Editing a referenced pattern similarly invalidates all stories that reference it.
-- `deprecated` is manual. `archived` moves the file out of active `stories/` (kept for history).
+- `unhealthy` is a derived view (dashboard-computed from evidence). It signals "a recent run went red" or "proof hash no longer matches the story's content" and is never written to disk.
 
 ## Proof hash
 
@@ -151,5 +149,5 @@ agentic search <terms>                      # search stories by terms (bootstrap
 - **Aggregate test justification.** Each test in `acceptance.tests` gets its own justification. No "these tests together cover X."
 - **Optimistic UAT.** "Run the command. It should work." is not a UAT. Write observed checks.
 - **Orphan tests and UAT scripts.** Every test file and UAT script must be referenced by some story.
-- **Proof-preservation edits.** Don't tiptoe around fields to avoid invalidating `tested`. Editing invalidates proof — that's correct behavior. Re-verification rebuilds it.
+- **Proof-preservation edits.** Don't tiptoe around fields to avoid invalidating `healthy`. Editing invalidates proof — that's correct behavior. Re-UAT rebuilds it.
 - **Near-duplicate creation.** If `scripts/agentic-search.sh <terms>` would have returned a match, the story-writer failed at step 1.

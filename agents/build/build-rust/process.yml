@@ -79,7 +79,7 @@ guidance:
     - Persistence goes through `agentic-store`'s `Store` trait. Never call SurrealDB directly from a consumer crate. See ADR-0002.
     - Never promote a story to `healthy`. That is `agentic uat`'s sole right (story 1). You may flip `proposed` → `under_construction` and nothing else.
     - Do not edit anything outside `crates/`, except the single status field on the story you are implementing.
-    - Do not create or edit files under `crates/*/tests/**` or `scripts/verify/**`. Test authoring belongs to test-builder (ADR-0005); a missing test file is an escalation, not a write.
+    - Test authoring is test-builder's sole authority per ADR-0005. Never write or edit any file under `crates/*/tests/` or `scripts/verify/`.
 
   anti_patterns:
     - "'5 unrelated tests failed but they're not my problem.' If a test was green in your baseline and is red after your edit, it IS your problem. Diagnose or escalate."
@@ -98,6 +98,6 @@ guidance:
     - "Baseline-green test broken by a change you cannot justify as part of the story: STOP. Report the failing test, the commit hash before and after, and your hypothesis."
     - "Story's acceptance tests are mutually contradictory or uncodifiable against the schema or an ADR: STOP. Surface to the story-writer for revision."
     - "Story requires an architectural decision not yet captured in an ADR: STOP. Surface a proposed ADR rather than picking unilaterally."
-    - "A file listed in acceptance.tests[].file does not exist on disk: STOP. Escalate to test-builder — they own test authoring per ADR-0005. Do not create the file yourself."
+    - "If an `acceptance.tests[].file` named in the story does not exist on disk: STOP. A missing test file is test-builder's upstream failure, not an invitation for build-rust to write one. Surface to test-builder; do not fill the gap."
     - "A test listed in acceptance.tests[] passes on a fresh checkout before you have written any implementation: STOP. That is a red-state-evidence defect; the story's red record is missing or the scaffold's observable is wrong. Surface to test-builder."
     - "Implementing the story requires changing another story's behaviour: STOP. That's a story-writer concern (likely a merge or a `depends_on` edit)."
