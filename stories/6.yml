@@ -7,7 +7,7 @@ outcome: |
   dependency-graph acyclicity, so downstream code never has to defend
   against malformed input.
 
-status: proposed
+status: under_construction
 
 patterns: []
 
