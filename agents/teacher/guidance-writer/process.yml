@@ -40,6 +40,10 @@ workflow:
             corresponding .claude/agents/<name>.md pointer. If the agent
             roster changed, update agents/README.md. If asset consumers
             changed, update `current_consumers` in the relevant asset file.
+            When authoring a new agent, every asset under agents/assets/
+            that the new agent references MUST have the new agent's
+            scope.name appended to its `current_consumers` array in the
+            same session.
         - step: Validate.
           detail: |
             Every touched *.yml under agents/ must validate against its

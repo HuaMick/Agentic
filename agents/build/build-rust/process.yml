@@ -58,7 +58,11 @@ workflow:
     - step: Quality gates.
       detail: |
         Run in order, each must pass clean:
-          1. cargo fmt --all
+          1. rustfmt --check crates/<pkg>/src/<file>.rs for every `src/` file
+             you edited this session. Never `cargo fmt --all` or
+             `cargo fmt -p <pkg>` — both reach `tests/` and rewrite
+             test-builder's scaffolds (ADR-0005). `<pkg>` and `<file>` are
+             per-story placeholders; verify only the files you touched.
           2. cargo clippy --workspace --all-targets -- -D warnings
           3. cargo test --workspace --no-fail-fast
         Clippy warnings count as failures here.
@@ -92,6 +96,7 @@ guidance:
     - Backwards-compatibility shims for code that does not have callers yet.
     - Editing the story's outcome, acceptance, or guidance fields. Those are contracts you implement against, not something you negotiate.
     - Creating or editing a file under `crates/*/tests/**` or `scripts/verify/**`. Test authoring is test-builder's authority per ADR-0005; editing an existing test to "fix" a failure softens the red-state evidence into a convention and is the exact legacy failure mode this system is designed to prevent.
+    - "Running `cargo fmt --all` or `cargo fmt -p <pkg>`. Both reach `tests/` under packages you do not own (ADR-0005) and silently rewrite test-builder's scaffolds. Format specific `src/` files instead via `rustfmt crates/<pkg>/src/<file>.rs`; verify with `rustfmt --check` on the same specific files."
     - Marking the story `healthy`. Status promotion past `under_construction` is not your authority — it belongs to `agentic uat`.
 
   escalation:

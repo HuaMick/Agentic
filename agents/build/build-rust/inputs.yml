@@ -53,8 +53,13 @@ commands:
       not hide other regressions. Run at session start (baseline) and after
       every code change.
   - name: cargo-fmt
-    invocation_example: cargo fmt --all
-    purpose: Format all crates before claiming completion.
+    invocation_example: rustfmt crates/<pkg>/src/<file>.rs
+    purpose: |
+      Format specific `src/` files you edited. Never `cargo fmt --all` or
+      `cargo fmt -p <pkg>` — both reach `tests/` and rewrite test-builder's
+      scaffolds (ADR-0005). `<pkg>` and `<file>` are per-story placeholders;
+      name the exact files you touched. Verify with `rustfmt --check` on the
+      same files before claiming completion.
   - name: cargo-clippy
     invocation_example: cargo clippy --workspace --all-targets -- -D warnings
     purpose: |

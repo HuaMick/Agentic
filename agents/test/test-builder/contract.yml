@@ -15,7 +15,8 @@ scope:
     - crates/*/src/**
     - crates/*/benches/**
     - crates/*/examples/**
-    - Cargo.toml
+    - Cargo.toml (workspace root)
+    - crates/*/Cargo.toml [dependencies]
     - Cargo.lock
     - stories/**
     - patterns/**
@@ -29,7 +30,7 @@ scope:
     - May create or append to `evidence/runs/<story-id>/<timestamp>-red.jsonl` with one row per acceptance test confirming its red verdict.
     - May not edit an existing test file under any circumstance — preserve and report instead.
     - May not create, edit, or delete any production source under `crates/*/src/**`.
-    - May not edit `Cargo.toml` or `Cargo.lock`. If a test scaffold requires a new dev-dependency, escalate — do not add it unilaterally.
+    - May add entries under `[dev-dependencies]` in `crates/<target-crate>/Cargo.toml` when a scaffold being authored would not compile without them. This is the only Cargo.toml edit permitted; the workspace-root `Cargo.toml`, any other crate's `Cargo.toml`, the `[dependencies]` / runtime-deps tables, and `Cargo.lock` remain forbidden. Dev-dep additions must be named in the run summary.
     - May not edit the story's YAML, including its `status` field. That remains build-rust's (for `proposed → under_construction`) and `agentic uat`'s (for `healthy`) authority.
 
 outcome:

@@ -18,6 +18,7 @@
 //!      consumers do not have to distinguish "missing key" from "key
 //!      with null value".
 //!   5. `summary` counts add up to `stories.len()`.
+//!
 //! Red today is compile-red via the missing `agentic_dashboard` public
 //! surface.
 
