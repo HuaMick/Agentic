@@ -1,0 +1,221 @@
+id: 6
+title: "Load and validate stories/*.yml into typed Story values"
+
+outcome: |
+  A developer can read any story file from disk into a typed `Story`
+  value whose construction has already enforced the schema and the
+  dependency-graph acyclicity, so downstream code never has to defend
+  against malformed input.
+
+status: proposed
+
+patterns: []
+
+acceptance:
+  tests:
+    - file: crates/agentic-story/tests/load_valid_story_round_trips.rs
+      justification: |
+        Proves the happy path: loading a syntactically valid story
+        whose fields match `schemas/story.schema.json` yields a
+        `Story` value whose observable fields (id, title, outcome,
+        status, patterns, acceptance.tests, acceptance.uat,
+        guidance, depends_on) are semantically equal to what the
+        file on disk contains. Without this, nothing downstream
+        (the dashboard, the UAT gate, the recorder) can trust
+        that what they see in memory is what the author wrote on
+        disk.
+
+    - file: crates/agentic-story/tests/load_missing_required_field_names_field.rs
+      justification: |
+        Proves the typed-error contract on structural failure: a
+        story file missing a required field (e.g. no `outcome:`)
+        is rejected by the loader with a typed error whose
+        payload names the missing field in text a human can act
+        on without opening a schema file. Without this, schema
+        drift during authoring surfaces as cryptic serde errors
+        that the story-writer agent and downstream tooling
+        cannot parse into a corrective action.
+
+    - file: crates/agentic-story/tests/load_cycle_in_depends_on_is_rejected.rs
+      justification: |
+        Proves load-time cycle detection: a directory containing
+        stories whose `depends_on` edges form a cycle (e.g. 10 →
+        11 → 10, or a self-loop 12 → 12) is rejected by the
+        directory-loading entry point with a typed error that
+        names at least one story id in the cycle. Without this,
+        a cycle slips past parse time and surfaces as an
+        infinite loop (or stack overflow) the first time the
+        dashboard or scheduler walks the graph.
+
+    - file: crates/agentic-story/tests/load_unknown_path_is_typed_absence.rs
+      justification: |
+        Proves clean failure on missing input: loading a story
+        from a path that does not exist returns a typed error
+        (or `Option`-style absence — impl chooses which, but
+        must be one of those two, NOT a panic and NOT an I/O
+        error bubbled up as `anyhow::Error`). Without this, a
+        typo in a test fixture path or a stale story id passed
+        on the CLI surfaces as a panic trace that looks like a
+        loader bug when it is actually user error.
+
+    - file: crates/agentic-story/tests/load_invalid_status_enum_is_rejected.rs
+      justification: |
+        Proves enum-boundary enforcement: a story file whose
+        `status` field is a string not in `proposed |
+        under_construction | healthy | unhealthy` is rejected
+        with a typed error naming the field AND the offending
+        value. Without this, a typo in `status:` (or a leftover
+        legacy value like `tested`) loads as a default or a
+        catch-all and the four-status model the dashboard
+        depends on is silently violated.
+
+  uat: |
+    Goal: convince yourself the loader accepts valid stories,
+    rejects the four specific failure modes with typed errors,
+    and never crashes the caller.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status`
+         and confirm the working tree is clean.
+      2. Confirm `crates/agentic-story/` builds as a library
+         (`cargo build -p agentic-story`) and that the loader
+         entry point (`Story::load` for single file and
+         `Story::load_dir` for a directory, or whatever the
+         impl names them) is publicly re-exported.
+      3. Pick a scratch directory you will use for fixtures.
+
+    Valid walkthrough:
+      4. Copy `stories/1.yml` (or any currently-valid story) to
+         your scratch directory as `1.yml`. Write a scratch
+         example under `crates/agentic-story/examples/load_smoke.rs`
+         (or reuse one) that loads the file and prints the
+         parsed `Story` value. Run it. Observe: the program
+         exits 0 and the printed fields match what you see in
+         the source file.
+
+    Missing-field walkthrough:
+      5. Copy the same fixture. Delete the `outcome:` block from
+         your scratch copy. Re-run the loader against the edited
+         file. Observe: non-zero exit, a single-line error
+         naming `outcome` as the missing required field, no
+         panic and no backtrace.
+
+    Bad-status walkthrough:
+      6. Restore the fixture's `outcome:` block. Change `status:
+         proposed` to `status: tested` (a legacy value the new
+         enum does not include). Re-run the loader. Observe:
+         non-zero exit, an error naming `status` and the
+         offending value `tested`.
+
+    Cycle walkthrough:
+      7. Restore the `status:` field. Copy the fixture twice
+         more into your scratch directory as `2.yml` and
+         `3.yml`. Edit `1.yml` so `depends_on: [2]`, `2.yml` so
+         `depends_on: [3]`, `3.yml` so `depends_on: [1]` — and
+         change the `id:` field of each to match its filename.
+         Run the loader against the scratch DIRECTORY (not a
+         single file). Observe: non-zero exit, an error naming
+         at least one of ids 1, 2, 3 as participating in a
+         cycle.
+
+    Missing-file walkthrough:
+      8. Remove the scratch directory. Run the loader against a
+         path that definitely does not exist. Observe: the
+         loader returns the absence sentinel or a typed
+         "not found" error — NOT a panic, NOT a raw I/O
+         error trace.
+
+    Cleanup:
+      9. Remove the scratch directory and any example files
+         you added but do not want to commit.
+     10. Confirm `git status` is clean.
+
+guidance: |
+  This story defines the parse-time contract for the story
+  corpus. It is deliberately small: load, validate, reject
+  early with typed errors. Downstream crates (the dashboard,
+  the UAT gate, the recorder) consume already-validated
+  `Story` values and are therefore allowed to assume
+  well-formedness without extra defensive code.
+
+  Why the standalone-resilient-library pattern is NOT applied.
+    The pattern's "when_to_use" clause requires that the crate
+    be on the runtime prove-it path — something that must still
+    produce a correct verdict when the rest of the system is in
+    flames. The story loader is a parse/validate step that runs
+    at the start of a command; if loading fails, there is no
+    story to verdict, and failing loudly is the correct
+    behaviour. The crate is therefore allowed to depend on
+    whatever gives the clearest typed errors (serde_yaml, a
+    schema validator library if useful, etc.) without the
+    "minimal dependency floor" discipline the pattern enforces.
+
+  Validation layers, in order.
+    1. YAML parse (serde_yaml or equivalent). Failures are
+       reported with the source position if the library
+       surfaces one.
+    2. Schema validation against `schemas/story.schema.json`.
+       Failures are reported with the JSON Pointer to the
+       offending field.
+    3. Semantic validation: the `id` field inside the file
+       must match the filename (`stories/<id>.yml`) when
+       loading from disk; the `status` must be one of the
+       four enum values the dashboard understands.
+    4. Graph validation (directory-load only): the `depends_on`
+       edges across all loaded stories must form a DAG.
+       Missing dependency targets and cycles both fail the
+       directory load with typed errors.
+
+  Error type surface.
+    The public error type is a typed enum (not `anyhow::Error`).
+    Required variants — at minimum — cover: YAML parse,
+    schema violation (with the path to the offending field),
+    id/filename mismatch, unknown status value, cycle in
+    `depends_on` (with at least one participating id), and
+    file-or-directory not found. Additional variants are
+    allowed when they add real information.
+
+  Single-file vs directory load.
+    The loader exposes two entry points: load one file at a
+    known path, and load an entire `stories/` directory.
+    Cycle detection and `depends_on`-target-exists checks only
+    run in the directory path, because a single file cannot
+    meaningfully validate its edges against stories it has
+    never seen. The dashboard uses the directory path; a
+    future story-writer CLI lint may use either.
+
+  Keep the `Story` struct aligned with the schema.
+    Fields are already enumerated in `crates/agentic-story/README.md`
+    and on `schemas/story.schema.json`. Do not add fields in
+    this story that are not in the schema. If a field would
+    be useful but the schema does not support it, that is a
+    schema change proposal — a separate story — not a silent
+    extension here.
+
+  The loader does NOT write.
+    This story is strictly read-only. No status mutation, no
+    proof-hash recomputation, no store writes. Those are
+    owned by stories 1 (UAT promotion) and 2 (test_runs
+    recorder). Keeping the loader pure means every consumer
+    can call it speculatively without side effects.
+
+  Test file locations.
+    All five tests live under `crates/agentic-story/tests/`
+    as Rust integration tests. They build fixture YAML either
+    inline as string literals or via `tempfile::TempDir` for
+    the directory-level cases. They do not touch the live
+    `stories/` directory at repo root. They do not shell out
+    to the top-level `agentic` binary. They do not depend on
+    `agentic-store`, the dashboard, or any other workspace
+    crate.
+
+  Relationship to stories 1, 3, 4, 5.
+    Story 1 (UAT gate) uses this loader to find the story it
+    is verdicting and to rewrite its `status` after a Pass.
+    Story 3 (dashboard) uses it to enumerate every story for
+    the table. Neither needs the loader to do anything the
+    tests here do not pin. Stories 4 and 5 are unrelated at
+    runtime (the loader does not persist anything) but share
+    Phase 2 acceptance.
+
+depends_on: []

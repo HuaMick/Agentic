@@ -229,4 +229,4 @@ guidance: |
     does not read `test_runs`, and `agentic-ci-record` does not
     read `uat_signings`.
 
-depends_on: []
+depends_on: [4, 6]

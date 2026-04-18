@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic.dev/schemas/asset.schema.json",
+  "title": "Asset",
+  "description": "Bounded contract for every file under agents/assets/**. An asset must declare WHAT it is (name + description) and WHO uses it (current_consumers). The body shape varies by asset category (definitions, guidelines, examples, templates) so additional properties are permitted — but the contract is enforced. An asset with zero current_consumers is an orphan and must be deleted or adopted per guidance-writer's escalation rules.",
+  "type": "object",
+  "required": ["name", "description", "current_consumers"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Slug matching the asset's filename without extension (e.g. `tools-base` for `tools-base.yml`)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-paragraph plain-English statement of what this asset is and when an agent should reference it. Not a summary of the body; a framing of it."
+    },
+    "current_consumers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\\.yml$"
+      },
+      "description": "Paths (repo-root-relative) to the agent spec files that currently reference this asset. At least one entry required. Guidance-writer audits check that every listed consumer genuinely contains a reference to this asset's path."
+    }
+  },
+  "additionalProperties": true
+}
