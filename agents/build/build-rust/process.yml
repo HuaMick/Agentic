@@ -1,0 +1,103 @@
+workflow:
+  session_start:
+    - Read every file listed in inputs.yml `required_reading`.
+    - Read every pattern named in the story's `patterns:` field.
+    - Read the README of every crate the story will touch.
+    - Run `cargo test --workspace --no-fail-fast` once to record the regression baseline. If the workspace does not yet compile, the baseline is "no tests yet" — note this.
+    - See agents/assets/definitions/session-start-memory.yml.
+
+  steps:
+    - step: Confirm scope.
+      detail: |
+        Re-read the story's outcome and acceptance.tests. Confirm with the user
+        (or invoking agent) which story id you are implementing if there is
+        any ambiguity. Do not start work on a story you are not certain about.
+
+    - step: Flip status.
+      detail: |
+        If story.status == proposed, edit the story YAML to set
+        status: under_construction. This is the ONLY edit you make to the
+        story file. Make this its own commit so the lifecycle event is
+        independently auditable from the code edits that follow.
+
+    - step: Confirm acceptance tests exist and are red.
+      detail: |
+        For each entry in acceptance.tests[], confirm the file exists on
+        disk. If any is missing, STOP and escalate to test-builder — test
+        authoring is outside this agent's authority per ADR-0005. A
+        missing test file also means the story's red-state evidence has
+        not been recorded, and build cannot proceed without it. Do NOT
+        create the scaffold yourself, even "just to unblock" — the red
+        evidence is the contract and you are not its author.
+
+    - step: Implement minimum-viable code.
+      detail: |
+        Pick one failing acceptance test. Write the smallest possible code
+        change in the relevant crate that turns that one test green. Do not
+        build out beyond what the test demands. Re-run that one test in
+        isolation until it passes.
+
+    - step: Run the full workspace.
+      detail: |
+        Run `cargo test --workspace --no-fail-fast`. Compare against the
+        regression baseline. Three outcomes:
+          - All baseline-green tests still green AND your story's test is now
+            green: continue to the next failing acceptance test.
+          - A baseline-green test went red: STOP. Diagnose. If the breakage is
+            a direct consequence of correct work on your story, fix the call
+            site. If the breakage is genuinely unrelated, escalate. Do NOT
+            continue work while a baseline-green test is red.
+          - Your story's test is still red: continue iterating on it.
+
+    - step: Iterate until all acceptance tests pass.
+      detail: |
+        Repeat the implement → full-workspace cycle until every
+        acceptance.tests[].file in your story is green AND the workspace
+        baseline is preserved.
+
+    - step: Quality gates.
+      detail: |
+        Run in order, each must pass clean:
+          1. cargo fmt --all
+          2. cargo clippy --workspace --all-targets -- -D warnings
+          3. cargo test --workspace --no-fail-fast
+        Clippy warnings count as failures here.
+
+    - step: Stop.
+      detail: |
+        Do NOT run `agentic uat`. Do NOT edit the story's status to `healthy`.
+        Do NOT mark anything complete in any external tracker. Hand back a
+        summary and let UAT (story 1) make the promotion call.
+
+guidance:
+  rules:
+    - Run `cargo test --workspace` at session start to record the regression baseline. Skipping it means you have no way to detect "fell from grace" failures, and detecting those is half the reason this agent exists.
+    - Run the full workspace test suite after every code change, not just your story's tests.
+    - Never leave a baseline-green test red. If you cannot fix it within scope, escalate and stop.
+    - Slow growth. Write the minimum code that makes one failing test green. Do not pre-build for hypothetical later tests, even if they exist in the same story.
+    - Subscription auth via the local `claude` binary (subprocess). Never use raw Anthropic API clients. See ADR-0003.
+    - Persistence goes through `agentic-store`'s `Store` trait. Never call SurrealDB directly from a consumer crate. See ADR-0002.
+    - Never promote a story to `healthy`. That is `agentic uat`'s sole right (story 1). You may flip `proposed` → `under_construction` and nothing else.
+    - Do not edit anything outside `crates/`, except the single status field on the story you are implementing.
+    - Do not create or edit files under `crates/*/tests/**` or `scripts/verify/**`. Test authoring belongs to test-builder (ADR-0005); a missing test file is an escalation, not a write.
+
+  anti_patterns:
+    - "'5 unrelated tests failed but they're not my problem.' If a test was green in your baseline and is red after your edit, it IS your problem. Diagnose or escalate."
+    - Suppressing failures with #[ignore], todo!(), unimplemented!(), or `cargo test -- --skip <name>`.
+    - Adding `unwrap()` or `expect()` in non-test code to silence error paths you did not want to design.
+    - Speculative abstractions (trait + one impl with three more impls planned). Add a trait only when the story or an ADR explicitly calls for it.
+    - Speculative dependencies — adding a crate to Cargo.toml without naming the specific test or behaviour that demands it.
+    - Wide refactors disguised as bug fixes. If the story does not ask for a rename or restructure, do not do one.
+    - Half-finished implementations — a function that compiles but returns `todo!()` or panics with "not implemented."
+    - Backwards-compatibility shims for code that does not have callers yet.
+    - Editing the story's outcome, acceptance, or guidance fields. Those are contracts you implement against, not something you negotiate.
+    - Creating or editing a file under `crates/*/tests/**` or `scripts/verify/**`. Test authoring is test-builder's authority per ADR-0005; editing an existing test to "fix" a failure softens the red-state evidence into a convention and is the exact legacy failure mode this system is designed to prevent.
+    - Marking the story `healthy`. Status promotion past `under_construction` is not your authority — it belongs to `agentic uat`.
+
+  escalation:
+    - "Baseline-green test broken by a change you cannot justify as part of the story: STOP. Report the failing test, the commit hash before and after, and your hypothesis."
+    - "Story's acceptance tests are mutually contradictory or uncodifiable against the schema or an ADR: STOP. Surface to the story-writer for revision."
+    - "Story requires an architectural decision not yet captured in an ADR: STOP. Surface a proposed ADR rather than picking unilaterally."
+    - "A file listed in acceptance.tests[].file does not exist on disk: STOP. Escalate to test-builder — they own test authoring per ADR-0005. Do not create the file yourself."
+    - "A test listed in acceptance.tests[] passes on a fresh checkout before you have written any implementation: STOP. That is a red-state-evidence defect; the story's red record is missing or the scaffold's observable is wrong. Surface to test-builder."
+    - "Implementing the story requires changing another story's behaviour: STOP. That's a story-writer concern (likely a merge or a `depends_on` edit)."

@@ -1,0 +1,206 @@
+id: 7
+title: "Record each story's red state before implementation begins"
+
+outcome: |
+  A developer running `agentic test-build <id>` receives a committed
+  red-state record that is the only way to prove a story's acceptance
+  tests were authored to fail first.
+
+status: proposed
+
+patterns:
+  - standalone-resilient-library
+
+acceptance:
+  tests:
+    - file: crates/agentic-test-builder/tests/scaffolds_missing_files.rs
+      justification: |
+        Proves the happy path: given a story whose acceptance.tests[]
+        lists two file paths that do not exist on disk and whose
+        justifications are substantive, `TestBuilder::run` writes both
+        files as compilable Rust integration tests, runs each one,
+        observes each fail, and appends one red-state JSONL row to
+        `evidence/runs/<id>/` with one `verdict: red` entry per scaffold
+        and the current HEAD commit hash. Without this the whole
+        contract is empty — red-state evidence is the artefact this
+        agent exists to produce, and if the happy path does not write
+        it the rest is theatre.
+
+    - file: crates/agentic-test-builder/tests/preserves_existing_tests.rs
+      justification: |
+        Proves preservation: given a story where one acceptance.tests[]
+        entry points at a file that already exists with non-empty
+        content, `TestBuilder::run` does not open the existing file,
+        does not edit it, and does not overwrite it — the file's bytes
+        on disk are byte-identical before and after the run. The
+        preserved entry still appears in the red-state JSONL row with
+        `verdict: preserved`. Without this, a second test-builder run
+        against a story mid-implementation would silently re-redden a
+        test the implementer has already turned green, which is the
+        exact legacy failure mode this ADR is designed to prevent.
+
+    - file: crates/agentic-test-builder/tests/fail_closed_dirty_tree.rs
+      justification: |
+        Proves the fail-closed contract on a dirty working tree: with
+        any uncommitted change present (including an untracked file),
+        `TestBuilder::run` returns `TestBuilderError::DirtyTree`, writes
+        zero scaffolds, and writes zero evidence. Without this the
+        red-state record can be forged — someone could edit code into
+        the tree, then run test-builder, and the resulting evidence
+        would claim those edits were red when they are not.
+
+    - file: crates/agentic-test-builder/tests/rejects_thin_justification.rs
+      justification: |
+        Proves the thin-justification refusal: given a story whose
+        acceptance.tests[] contains one entry with justification text
+        `"TODO"` (or empty after trim, or a single token),
+        `TestBuilder::run` returns `TestBuilderError::ThinJustification`
+        naming the offending entry's index, writes zero scaffolds (even
+        for the substantive entries in the same story), and writes zero
+        evidence. Without this, story-writer could offload test design
+        by stubbing justifications, and test-builder would produce
+        scaffolds whose failure messages say nothing — green evidence
+        for a story that was never meaningfully specified.
+
+    - file: crates/agentic-test-builder/tests/evidence_row_shape.rs
+      justification: |
+        Proves the evidence shape that downstream agents (build-rust,
+        `agentic uat`) rely on: after a happy-path run the JSONL row
+        contains exactly the keys `run_id`, `story_id`, `commit`,
+        `timestamp`, and `verdicts`, where `verdicts` is an array with
+        one entry per acceptance.tests[].file keyed by `file` with
+        `verdict` in {`red`, `preserved`} and a `diagnostic` field on
+        red rows whose value is the first line of the scaffold's panic
+        output. Without this, the handshake with build-rust and UAT is
+        a conventions-not-contract situation — the next agent that
+        reads the evidence file has nothing stable to parse against.
+
+  uat: |
+    Goal: convince yourself that `agentic test-build` writes red-state
+    evidence only on a clean tree, never overwrites existing tests,
+    refuses thin justifications, and produces evidence downstream
+    agents can parse.
+
+    Setup:
+      1. From a clean checkout, run `git status --porcelain` and
+         confirm the output is empty.
+      2. Confirm `stories/7.yml` (this story) exists. Confirm at least
+         one OTHER `stories/N.yml` exists with `status: proposed`, with
+         acceptance.tests[] pointing at files that do not exist on
+         disk yet, and with substantive justifications. If no such
+         story exists, stop — this UAT cannot run until a second
+         scaffoldable story is on disk.
+
+    Happy path:
+      3. Run `agentic test-build <other-id>`.
+      4. Observe the summary names one file per acceptance.tests[]
+         entry, classified as CREATED or PRESERVED.
+      5. Run `git status --porcelain`. Confirm the only untracked
+         paths are the newly written scaffolds plus one
+         `evidence/runs/<other-id>/<timestamp>-red.jsonl`.
+      6. `cat` the evidence file. Confirm the JSON row contains
+         `run_id`, `story_id`, `commit`, `timestamp`, and `verdicts`;
+         and that every acceptance.tests[].file path appears in
+         `verdicts` exactly once.
+      7. For each CREATED row, run `cargo test --package <crate>
+         --test <name>` and confirm the test panics with the first
+         line of its justification.
+
+    Preservation check:
+      8. Revert the untracked scaffolds and evidence from the happy
+         path (`git clean -fd`).
+      9. Pick one acceptance.tests[].file from the target story and
+         create it by hand with a single Rust `#[test]` body like
+         `#[test] fn placeholder() { panic!("human-authored"); }`.
+         Commit it.
+     10. Re-run `agentic test-build <other-id>`.
+     11. Confirm the hand-authored file's bytes on disk match before
+         and after (diff its content against the git-committed version
+         — identical). Confirm the evidence row for that path shows
+         `verdict: preserved`.
+
+    Dirty-tree refusal:
+     12. `git clean -fd` the created artefacts. Touch a random file
+         (e.g. `echo '' >> README.md`).
+     13. Run `agentic test-build <other-id>`. Confirm it exits
+         non-zero with a message naming `DirtyTree`, writes no
+         scaffolds, and writes no evidence.
+
+    Thin-justification refusal:
+     14. `git checkout -- README.md` to clean the tree.
+     15. Edit the target story so one acceptance.tests[] entry's
+         justification is the literal string `"TODO"`. Commit.
+     16. Run `agentic test-build <other-id>`. Confirm it exits
+         non-zero with a message naming `ThinJustification` and the
+         offending entry's index, writes no scaffolds (even for the
+         other entries), and writes no evidence.
+
+    Cleanup:
+     17. `git reset --hard <SHA-before-UAT>` to restore the working
+         tree and the story. Confirm `git status --porcelain` is empty
+         and the target story's acceptance.tests[] justifications are
+         back to substantive text.
+
+guidance: |
+  This story is the meta-story for ADR-0005 ("Red-green is a contract,
+  not a convention") — the same role story 1 plays for `agentic uat`.
+  It proves the contract end-to-end against a second, unrelated story;
+  it does NOT attempt to verify its own red state recursively. The
+  crate under test is `agentic-test-builder`, a standalone-resilient
+  library (see the referenced pattern) with a thin CLI shim at
+  `agentic test-build`.
+
+  Key invariants the tests collectively pin down:
+
+  - **Red-state evidence is a committable atomic.** Test-builder runs
+    only on a clean working tree (`git status --porcelain` empty). On
+    a dirty tree it returns `DirtyTree`, writes nothing, exits
+    non-zero. No partial runs, no "best effort" evidence.
+
+  - **Existing tests are bytes-immutable.** If an acceptance.tests[]
+    entry points at a file with non-empty content, that file is not
+    opened for writing and is not opened for reading beyond an
+    existence check. The file's hash on disk before and after the
+    run must be identical.
+
+  - **Scaffold shape is deterministic from justification.** Given the
+    same justification text, test-builder produces a byte-identical
+    Rust scaffold. The test's function name is a snake_case reduction
+    of the first sentence; the `panic!(..)` message is the
+    justification's first line; there is no timestamp, UUID, or other
+    non-deterministic content in the scaffold body. This property
+    lets the preservation test above compare bytes directly.
+
+  - **Evidence shape is the handshake.** The JSONL row's keys are
+    fixed (`run_id`, `story_id`, `commit`, `timestamp`, `verdicts`).
+    Each verdict carries `file`, `verdict`, and — for `red` only —
+    `diagnostic` (the first line of the scaffold's panic output,
+    captured from a real `cargo test` invocation). Downstream agents
+    parse this shape; changing it is a breaking change that requires
+    an ADR update, not a code change.
+
+  - **Thin-justification detection is local.** The refusal rule is
+    evaluated per acceptance.tests[] entry independently: thin =
+    empty after trim, OR a single whitespace-delimited token, OR
+    matches /^\s*(TODO|TBD|\.\.\.)\s*$/i. A single thin entry halts
+    the whole story's run — partial scaffolding on a story with a
+    thin entry would undermine the guarantee that every scaffold has
+    a justification worth reading.
+
+  - **Red-evidence path is conventional, not schema'd.** The story
+    schema does NOT encode an evidence path field (see ADR-0005's
+    deferred alternative). The path
+    `evidence/runs/<story-id>/<timestamp>-red.jsonl` is derived by
+    test-builder and read by downstream agents by the same
+    convention. If this proves fragile, a future ADR adds the path
+    to the schema — until then, the derivation is the contract.
+
+  - **Pre-ADR-0005 scaffolds are handled by preservation, not special
+    code paths.** Stories that were `under_construction` before
+    ADR-0005 was accepted may carry test files that an earlier
+    build-rust produced. The preservation rule treats them exactly
+    like any other existing file — classified as PRESERVED, never
+    re-opened for write. No migration branch in the code; the
+    invariant "existing file is bytes-immutable" already covers it.
+
+depends_on: []

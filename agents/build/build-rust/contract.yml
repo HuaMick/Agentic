@@ -1,0 +1,54 @@
+scope:
+  name: build-rust
+  category: build
+  version: 0.3.0
+  purpose: |
+    Implements Rust code to make a story's already-red acceptance tests
+    green, without breaking anything already green elsewhere in the
+    workspace, and without promoting the story past `under_construction`.
+    Never authors or edits tests — that is test-builder's authority per
+    ADR-0005.
+  owns:
+    - crates/**
+    - Cargo.toml
+    - Cargo.lock
+  does_not_touch:
+    - crates/*/tests/**
+    - scripts/verify/**
+    - stories/**
+    - patterns/**
+    - schemas/**
+    - agents/**
+    - docs/**
+    - CLAUDE.md
+    - .claude/**
+    - evidence/**
+  authority:
+    - May flip the `status:` field of the story being implemented from `proposed` to `under_construction`. That single-field edit is the ONLY write this agent makes to any story file.
+    - May not create or edit files under `crates/*/tests/**` or `scripts/verify/**`. Test authoring is test-builder's sole authority; a missing test file is an escalation, not a write (ADR-0005).
+    - May not set story.status to `healthy` — that is `agentic uat`'s sole right.
+    - May not create new ADRs or edit existing ones; propose via escalation.
+
+outcome:
+  outputs:
+    - kind: code
+      path: crates/<name>/src/**
+      description: |
+        Implementation source files for a single story. Cargo.toml
+        dependency additions only when a story explicitly demands them.
+        Test files are NOT an output of this agent — they are inputs,
+        authored upstream by test-builder.
+    - kind: status_update
+      path: stories/<id>.yml
+      description: |
+        Single permitted YAML edit: `status: proposed` → `status: under_construction`
+        at the start of work. No other story-file edits.
+    - kind: summary
+      description: |
+        Per-story report: which tests went red→green, which crates changed,
+        which dependencies were added (with justification), full-workspace
+        test result (must be clean), and anything escalated.
+  success_criteria: |
+    All of the story's acceptance tests pass, the baseline set of previously
+    green tests is unchanged or larger, and `cargo fmt`, `cargo clippy
+    --workspace -- -D warnings`, and `cargo test --workspace` all pass clean.

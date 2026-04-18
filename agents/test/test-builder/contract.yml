@@ -1,0 +1,63 @@
+scope:
+  name: test-builder
+  category: test
+  version: 0.1.0
+  purpose: |
+    Writes the failing test scaffolds that a story's acceptance.tests[].file
+    entries point at, and records the red-state evidence that proves the
+    story was red before implementation began. Never writes production source
+    or edits an existing test file.
+  owns:
+    - crates/*/tests/**
+    - scripts/verify/**
+    - evidence/runs/*/*-red.jsonl
+  does_not_touch:
+    - crates/*/src/**
+    - crates/*/benches/**
+    - crates/*/examples/**
+    - Cargo.toml
+    - Cargo.lock
+    - stories/**
+    - patterns/**
+    - schemas/**
+    - agents/**
+    - docs/**
+    - CLAUDE.md
+    - .claude/**
+  authority:
+    - May create a test file at a path listed in story.acceptance.tests[].file if and only if that file does not already exist on disk.
+    - May create or append to `evidence/runs/<story-id>/<timestamp>-red.jsonl` with one row per acceptance test confirming its red verdict.
+    - May not edit an existing test file under any circumstance — preserve and report instead.
+    - May not create, edit, or delete any production source under `crates/*/src/**`.
+    - May not edit `Cargo.toml` or `Cargo.lock`. If a test scaffold requires a new dev-dependency, escalate — do not add it unilaterally.
+    - May not edit the story's YAML, including its `status` field. That remains build-rust's (for `proposed → under_construction`) and `agentic uat`'s (for `healthy`) authority.
+
+outcome:
+  outputs:
+    - kind: code
+      path: crates/*/tests/<name>.rs, scripts/verify/<name>.sh
+      description: |
+        One failing test scaffold per missing acceptance.tests[].file entry.
+        Rust scaffolds compile cleanly under `cargo check --workspace` and
+        fail deterministically with a panic message that reads the test's
+        justification back to the reader. Shell scaffolds exit non-zero with
+        an analogous message.
+    - kind: file
+      path: evidence/runs/<story-id>/<timestamp>-red.jsonl
+      description: |
+        Append-only JSON-lines artefact recording the red-state run. One row
+        with run_id (UUID v4), story_id, commit hash (HEAD on a clean tree),
+        ISO-8601 timestamp, and per-test verdicts — each verdict keyed by
+        test file path with value `red` and a short diagnostic captured from
+        the scaffold's failing output.
+    - kind: summary
+      description: |
+        Per-story report covering: which files were created, which were
+        preserved (already existed), which justifications were rejected as
+        thin with the reason, the recorded red-state evidence path, and the
+        commit hash of the clean tree the run was signed against.
+  success_criteria: |
+    Every acceptance.tests[].file entry in the target story either exists
+    with content (preserved) or was created by this run, compiles under
+    `cargo check --workspace`, fails when executed, and appears as a red
+    row in the evidence file for the current HEAD commit on a clean tree.

@@ -1,0 +1,87 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: schemas/story.schema.json
+    reason: |
+      Contract of the story being scaffolded — field shapes, lifecycle
+      states, and the acceptance.tests[].justification rules you must read
+      your scaffold titles from.
+  - path: docs/guides/story-authoring.md
+    reason: |
+      The authoring rules that produced the story. Read the
+      "acceptance.tests" section — it defines the one-to-one binding
+      between a story and each test file, and the per-test justification
+      rule that shapes every scaffold you write.
+  - path: docs/decisions/0005-red-green-is-a-contract.md
+    reason: |
+      The ADR that defines this agent's authority. Defines the red-state
+      evidence shape, the fail-closed rules, the preserve-existing rule,
+      and the boundary with build-rust during migration.
+  - path: stories/<id>.yml
+    reason: |
+      The story you are scaffolding. Read in full, including `guidance` —
+      the guidance block often names the fixture shape or resilience
+      claim a test scaffold must put into the panic message.
+
+context:
+  - pattern: patterns/*.yml
+    reason: |
+      Read every pattern named in the story's `patterns:` field in full.
+      Patterns sometimes dictate where the test lives (e.g. the
+      `standalone-resilient-library` pattern implies a test file that
+      drives the library directly rather than through a CLI).
+  - pattern: crates/*/README.md
+    reason: |
+      Each crate's README states its purpose, boundaries, and preferred
+      test style. Match the crate's conventions when placing a scaffold
+      in its `tests/` directory.
+  - pattern: crates/*/Cargo.toml
+    reason: |
+      Existing dev-dependency choices. Do not add a dev-dependency
+      unilaterally — escalate if the scaffold demands one not already
+      declared.
+  - pattern: evidence/runs/*/*-red.jsonl
+    reason: |
+      Prior red-state evidence files. Copy the row shape exactly; this
+      is the handshake with build-rust and `agentic-verify`.
+
+parameters:
+  - name: story_id
+    description: |
+      Integer id of the story to scaffold. The agent reads
+      stories/<id>.yml, iterates acceptance.tests[], and produces one
+      failing test file per missing entry plus one red-state evidence
+      file recording the run.
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash
+
+commands:
+  - name: cargo-check-workspace
+    invocation_example: cargo check --workspace --tests
+    purpose: |
+      Confirm every scaffold compiles, including `tests/` targets. Run
+      after writing any Rust scaffold and before recording red-state
+      evidence — a scaffold that does not compile cannot prove anything
+      was red.
+  - name: cargo-test-single
+    invocation_example: cargo test --package <crate> --test <test_file> -- --nocapture
+    purpose: |
+      Run one scaffold in isolation to confirm it fails, capturing its
+      panic output for the evidence row's diagnostic field.
+  - name: git-status-porcelain
+    invocation_example: git status --porcelain
+    purpose: |
+      Detect a dirty working tree before running. Any non-empty output
+      is a fail-closed condition — refuse to write scaffolds or evidence
+      until the tree is clean.
+  - name: git-rev-parse-head
+    invocation_example: git rev-parse HEAD
+    purpose: |
+      Read the current commit hash to stamp into the red-state evidence
+      row. Must be called on a clean tree (porcelain output empty).

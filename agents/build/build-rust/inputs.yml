@@ -1,0 +1,72 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: schemas/story.schema.json
+    reason: Contract of the story you're implementing — fields, statuses, structure.
+  - path: stories/<id>.yml
+    reason: |
+      The actual story you are implementing. Required input. Read in full,
+      including the guidance block — that's where non-obvious technical
+      constraints live.
+  - path: docs/decisions/
+    reason: |
+      Architectural Decision Records. Read every ADR the story or its
+      patterns reference. Especially ADR-0002 (store trait, no direct DB
+      access) and ADR-0003 (subscription auth via local claude binary).
+
+context:
+  - pattern: patterns/*.yml
+    reason: |
+      Read every pattern named in the story's `patterns:` field in full.
+      Patterns describe shared design constraints; ignoring them leads to
+      violating boundaries the story takes for granted.
+  - pattern: crates/*/README.md
+    reason: |
+      Each crate's README is the source of truth for that crate's purpose,
+      boundaries, allowed dependencies, and design rules.
+  - pattern: crates/*/Cargo.toml
+    reason: |
+      Existing dependency choices and version constraints across the
+      workspace. Match versions; do not introduce duplicates at different
+      semver ranges.
+
+parameters:
+  - name: story_id
+    description: |
+      Integer id of the story to implement. The agent reads stories/<id>.yml,
+      identifies the failing acceptance tests, and produces the minimum code
+      change to turn them green.
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash
+
+commands:
+  - name: cargo-test-workspace
+    invocation_example: cargo test --workspace --no-fail-fast
+    purpose: |
+      Run the full test suite. `--no-fail-fast` so one regressed test does
+      not hide other regressions. Run at session start (baseline) and after
+      every code change.
+  - name: cargo-fmt
+    invocation_example: cargo fmt --all
+    purpose: Format all crates before claiming completion.
+  - name: cargo-clippy
+    invocation_example: cargo clippy --workspace --all-targets -- -D warnings
+    purpose: |
+      Run clippy with warnings-as-errors across all crates and targets.
+      Required to pass before claiming completion.
+  - name: cargo-build
+    invocation_example: cargo build --workspace
+    purpose: |
+      Confirm the workspace compiles before running tests. Useful when a
+      compilation error would otherwise be buried in test output.
+  - name: cargo-test-single
+    invocation_example: cargo test --package <crate> --test <test_file>
+    purpose: |
+      Run a single integration test in isolation while iterating. Always
+      follow up with the full workspace run before claiming completion.
