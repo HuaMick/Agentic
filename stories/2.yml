@@ -6,7 +6,7 @@ outcome: |
   per story in the `test_runs` table that the dashboard can read to
   surface which stories' tests are currently red.
 
-status: proposed
+status: under_construction
 
 patterns:
   - standalone-resilient-library

@@ -4,3 +4,20 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dependencies]
+# Story 2: the recorder upserts schemaless JSON documents through the
+# `Store` trait. Matches the shape every other consumer uses for
+# `agentic-store` per ADR-0002.
+agentic-store = { path = "../agentic-store" }
+
+# Story 2: `test_runs` rows are modelled as `serde_json::Value` so the
+# recorder can hand them to `Store::upsert` without a bespoke serializer.
+serde_json.workspace = true
+
+# Story 2: `commit` field in the `test_runs` row is the full SHA of
+# HEAD at record time; git2 is the Rust-native binding to libgit2 the
+# story's `guidance` explicitly allows. Discover the repo from the
+# current working directory (any ancestor qualifies) so the recorder
+# runs from any workspace crate's directory.
+git2 = { version = "0.19", default-features = false }
