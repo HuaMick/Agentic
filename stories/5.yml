@@ -6,7 +6,7 @@ outcome: |
   `Store` and get the same behaviour as the in-memory implementation,
   with writes that survive process restart.
 
-status: proposed
+status: under_construction
 
 patterns:
   - standalone-resilient-library
