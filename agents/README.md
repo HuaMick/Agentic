@@ -25,7 +25,11 @@ The schemas enforce exactly these five buckets (scope, outcome, inputs, workflow
 Current content (see [`agents/assets/README.md`](assets/README.md) for the full layout and extraction rules):
 
 - `definitions/tools-base.yml` — canonical base toolset every agent needs.
+- `definitions/session-start-memory.yml` — do-not-trust-prior-session clause referenced from every agent's `workflow.session_start`.
+- `definitions/audit-mode-protocol.yml` — shared six-step protocol for any curator with an `audit` mode (Scope, Scan, Plan, Confirm, Execute, Summarize).
 - `guidelines/reference-claude-md.yml` — when and why to read CLAUDE.md, so individual agents do not restate it.
+- `guidelines/edit-first-curation.yml` — edit-is-default rule shared by curator agents.
+- `guidelines/no-proof-preservation.yml` — anti-pattern of tiptoeing around fields to preserve a verdict, shared by curator agents.
 
 ## Claude Code pointer files
 
@@ -48,7 +52,7 @@ Still to come (order roughly follows Phase 2 demand):
 - `planner/planner-build` — plans a story's implementation phases.
 - `orchestration/orchestration-executor` — runs phases deterministically. Natural home for enforcing the ADR-0005 sequence (story-writer → test-builder → build-rust → uat).
 
-No agents beyond `story-writer` are authored yet. They're added when a story demands one.
+Agents beyond the four above are added when a story demands one.
 
 ## Invoking an agent
 

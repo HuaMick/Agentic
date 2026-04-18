@@ -4,7 +4,7 @@ Reusable design and operational guidance referenced by stories. A pattern centra
 
 ## Layout
 
-One file per pattern: `<slug>.yml` where slug is kebab-case (`lazy-loading.yml`, `append-only-log.yml`, `fail-closed-on-dirty-tree.yml`).
+One file per pattern: `<slug>.yml` where slug is kebab-case (`standalone-resilient-library.yml`, `append-only-log.yml`).
 
 ## Schema
 
@@ -31,6 +31,8 @@ A dedicated `pattern-writer` agent may be added later if pattern volume warrants
 
 Extract when the same concept appears (or is about to appear) in **2+ stories' guidance sections**. Before that point, inline in the story's guidance. Extraction is driven by observed repetition, not speculation.
 
-## Current state
+## Current patterns
 
-Empty. Story 1 ships with `patterns: []` because no repetition has emerged yet. First extraction will most likely come from a second or third story that shares substantial architectural concerns with story 1 — likely candidates: "fail-closed-on-dirty-tree" (when a second story needs the same semantic), "append-only-log" (when a second artifact beyond evidence needs the same writing discipline).
+- **`standalone-resilient-library`** — extracted when multiple crates needed the same "crate stands alone, fails closed on missing deps" guidance. Referenced by the `agentic-store` and `agentic-story` stories.
+
+Next extraction candidates will emerge as stories 1, 2, 3, and 7 are written up against the existing corpus.

@@ -32,3 +32,4 @@ current_consumers:
   - agents/planner/story-writer/process.yml
   - agents/build/build-rust/process.yml
   - agents/teacher/guidance-writer/process.yml
+  - agents/test/test-builder/process.yml

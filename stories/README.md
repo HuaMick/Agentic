@@ -12,7 +12,7 @@ A unit of work defined by:
 2. **Acceptance** — one or more executable tests (each with its own justification) plus a prose UAT walkthrough.
 3. **Guidance** — non-obvious rebuild-from-scratch context.
 4. **Patterns** — IDs of reusable design patterns this story applies (see `patterns/`).
-5. **Evidence** — append-only log of verify runs, stored externally under `evidence/runs/<id>/` (see `evidence/README.md`).
+5. **Evidence** — test results are persisted in `agentic-store` (see `evidence/README.md`); only red-state artefacts live on disk under `evidence/runs/<id>/`.
 
 ## Lifecycle
 
@@ -22,15 +22,15 @@ proposed → under_construction → healthy
                  └── (edit invalidates proof, auto-revert)
 ```
 
-- `proposed` — default on new stories. Written by the story-writer agent or by humans.
-- `under_construction` — written by the implementing agent (`build-rust`) when it picks up a `proposed` story, or auto-reverted by the story-writer when an edit invalidates a prior Pass verdict.
+- `proposed` — default on new stories. Written by the `story-writer` agent or by humans.
+- `under_construction` — written by the implementing agent (`build-rust`) when it picks up a `proposed` story and begins work, or auto-reverted by `story-writer` when an edit invalidates a prior Pass verdict.
 - `healthy` — written only by `agentic uat` on a Pass verdict.
-- `unhealthy` — computed by the dashboard from evidence signals; never written to disk.
+- `unhealthy` — computed by the dashboard (`agentic stories health`) from signals in `agentic-store`; never written to disk.
 
 A story cannot transition to `healthy` without a Pass verdict from `agentic uat` including:
 
 - A full git commit hash (clean working tree required).
-- A trace reference (the actual evidence file).
+- A trace reference (persisted `test_runs` + `uat_signings` rows).
 - A run ID (UUID v4).
 
 ## Test file binding
@@ -48,6 +48,14 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 ## Current corpus
 
-- **`1.yml`** — "Verify a story end-to-end." The meta-story driving `agentic-verify` implementation. Status: `proposed`. No tests yet — they're authored during Phase 2 alongside the verifier.
+| id | title | status |
+|----|-------|--------|
+| 1 | `agentic uat` signs a verdict promoting a story to healthy | proposed (unstarted) |
+| 2 | `agentic-ci-record` records test-builder red-state evidence | under_construction (red-state scaffold) |
+| 3 | `agentic stories health` dashboard | proposed (unstarted) |
+| 4 | `Store` trait + `MemStore` impl | under_construction (awaiting UAT) |
+| 5 | `SurrealStore` backed by `surrealkv` | under_construction (awaiting UAT) |
+| 6 | `agentic-story` YAML loader + schema + DAG check | under_construction (awaiting UAT) |
+| 7 | test-builder meta-story | proposed (unstarted) |
 
-Next expected story: something that provides story 1's UAT with a second story to walk through. Candidates in `CLAUDE.md`.
+Check each `<id>.yml` for the authoritative status, outcome, and acceptance.
