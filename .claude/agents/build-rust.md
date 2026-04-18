@@ -8,6 +8,7 @@ description: |
   ready to be implemented and you need code written against its acceptance
   contract.
 tools: Read, Glob, Grep, Write, Edit, Bash
+model: haiku
 ---
 
 Read the three spec files for this agent and follow them as a complete set:
