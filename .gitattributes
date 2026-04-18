@@ -1,0 +1,16 @@
+# Normalize line endings across Windows/WSL/Linux checkouts.
+# Without this, files edited through the Windows side of //wsl.localhost/
+# acquire CRLF and show as "modified" even when byte-identical modulo EOL.
+* text=auto eol=lf
+
+# Explicitly LF on the hygiene-critical files so a stray Windows editor
+# can't re-dirty them.
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+*.toml         text eol=lf
+*.md           text eol=lf
+*.rs           text eol=lf
+*.sh           text eol=lf
