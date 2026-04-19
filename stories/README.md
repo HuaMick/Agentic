@@ -50,12 +50,19 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 | id | title | status |
 |----|-------|--------|
-| 1 | `agentic uat` signs a verdict promoting a story to healthy | proposed (unstarted) |
-| 2 | `agentic-ci-record` records test-builder red-state evidence | under_construction (red-state scaffold) |
-| 3 | `agentic stories health` dashboard | proposed (unstarted) |
-| 4 | `Store` trait + `MemStore` impl | under_construction (awaiting UAT) |
-| 5 | `SurrealStore` backed by `surrealkv` | under_construction (awaiting UAT) |
-| 6 | `agentic-story` YAML loader + schema + DAG check | under_construction (awaiting UAT) |
-| 7 | test-builder meta-story | proposed (unstarted) |
+| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | under_construction |
+| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | healthy |
+| 3 | `agentic stories health` dashboard (library + CLI) | under_construction |
+| 4 | `Store` trait + `MemStore` impl | healthy |
+| 5 | `SurrealStore` backed by `surrealkv` | healthy |
+| 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
+| 7 | test-builder meta-story — red-state evidence is a committable atomic | proposed |
+
+Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
+audit found the split was along library/binary crate boundaries rather
+than along user journeys — and that story 8's outcome explicitly joined
+two distinct observables (signing a verdict AND reading the dashboard).
+See each story's `acceptance.tests` for the library-level vs. binary-level
+test split.
 
 Check each `<id>.yml` for the authoritative status, outcome, and acceptance.

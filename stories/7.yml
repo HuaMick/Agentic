@@ -10,6 +10,7 @@ status: proposed
 
 patterns:
   - standalone-resilient-library
+  - fail-closed-on-dirty-tree
 
 acceptance:
   tests:
@@ -152,10 +153,12 @@ guidance: |
 
   Key invariants the tests collectively pin down:
 
-  - **Red-state evidence is a committable atomic.** Test-builder runs
-    only on a clean working tree (`git status --porcelain` empty). On
-    a dirty tree it returns `DirtyTree`, writes nothing, exits
-    non-zero. No partial runs, no "best effort" evidence.
+  - **Red-state evidence is a committable atomic — see the
+    fail-closed-on-dirty-tree pattern.** Test-builder runs only on a
+    clean working tree (`git status --porcelain` empty). On a dirty
+    tree it returns `TestBuilderError::DirtyTree`, writes nothing,
+    exits non-zero per the pattern's exit-code mapping. No partial
+    runs, no "best effort" evidence.
 
   - **Existing tests are bytes-immutable.** If an acceptance.tests[]
     entry points at a file with non-empty content, that file is not

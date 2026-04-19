@@ -1,0 +1,87 @@
+id: fail-closed-on-dirty-tree
+title: "Fail-closed on a dirty git working tree"
+
+summary: |
+  A command that writes attestable evidence (a UAT signing, a red-state
+  record, or any other artefact whose value depends on being traceable
+  to a specific commit) refuses to run when the git working tree is
+  dirty. On a dirty tree the command returns a typed error, writes
+  nothing, and exits with a distinct "could-not-verdict" code — never
+  a pass, never a silent success.
+
+when_to_use: |
+  Apply when ALL of the following hold:
+
+  - The command produces evidence whose trust depends on being pinned
+    to a commit hash (UAT signings, red-state JSONL rows, store rows
+    whose `commit` field the dashboard reads).
+  - A consumer downstream of the evidence will treat the recorded
+    commit as an authoritative description of the tree state the
+    evidence was observed against.
+  - The cost of a forgeable or ambiguous record is strictly worse
+    than the inconvenience of making the operator commit or stash
+    first.
+
+  Do NOT apply to read-only commands (e.g. `agentic stories health`),
+  parse/validate commands (e.g. the story loader) or to pure
+  computation that does not claim to be a point-in-time observation of
+  the codebase.
+
+how_we_do_it: |
+  Four concrete conventions, all enforced by tests rather than docs:
+
+  1. **Check first, write second.** Before opening a store
+     transaction, creating a file, or allocating a run id, ask
+     `git2::Repository::statuses()` whether the working tree has any
+     uncommitted or unstaged changes and any untracked files that
+     would affect the build. On non-empty statuses, return the
+     typed error and stop.
+
+  2. **Typed error, distinct exit code.** The error variant is
+     named `<Crate>Error::DirtyTree`. The CLI shim maps it to
+     exit code `2` (could-not-verdict), never `1` (which means
+     "real fail"). The distinction lets CI tell "fix the system
+     under test" apart from "retry after cleaning the tree."
+
+  3. **Dedicated test per gated command.** Each command that
+     applies this pattern ships an integration test named
+     `*_dirty_tree*.rs` (Rust integration test) or a scripted
+     equivalent that: constructs a tempdir git repo, commits a
+     baseline, introduces an uncommitted change, invokes the
+     command, and asserts (a) typed DirtyTree return, (b) zero
+     side effects on disk, (c) zero rows written to the store.
+
+  4. **No "best effort" escape hatch.** There is no
+     `--allow-dirty`, no environment-variable override, no warn-
+     and-continue. A command that is allowed to run on a dirty
+     tree is either not producing attestable evidence (in which
+     case it should not be in this pattern's scope) or is
+     documenting a bypass that undermines the gate.
+
+  Canonical examples: the UAT gate (`crates/agentic-uat`, see
+  `stories/1.yml`) and test-builder (`crates/agentic-test-builder`,
+  see `stories/7.yml`). Both check via `git2` before any write.
+
+trade_offs: |
+  **Given up.** Operator convenience: if the tree is dirty for an
+  unrelated reason (a local experiment, a generated artefact the
+  operator means to discard), the command refuses and forces a
+  commit or stash first. This is the intended friction; the
+  alternative is a signed record that cannot be reconstructed from
+  the commit alone.
+
+  **Wrong choice when.** The command's output is not an attestation.
+  Read-only views, parsers, and computation that consumers would
+  never treat as a point-in-time tree observation do not need (and
+  should not grow) this gate — it would add friction without buying
+  trust.
+
+  **Drift risk.** A command that starts as a write-evidence
+  command but evolves into something also exposing a read mode
+  must keep the dirty-tree check on the write path only. Do not
+  apply the gate globally at the CLI entry point; apply it inside
+  the library function that produces the attestation, so read
+  paths stay usable on a dirty tree.
+
+related_patterns:
+  - standalone-resilient-library

@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -55,21 +55,22 @@ acceptance:
       long titles can break terminal layouts.
   - file: crates/agentic-dashboard/tests/health_json_mode.rs
     justification: |
-      Proves the `--json` contract: emits an object with
-      `stories[]` and `summary{}` keys, includes FULL commit SHAs
-      (not truncated), preserves the same data as the table mode,
-      and is parseable by `serde_json` round-trip. Without this
-      downstream tooling (CI status checks, future web UI) cannot
-      consume the dashboard programmatically without scraping the
-      TTY output.
+      Proves the `--json` contract at the library boundary: emits
+      an object with `stories[]` and `summary{}` keys, includes
+      FULL commit SHAs (not truncated), preserves the same data as
+      the table mode, and is parseable by `serde_json` round-trip.
+      Without this downstream tooling (CI status checks, future web
+      UI) cannot consume the dashboard programmatically without
+      scraping the TTY output.
   - file: crates/agentic-dashboard/tests/health_drilldown.rs
     justification: |
-      Proves the single-story drill-down: `agentic stories health <id>`
-      returns an expanded view including the list of currently
-      failing test file basenames (when unhealthy) and the latest
-      signing's commit and timestamp. Without this an operator
-      sees `unhealthy` in the table but has no path from there to
-      "which test, which commit?" without leaving the tool.
+      Proves the single-story drill-down at the library boundary:
+      `Dashboard::drilldown(<id>)` returns an expanded view
+      including the list of currently failing test file basenames
+      (when unhealthy) and the latest signing's commit and
+      timestamp. Without this an operator sees `unhealthy` in the
+      table but has no path from there to "which test, which
+      commit?" without leaving the tool.
   - file: crates/agentic-dashboard/tests/health_malformed_yaml_renders_error_row.rs
     justification: |
       Proves the dashboard does not crash on bad input: given one
@@ -80,38 +81,86 @@ acceptance:
       malformed story file would blank the entire dashboard —
       making the worst case (we can't see what's broken) coincide
       with the moment we most need to see what's broken.
+  - file: crates/agentic-cli/tests/health_table_mode.rs
+    justification: |
+      Proves the table-mode wiring through the binary: running
+      `agentic stories health` with a fixture `stories/` directory
+      and an empty tempdir store writes the table header row, zero
+      data rows (because the fixture stories directory is empty),
+      and exits 0. Without this the CLI-to-`Dashboard::render_table`
+      wire is a library-level claim only — a broken argv-to-
+      Dashboard path would go unnoticed.
+  - file: crates/agentic-cli/tests/health_json_mode.rs
+    justification: |
+      Proves the `--json` flag is plumbed through the binary:
+      running `agentic stories health --json` against the same empty
+      fixture emits stdout that `serde_json::from_str` parses into a
+      value with `stories` (array) and `summary` (object) keys, and
+      exits 0. Without this, JSON-mode consumers (future CI status
+      checks, dashboards reading the binary's output) would have to
+      discover via runtime failure whether the flag reached the
+      `Dashboard::render_json` call at all.
+  - file: crates/agentic-cli/tests/health_drilldown.rs
+    justification: |
+      Proves the positional `<id>` argument selects drilldown mode
+      through the binary: `agentic stories health <id>` against a
+      fixture story emits a single-story view (not the table
+      header) and exits 0; running against an id that does not
+      exist on disk exits non-zero with a message naming the
+      missing id. Without this, the only way to access
+      `Dashboard::drilldown` is via Rust, defeating the purpose of
+      the subcommand for an operator.
+  - file: crates/agentic-cli/tests/cli_uses_configured_store.rs
+    justification: |
+      Proves the two subcommands share one store end-to-end: after
+      `agentic uat <id> --verdict pass --store <tempdir>` promotes a
+      fixture story, running `agentic stories health --store
+      <tempdir>` on the same tempdir reports that story as `healthy`
+      with a `Healthy at` cell populated from the just-written
+      `uat_signings` row. Without this end-to-end check, the
+      dashboard could read a different default store than the UAT
+      command wrote to, and the binary would look correct in
+      isolation but produce silently inconsistent state in any real
+      session.
   uat: |
     Goal: convince yourself the dashboard correctly classifies the four
     statuses, surfaces `unhealthy` first, drills down on a specific
-    story, and refuses to crash when one story file is malformed.
+    story, refuses to crash when one story file is malformed, and that
+    the `agentic stories health` subcommand reads the same store the
+    `agentic uat` subcommand writes to.
 
     Setup:
       1. From a clean checkout on branch `main`, run `git status` and
          confirm the working tree is clean.
-      2. Confirm at least four stories exist on disk so the table has
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the just-
+         installed binary.
+      3. Confirm at least four stories exist on disk so the table has
          visible variety. If fewer exist, this UAT can still run but
          only some classifications will be observable; note in the
          report which were exercised.
-      3. Confirm `agentic-store` is reachable. Drop and recreate the
-         local DB so `test_runs` and `uat_signings` start empty.
+      4. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
 
     Four-status walkthrough:
-      4. Set up four stories such that one matches each classification:
+      5. Set up four stories such that one matches each classification:
          - `<proposed-id>`: leave `status: proposed` on disk; do not
            record any test runs or signings.
          - `<uc-id>`: edit `status: under_construction` on disk; record
            a Pass `test_runs` row for it via story 2's recorder.
-         - `<healthy-id>`: drive it through `agentic uat <healthy-id>`
-           (story 1) so `status: healthy` is on disk and a
-           `uat_signings.verdict=pass` row exists at HEAD; also record
-           a Pass `test_runs` row.
-         - `<unhealthy-id>`: drive it through `agentic uat <unhealthy-id>`
-           on commit `C1`, then make a code change and commit as `C2`,
-           then break one of its acceptance tests and record a Fail
-           `test_runs` row at `C2`. (You may also exercise the second
-           trigger — UAT commit != HEAD without test failure — by
-           making a no-op commit instead of breaking a test.)
-      5. Run `agentic stories health`. Observe:
+         - `<healthy-id>`: drive it through `agentic uat <healthy-id>
+           --verdict pass --store "$AGENTIC_STORE"` (see story 1) so
+           `status: healthy` is on disk and a `uat_signings.verdict=pass`
+           row exists at HEAD; also record a Pass `test_runs` row.
+         - `<unhealthy-id>`: drive it through `agentic uat <unhealthy-id>
+           --verdict pass --store "$AGENTIC_STORE"` on commit `C1`,
+           then make a code change and commit as `C2`, then break one
+           of its acceptance tests and record a Fail `test_runs` row at
+           `C2`. (You may also exercise the second trigger — UAT commit
+           != HEAD without test failure — by making a no-op commit
+           instead of breaking a test.)
+      6. Run `agentic stories health --store "$AGENTIC_STORE"`. Observe:
+         - Process exits 0.
          - Output is a single table with a header row matching:
            `ID | Title | Health | Failing tests | Healthy at`.
          - Row order: `<unhealthy-id>` first, then `<uc-id>`, then
@@ -126,15 +175,22 @@ acceptance:
            truncated with an ellipsis; no row wraps onto two lines.
 
     Drill-down walkthrough:
-      6. Run `agentic stories health <unhealthy-id>`. Observe:
+      7. Run `agentic stories health <unhealthy-id> --store
+         "$AGENTIC_STORE"`. Observe:
          - Output is an expanded single-story view, NOT the table.
          - It names every failing test file's basename.
          - It shows the latest UAT signing's commit (full or short
            is acceptable as long as it's unambiguous in this view)
            and timestamp.
+      8. Run `agentic stories health 99999 --store "$AGENTIC_STORE"`
+         (an id that does not exist). Observe:
+         - Process exits non-zero.
+         - stderr names the missing id.
+         - No panic / backtrace is shown.
 
     JSON walkthrough:
-      7. Run `agentic stories health --json | jq .`. Observe:
+      9. Run `agentic stories health --store "$AGENTIC_STORE" --json |
+         jq .`. Observe:
          - Output parses as JSON.
          - Top-level keys include `stories` (array) and `summary`
            (object).
@@ -145,12 +201,12 @@ acceptance:
            `error` rows) equals the length of `stories`.
 
     Malformed-yaml walkthrough:
-      8. Pick a story id `<bad-id>` that you do NOT mind temporarily
+     10. Pick a story id `<bad-id>` that you do NOT mind temporarily
          corrupting (or copy a valid story to `stories/9999.yml`
          first to avoid risking real content). Edit it to be invalid
          YAML (e.g. unbalanced quotes) or invalid against the schema
-         (e.g. `status: nonsense`). Save. Run `agentic stories health`.
-         Observe:
+         (e.g. `status: nonsense`). Save. Run `agentic stories
+         health --store "$AGENTIC_STORE"`. Observe:
          - Process exits 0 (the dashboard does NOT crash on one bad
            file).
          - The `<bad-id>` row appears with `Health` = `error` and a
@@ -158,26 +214,41 @@ acceptance:
            "schema: status").
          - Every OTHER story still renders correctly.
 
+    Shared-store walkthrough:
+     11. Confirm that `<healthy-id>` from step 5 still renders as
+         `healthy` in both the table and `--json` output — i.e. the
+         dashboard's store matches the one the UAT signing in step
+         5 wrote to. If the dashboard does not see the row, the
+         `--store` flag is not being honoured consistently across
+         subcommands and this UAT fails.
+
     Cleanup:
-      9. Revert the corrupted file from step 8 (`git checkout
+     12. Revert the corrupted file from step 10 (`git checkout
          stories/<bad-id>.yml` or delete the throwaway `9999.yml`).
-      10. Revert any `status: under_construction` / `status: healthy`
-          edits you made for step 4 if you do not want to keep them.
-      11. Drop and recreate the local store DB to clear the
-          synthetic `test_runs` and `uat_signings` rows.
+     13. Revert any `status: under_construction` / `status: healthy`
+         edits you made for step 5 if you do not want to keep them.
+     14. `rm -rf "$AGENTIC_STORE"` to clear the synthetic
+         `test_runs` and `uat_signings` rows.
+     15. If you want the installed binary gone from your toolchain:
+         `cargo uninstall agentic-cli`.
 guidance: |
-  This story owns the read-side of the four-status model. It does not
-  write to `test_runs` (story 2 owns that), it does not write to
-  `uat_signings` and it does not promote any story (story 1 owns that).
-  The dashboard is a pure reader.
+  This story owns the read-side of the four-status model end-to-end:
+  the classification rules and render logic in `agentic-dashboard`,
+  the binary's argv-to-library wire in `agentic-cli`, and the cross-
+  subcommand invariant that `agentic stories health` reads from the
+  same store `agentic uat` writes to. The dashboard is a pure reader
+  — it does not write to `test_runs` (story 2 owns that), it does
+  not write to `uat_signings`, and it does not promote any story
+  (story 1 owns that).
 
   Why no standalone-resilient-library pattern.
-    The `standalone-resilient-library` pattern applies when "the system
-    is in flames and we still need a verdict." The dashboard is the
-    opposite: when the store is unreachable, the right behavior is to
-    fail loudly with a clear error, not to produce a degraded reading
-    that an operator might misinterpret. So the dashboard is allowed
-    to depend on whatever it needs to render well.
+    The `standalone-resilient-library` pattern applies when "the
+    system is in flames and we still need a verdict." The dashboard
+    is the opposite: when the store is unreachable, the right
+    behavior is to fail loudly with a clear error, not to produce a
+    degraded reading that an operator might misinterpret. So the
+    dashboard is allowed to depend on whatever it needs to render
+    well.
 
   Health computation rules — the four cases.
     Compute per story by joining its YAML against the latest
@@ -292,22 +363,80 @@ guidance: |
     dashboard's job is to report the truth, and the truth is
     sometimes "I can't read the data."
 
+  CLI shape — argv for `agentic stories health` (authoritative).
+    agentic stories health [<id>] [--json] [--store <path>]
+
+    Positional `<id>` is optional; when present it selects drilldown
+    mode. `--json` selects JSON output instead of the table.
+    `--store` is described in story 1's "Store location — default
+    and override" section; this story inherits that behaviour
+    verbatim and is tested against it via the
+    `cli_uses_configured_store.rs` end-to-end test.
+
+  Exit-code contract for `agentic stories health`.
+    0 = rendered successfully (including the case where the
+        dashboard marks a row as `error` because of malformed
+        YAML — that is inside this story's tolerance). In
+        drilldown mode, an unknown `<id>` exits non-zero with a
+        clear message (stderr names the missing id);
+        `DashboardError::UnknownStory` carries the right shape.
+        Non-zero is also acceptable for the failure modes this
+        story declines to tolerate (store unreachable, stories/
+        directory missing).
+
+  CLI-wide decisions inherited from story 1.
+    The parser choice, the full `agentic-cli` allowed-dependency
+    list, the store-path default/override semantics, and the
+    SurrealStore-not-MemStore decision are stated once in story 1's
+    guidance. They apply to `agentic stories health` unchanged; do
+    not restate them here.
+
+  The `cli_uses_configured_store.rs` test — where and why.
+    The cross-subcommand invariant "a UAT write is visible to the
+    subsequent dashboard read on the same `--store`" is proven by
+    this test. It lives in story 3 rather than story 1 because
+    story 3 already depends on story 1 (the dashboard needs the
+    UAT row to exist to classify a story `healthy`); placing it in
+    story 1 would close a dependency cycle. The test drives the
+    binary with `assert_cmd`, constructs a single `TempDir` as
+    `--store`, runs `agentic uat` first and `agentic stories
+    health` second, and asserts the dashboard output reflects the
+    signing row.
+
   Test file locations.
-    All eight tests live under `crates/agentic-dashboard/tests/`
-    as Rust integration tests. They use the `MemStore` impl from
+    Library-level tests (eight tests: `health_proposed.rs`,
+    `health_under_construction.rs`, `health_healthy.rs`,
+    `health_unhealthy_fell_from_grace.rs`,
+    `health_sort_and_truncation.rs`, `health_json_mode.rs`,
+    `health_drilldown.rs`, `health_malformed_yaml_renders_error_row.rs`)
+    live under `crates/agentic-dashboard/tests/` as Rust
+    integration tests. They use the `MemStore` impl from
     `agentic-store`, seed it with synthetic `test_runs` and
     `uat_signings` rows, point the dashboard at a temporary
     `stories/` directory with fixture YAMLs, and assert on the
     rendered string (table mode) or the parsed JSON value (json
     mode). They do not shell out to the top-level binary.
 
+    Binary-level tests (four tests: `health_table_mode.rs`,
+    `health_json_mode.rs`, `health_drilldown.rs`,
+    `cli_uses_configured_store.rs`) live under
+    `crates/agentic-cli/tests/` as Rust integration tests. They
+    drive the compiled binary via `assert_cmd` (or equivalent),
+    construct a `tempfile::TempDir` for `--store`, construct a
+    separate `TempDir` seeded with a minimal `stories/` directory
+    and a small git repo (HEAD commit required for any signing
+    path they exercise), and invoke `agentic` with its full argv.
+    The fixture `stories/` directory is private to each test; none
+    of these tests touch the repo's real `stories/` directory at
+    the workspace root. The binary-under-test is whatever
+    `CARGO_BIN_EXE_agentic` resolves to.
+
   Relationship to stories 1 and 2.
-    This story READS what stories 1 and 2 write. It does not
-    require either to exist as code at the moment of authoring —
-    the row contracts in stories 1 and 2 are sufficient to write
-    these tests against `MemStore`. At runtime, however, the
-    dashboard is only useful once stories 1 and 2 have shipped.
-    `depends_on` therefore lists both.
+    This story READS what stories 1 and 2 write. The row contracts
+    in stories 1 and 2 are sufficient to write the library-level
+    tests against `MemStore` even before their impls ship. At
+    runtime the dashboard is only useful once stories 1 and 2 have
+    shipped, which is what `depends_on` encodes.
 depends_on:
 - 1
 - 2

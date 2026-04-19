@@ -1,142 +1,202 @@
 id: 1
 title: Sign a UAT verdict and promote the story to healthy
 outcome: |
-  A developer runs `agentic uat <id>` against a story and receives a
-  commit-signed Pass or Fail verdict that is the only path by which a
-  story's status on disk becomes `healthy`.
-status: healthy
+  A developer runs `agentic uat <id> --verdict <pass|fail>` against a
+  story and receives a commit-signed verdict that is the only path by
+  which a story's status on disk becomes `healthy`.
+status: under_construction
 patterns:
 - standalone-resilient-library
+- fail-closed-on-dirty-tree
 acceptance:
   tests:
   - file: crates/agentic-uat/tests/uat_pass.rs
     justification: |
-      Proves the happy path: given a story whose UAT walkthrough
-      executes successfully (driven by a stub `UatExecutor` that
-      returns Pass) on a clean working tree, `Uat::run` returns a
-      Pass verdict, writes exactly one row to `uat_signings` with
-      verdict=pass and the current commit hash, and rewrites the
-      story YAML so `status: healthy`. Without this the gate cannot
-      promote a story at all — and promotion-to-healthy is the
-      whole point of the command.
+      Proves the happy path at the library boundary: given a story
+      whose UAT walkthrough executes successfully (driven by a stub
+      `UatExecutor` that returns Pass) on a clean working tree,
+      `Uat::run` returns a Pass verdict, writes exactly one row to
+      `uat_signings` with verdict=pass and the current commit hash,
+      and rewrites the story YAML so `status: healthy`. Without this
+      the gate cannot promote a story at all — and promotion-to-
+      healthy is the whole point of the command.
   - file: crates/agentic-uat/tests/uat_fail.rs
     justification: |
-      Proves the failure path: given a stub `UatExecutor` that
-      returns Fail, `Uat::run` returns a Fail verdict, writes a
-      `uat_signings` row with verdict=fail and the current commit,
-      and does NOT mutate the story YAML's `status` field. Without
-      this a Fail could either silently promote (catastrophic) or
-      leave no audit trail (we'd lose the negative evidence the
-      dashboard needs to compute "fell from grace").
+      Proves the failure path at the library boundary: given a stub
+      `UatExecutor` that returns Fail, `Uat::run` returns a Fail
+      verdict, writes a `uat_signings` row with verdict=fail and the
+      current commit, and does NOT mutate the story YAML's `status`
+      field. Without this a Fail could either silently promote
+      (catastrophic) or leave no audit trail (we'd lose the negative
+      evidence the dashboard needs to compute "fell from grace").
   - file: crates/agentic-uat/tests/uat_fail_closed_dirty_tree.rs
     justification: |
-      Proves the fail-closed contract on a dirty git working tree:
-      with uncommitted changes present, `Uat::run` refuses to
-      produce a verdict, returns `UatError::DirtyTree`, writes no
-      row to `uat_signings`, and does not touch the story YAML.
-      Without this the commit-signed guarantee is forgeable —
-      someone could run UAT, see Pass, then edit code and claim
-      the old verdict still applies to the new tree.
+      Proves the fail-closed contract on a dirty git working tree at
+      the library boundary: with uncommitted changes present,
+      `Uat::run` refuses to produce a verdict, returns
+      `UatError::DirtyTree`, writes no row to `uat_signings`, and
+      does not touch the story YAML. Without this the commit-signed
+      guarantee is forgeable — someone could run UAT, see Pass, then
+      edit code and claim the old verdict still applies to the new
+      tree.
   - file: crates/agentic-uat/tests/uat_bad_story_id.rs
     justification: |
-      Proves clean failure on bad input: invoking `Uat::run` with
-      a non-existent story id returns `UatError::UnknownStory`,
-      does not panic, writes no row to `uat_signings`, and does
-      not create or touch any YAML file. Without this a typo or
-      stale id could produce a panic trace that looks like a
-      system fault when it is actually user error — eroding trust
-      in the verdict precisely when we need it.
+      Proves clean failure on bad input at the library boundary:
+      invoking `Uat::run` with a non-existent story id returns
+      `UatError::UnknownStory`, does not panic, writes no row to
+      `uat_signings`, and does not create or touch any YAML file.
+      Without this a typo or stale id could produce a panic trace
+      that looks like a system fault when it is actually user error
+      — eroding trust in the verdict precisely when we need it.
   - file: crates/agentic-uat/tests/uat_standalone_resilience.rs
     justification: |
-      Proves the standalone-resilient-library claim: the UAT
-      library is driven directly with only `agentic-store`,
-      `agentic-events`, `agentic-story`, and `git2` wired up (no
-      orchestrator, no runtime, no sandbox), and produces the
-      same verdict-and-signing shape as the CLI path. Without
-      this we cannot claim `agentic uat` is the layer that still
-      promotes stories when the rest of the system is in flames;
-      it would be just another thing that breaks together.
+      Proves the standalone-resilient-library claim: the UAT library
+      is driven directly with only `agentic-store`, `agentic-events`,
+      `agentic-story`, and `git2` wired up (no orchestrator, no
+      runtime, no sandbox, no CLI crate), and produces the same
+      verdict-and-signing shape as the binary path. Without this we
+      cannot claim `agentic uat` is the layer that still promotes
+      stories when the rest of the system is in flames; it would be
+      just another thing that breaks together.
+  - file: crates/agentic-cli/tests/uat_pass_promotes.rs
+    justification: |
+      Proves the happy path through the binary: `agentic uat <id>
+      --verdict pass` on a clean fixture repo with a valid story
+      exits 0, writes exactly one row to the configured store's
+      `uat_signings` table with `verdict=pass` and the fixture HEAD
+      SHA, and rewrites the fixture's `stories/<id>.yml` to `status:
+      healthy`. Without this we cannot claim the binary is a real
+      path to `healthy` — the library could do it right while the
+      argv parser or the signing-library wire-up drops the
+      promotion on the floor.
+  - file: crates/agentic-cli/tests/uat_fail_does_not_promote.rs
+    justification: |
+      Proves the Fail exit-code contract at the binary boundary:
+      `agentic uat <id> --verdict fail` on the same clean fixture
+      exits 1 (not 0, not 2), writes exactly one row with
+      `verdict=fail`, and leaves the fixture YAML's `status:` field
+      untouched. Without this a Fail could either silently promote
+      (catastrophic) or surface as exit 2 and be confused with "the
+      CLI itself could not run," which breaks CI's distinction
+      between a real negative verdict and a system fault.
+  - file: crates/agentic-cli/tests/uat_dirty_tree_exits_2.rs
+    justification: |
+      Proves the fail-closed contract reaches the operator via the
+      binary's exit code: with an uncommitted change in the fixture
+      repo, `agentic uat <id> --verdict pass` exits 2, writes zero
+      rows to `uat_signings`, and leaves the fixture YAML unchanged.
+      Without this a wrapper that mistranslated the dirty-tree error
+      to exit 1 would silently turn "could not verdict" into "real
+      failure."
+  - file: crates/agentic-cli/tests/uat_requires_verdict_flag.rs
+    justification: |
+      Proves argv validation exits 2, not 0 or 1: `agentic uat <id>`
+      with no `--verdict` flag returns exit 2 (malformed args),
+      writes no store row, and does not touch the story YAML.
+      Without this a user typo or scripted invocation missing the
+      flag could surface as a panic or as exit 1 (which CI would
+      treat as a real UAT failure) rather than as the documented
+      could-not-verdict code.
   uat: |
     Goal: convince yourself that `agentic uat` is the only path to
-    `healthy`, that it refuses to run on a dirty tree, and that bad
-    input fails cleanly.
+    `healthy`, that it refuses to run on a dirty tree, that bad input
+    fails cleanly, and that the binary's exit-code contract matches
+    what CI expects.
 
     Setup:
       1. From a clean checkout on branch `main`, run `git status` and
          confirm the working tree is clean.
-      2. Confirm `stories/1.yml` (this story) exists and that at least
-         one other `stories/N.yml` exists with `status: under_construction`
-         and a UAT walkthrough that the local stub executor can drive
-         to Pass. If no such story exists yet, stop — this UAT cannot
-         run until a second testable story is on disk.
-      3. Confirm the `agentic-store` DB is reachable (run any read-only
-         `agentic stories health` command first; it should not error).
+      2. Install the binary from this workspace:
+         `cargo install --path crates/agentic-cli --locked`. Confirm
+         `command -v agentic` resolves to the just-installed binary.
+      3. Choose a store location for this UAT run. Pass an explicit
+         `--store <tempdir>` (e.g. `export AGENTIC_STORE=$(mktemp -d)`)
+         so the signing rows you write here do not mingle with any
+         prior state.
+      4. Confirm `stories/1.yml` (this story) exists and that at
+         least one other `stories/N.yml` exists with
+         `status: under_construction` and a UAT walkthrough that you
+         (acting as orchestrator) can decide a verdict on. If no such
+         story exists, stop — this UAT cannot run until a second
+         testable story is on disk.
 
     Pass-and-promote walkthrough:
-      4. Pick the candidate story id `<pass-id>` (NOT story 1). Note its
-         current `status:` field on disk. Run `agentic uat <pass-id>`.
-         Observe:
-         - Process exits 0.
-         - stdout includes `Pass` and a commit hash matching
+      5. Pick the candidate story id `<pass-id>` (NOT story 1). Note
+         its current `status:` field on disk. Run `agentic uat
+         <pass-id> --verdict pass --store "$AGENTIC_STORE"`. Observe:
+         - Process exits 0 (`echo $?`).
+         - stdout includes `pass` and a commit hash matching
            `git rev-parse HEAD`.
          - The story file `stories/<pass-id>.yml` now has
-           `status: healthy` (open the file to confirm).
-         - Run `agentic stories health <pass-id>`; the row reports
-           `healthy` with the same commit short-SHA.
-         - Querying `uat_signings` (via the dashboard's `--json` mode
-           or a future `agentic store query` shim) shows exactly one
-           new row for `<pass-id>` with verdict=pass.
+           `status: healthy` on disk (`grep '^status:' stories/<pass-id>.yml`).
+         - Querying `uat_signings` (via the dashboard's `--json`
+           mode once story 3 ships, or a `surreal sql` shell for
+           now) shows exactly one new row for `<pass-id>` with
+           `verdict=pass`.
 
     Fail-without-promotion walkthrough:
-      5. Pick a different story `<fail-id>` whose UAT the stub executor
-         is configured to fail. Note its current `status:`. Run
-         `agentic uat <fail-id>`. Observe:
-         - Process exits 1 (Fail, distinct from could-not-verdict).
-         - stdout includes `Fail`.
-         - The story file `stories/<fail-id>.yml` is unchanged on disk —
-           `status:` was NOT promoted.
-         - A new row appears in `uat_signings` with verdict=fail and the
-           current commit.
+      6. Pick a different story `<fail-id>`. Note its current
+         `status:`. Run `agentic uat <fail-id> --verdict fail --store
+         "$AGENTIC_STORE"`. Observe:
+         - Process exits 1 (not 0, not 2).
+         - stdout includes `fail`.
+         - The story file `stories/<fail-id>.yml` is unchanged on
+           disk — `status:` was NOT promoted.
+         - A new row appears in `uat_signings` with `verdict=fail`
+           and the current commit.
 
     Dirty-tree refusal walkthrough:
-      6. With the tree still clean, introduce an uncommitted change
+      7. With the tree still clean, introduce an uncommitted change
          (`echo x >> README.md`). Without committing, run
-         `agentic uat <pass-id>` again. Observe:
-         - Process exits 2 (CouldNotVerdict, distinct from Fail).
-         - stderr names the dirty tree as the cause; no Pass/Fail line
-           is printed.
+         `agentic uat <pass-id> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe:
+         - Process exits 2 (not 0, not 1).
+         - stderr names the dirty tree as the cause; no `pass` or
+           `fail` line is printed on stdout.
          - No new row was written to `uat_signings` for `<pass-id>`
-           (count is unchanged from step 4).
+           (count is unchanged from step 5).
          - The story file is unchanged.
 
     Bad-id refusal walkthrough:
-      7. With the dirty README change still present, first run
+      8. With the dirty README change still present, first run
          `git restore README.md` to clean the tree. Then run
-         `agentic uat 99999` (an id that does not exist). Observe:
+         `agentic uat 99999 --verdict pass --store "$AGENTIC_STORE"`
+         (an id that does not exist). Observe:
          - Process exits 2.
          - stderr is a human-readable "unknown story id" message.
          - No panic / backtrace is shown.
          - No new row was written to `uat_signings` for `99999`.
 
-    Cleanup:
-      8. If step 4 promoted `<pass-id>` to `healthy`, decide whether to
-         keep the promotion. To revert for a clean repo state: edit the
-         file back to its previous status, OR `git checkout stories/<pass-id>.yml`.
-      9. If you want a pristine `uat_signings` table, drop and recreate
-         the local store DB (acceptable for UAT walkthroughs because no
-         signing in this exercise is a real product claim). Document
-         this in your UAT report so reviewers know the rows were
-         exercise-only.
-guidance: |
-  This story supersedes the original `agentic verify` story. The
-  prove-it gate has been split: continuous test bookkeeping moved to
-  story 2 (`agentic-ci-record` writing to `test_runs`), and this story
-  owns the UAT promotion gate. Together with story 3 (`agentic stories
-  health`) they form the new four-status model: `proposed`,
-  `under_construction`, `healthy`, `unhealthy`.
+    Missing-verdict refusal walkthrough:
+      9. Run `agentic uat <pass-id>` with NO `--verdict` flag.
+         Observe:
+         - Process exits 2 (argv validation, same code as could-not-
+           verdict).
+         - stderr names the missing flag.
+         - No new row was written to the store.
+         - `stories/<pass-id>.yml` is unchanged (still `healthy` from
+           step 5).
 
-  Architectural boundary — see the standalone-resilient-library pattern.
-  Allowed dependencies for `agentic-uat`: `agentic-story`,
+    Cleanup:
+     10. If step 5 promoted `<pass-id>` to `healthy`, decide whether
+         to keep the promotion. To revert for a clean repo state:
+         edit the file back to its previous status, OR `git checkout
+         stories/<pass-id>.yml`.
+     11. Remove the ephemeral store directory:
+         `rm -rf "$AGENTIC_STORE"`.
+     12. If you want the installed binary gone from your toolchain:
+         `cargo uninstall agentic-cli`.
+guidance: |
+  This story owns the UAT promotion gate end-to-end: the library
+  contract in `agentic-uat`, the binary's argv-to-library wire in
+  `agentic-cli`, and the exit-code contract operators and CI rely on.
+  Continuous test bookkeeping is a separate concern owned by story 2
+  (`agentic-ci-record` writing to `test_runs`). Together with story 3
+  (`agentic stories health`) they form the four-status model:
+  `proposed`, `under_construction`, `healthy`, `unhealthy`.
+
+  Architectural boundary — see the standalone-resilient-library
+  pattern. Allowed dependencies for `agentic-uat`: `agentic-story`,
   `agentic-store`, `agentic-events`, `git2`. Forbidden: anything in
   `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`, or the
   CLI crate itself. The standalone-resilience test enforces this.
@@ -145,21 +205,36 @@ guidance: |
     The library defines `trait UatExecutor { fn execute(&self, story:
     &Story) -> ExecutionOutcome; }` where `ExecutionOutcome` is a
     minimal `{ verdict: Pass | Fail, transcript: String }`. For this
-    story's tests the impl is a stub (`StubExecutor::always_pass()`,
-    `StubExecutor::always_fail()`). The real impl — a UAT agent that
-    drives a human or sub-agent through the prose journey — is a
-    later story. Keeping it a trait now means we can ship the
-    signing-and-promotion contract without blocking on the journey
-    runner, and a future Phase 3 work can swap the real executor in
-    without changing the signed-verdict contract.
+    story's library-level tests the impl is a stub
+    (`StubExecutor::always_pass()`, `StubExecutor::always_fail()`).
+    The real impl — an agent-driven executor that drives a human or
+    sub-agent through the prose journey — is a later story. Keeping
+    it a trait now means we can ship the signing-and-promotion
+    contract without blocking on the journey runner, and a future
+    Phase 3 work can swap the real executor in without changing the
+    signed-verdict contract.
 
-  Fail-closed on dirty tree.
-    Before doing anything else, ask `git2` whether the working tree is
-    clean (no uncommitted changes, no unstaged changes, no untracked
-    files that would affect the build). If dirty, return
-    `UatError::DirtyTree`, do not write any row, do not touch the
-    story file. This is a hard gate, not a warning. A signed verdict
-    against an unknowable tree state is worse than no verdict.
+  Orchestrator-driven UAT at the binary boundary.
+    `agentic uat <id> --verdict <pass|fail>` is the orchestrator-
+    supplies-the-verdict path. The human (or a Claude Code session
+    acting as orchestrator) has already walked through the story's
+    prose UAT and decided the verdict; the CLI exists to sign that
+    decision. Internally, the binary maps `--verdict pass` to
+    constructing `agentic_uat::StubExecutor::always_pass()` and
+    `--verdict fail` to `agentic_uat::StubExecutor::always_fail()`,
+    then calls `Uat::run`. A future story may add an agent-driven
+    executor behind a different flag (e.g. `--executor claude`);
+    keep the `--verdict` flag mandatory for now rather than
+    defaulting it, so the operator's decision is always explicit in
+    the command line.
+
+  Fail-closed on dirty tree — see the fail-closed-on-dirty-tree
+  pattern. Applied at the library boundary (`Uat::run` refuses on
+  dirty and returns `UatError::DirtyTree`) and surfaced at the
+  binary boundary as exit code 2. The library-level test
+  (`uat_fail_closed_dirty_tree.rs`) and the binary-level test
+  (`uat_dirty_tree_exits_2.rs`) together pin the gate on both
+  sides of the CLI shim.
 
   `uat_signings` row contract.
     Append-only table in `agentic-store`, schemaless per ADR-0002.
@@ -171,9 +246,9 @@ guidance: |
       - `commit`: full git SHA of HEAD at signing time.
       - `signed_at`: RFC3339 UTC timestamp.
     The dashboard (story 3) reads this table to compute `healthy` /
-    `unhealthy`. We deliberately do NOT include the transcript here;
-    transcript bytes go to a separate evidence blob (later story) so
-    the signing table stays small and queryable.
+    `unhealthy`. We deliberately do NOT include the transcript
+    here; transcript bytes go to a separate evidence blob (later
+    story) so the signing table stays small and queryable.
 
   Promotion contract.
     On a Pass verdict AND only on a Pass verdict, the library
@@ -181,35 +256,127 @@ guidance: |
     rewrite preserves all other fields exactly (key order, comments
     where the YAML lib supports it, trailing newline). On a Fail
     verdict the YAML is not touched. On any error path (dirty tree,
-    bad id, IO failure, store failure) the YAML is not touched.
-    `healthy` is reachable ONLY through this code path; the schema
-    enforces this by leaving `healthy` out of the values the
-    story-writer is allowed to hand-write.
+    bad id, IO failure, store failure, bad argv) the YAML is not
+    touched. `healthy` is reachable ONLY through this code path;
+    the schema enforces this by leaving `healthy` out of the values
+    the story-writer is allowed to hand-write.
 
   Exit-code contract for the CLI subcommand.
     0  = Pass verdict issued (story promoted to healthy).
     1  = Fail verdict issued (real result, not a system error).
-    2  = Could not produce a verdict (dirty tree, unknown story,
-         store unavailable, IO error). CI distinguishes 1 from 2:
-         1 means "the UAT itself failed, fix the system under test";
-         2 means "something prevented us from running, retry or alert."
+    2  = Could not produce a verdict. Triggers: dirty tree,
+         unknown story id, store unavailable, IO error, missing or
+         unparseable `--verdict` flag, store construction failure.
+         CI distinguishes 1 from 2 — treat this mapping as the
+         CLI's public contract, not an implementation detail. 1
+         means "the UAT itself failed, fix the system under test";
+         2 means "something prevented us from running, retry or
+         alert."
 
   Signing semantics.
-    "Signed by a commit" means the verdict row records the full SHA
-    of HEAD at the moment of signing, and the signing happened on a
-    clean tree. We do not use GPG or cryptographic signatures in this
-    story. If stronger provenance is needed later, extend the row
-    schema (schemaless makes this cheap) — do not change the gate's
-    public contract.
+    "Signed by a commit" means the verdict row records the full
+    SHA of HEAD at the moment of signing, and the signing happened
+    on a clean tree. We do not use GPG or cryptographic signatures
+    in this story. If stronger provenance is needed later, extend
+    the row schema (schemaless makes this cheap) — do not change
+    the gate's public contract.
 
-  Test file locations.
-    All five tests live under `crates/agentic-uat/tests/` as Rust
-    integration tests. They construct a temporary git repo via
-    `tempfile` + `git2`, seed it with a minimal story fixture and a
-    `StubExecutor`, and invoke the library directly. Nothing in
-    these tests shells out to the top-level `agentic` binary — they
-    exercise the crate as a library so the standalone-resilience
-    claim is self-enforcing.
+  CLI shape — argv for `agentic uat` (authoritative).
+    agentic uat <id> --verdict <pass|fail> [--store <path>]
+
+    `<id>` is required; `--verdict` is required. A missing
+    `--verdict` exits 2, not 0 or 1.
+
+  Store location — default and override (shared with story 3).
+    The binary MUST accept an explicit store location. Flag:
+    `--store` on both `uat` and `stories health`. Environment
+    variable: `AGENTIC_STORE`. Implementation may support either or
+    both as long as one is documented. When neither is supplied,
+    the default is `$XDG_DATA_HOME/agentic/store` if
+    `$XDG_DATA_HOME` is set, else `$HOME/.local/share/agentic/store`
+    on Unix. On Windows, mirror via `dirs`-style resolution
+    (`%LOCALAPPDATA%\agentic\store`). Record the resolved path on
+    stderr once at startup of each subcommand so the user always
+    knows which store was hit. Do NOT default to a project-local
+    `./.agentic-store/` — two workspaces on the same machine should
+    not silently share a store just because the cwd differs, and a
+    per-user default matches the expectation set by the dashboard
+    reading and the UAT gate writing the same rows across sessions.
+    Future cloud swap is a config change (project memory: the store
+    moves to cloud; do not hard-code local paths deep in consumer
+    code).
+
+  SurrealStore, not MemStore (at the binary).
+    The binary constructs `agentic_store::SurrealStore::open` (story
+    5) because `MemStore` is lost on process exit and the whole
+    point here is durable signing. The binary-level tests in this
+    story use a `tempfile::TempDir` as the `--store` argument so the
+    `SurrealStore` code path is real (same one the installed binary
+    takes) but isolated per-test.
+
+  Parser choice — flag for build-rust (CLI-wide).
+    Preference is `clap` (`derive` feature) because the team already
+    knows it and exit-code handling is explicit; `argh` is
+    acceptable if the resulting binary is meaningfully smaller or
+    compiles faster. A hand-rolled parser is accepted only if its
+    own tests live inside this story's acceptance suite (we are not
+    adding a fourth micro-crate to hold it). Whatever choice is
+    made, it is pinned by this story's tests rather than restated
+    here.
+
+  Allowed dependencies for `agentic-cli` (CLI-wide, shared with
+  story 3).
+    `agentic-dashboard`, `agentic-uat`, `agentic-store`,
+    `agentic-story`, one argument parser (`clap` or `argh`),
+    `serde_json`, `git2`. Dev-dependencies: whatever drives the
+    end-to-end tests (recommended: `assert_cmd`, `predicates`,
+    `tempfile`). Forbidden (same boundary stories 2 and 5 enforce
+    via the standalone-resilience pattern):
+    `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`.
+    The CLI is the composition root, but it is still the LEAST
+    privileged crate in terms of runtime capability — if a feature
+    requires one of the forbidden crates, that feature belongs in a
+    different subcommand owned by a different story.
+
+  Why the standalone-resilient-library pattern is NOT applied to
+  `agentic-cli`.
+    The pattern's `when_to_use` clause targets crates that must
+    produce a correct verdict when the system is in flames.
+    `agentic-cli` is the outermost layer — it IS the thing we call
+    the resilient libraries from. Loading the CLI also loads
+    everything underneath, so "standalone" is meaningless here. The
+    dependency-floor discipline is enforced by the explicit allow-
+    list above instead of by that pattern's standalone-resilience
+    test. The pattern DOES apply to `agentic-uat` itself.
+
+  Test file locations and style.
+    Library-level tests (five tests: `uat_pass.rs`, `uat_fail.rs`,
+    `uat_fail_closed_dirty_tree.rs`, `uat_bad_story_id.rs`,
+    `uat_standalone_resilience.rs`) live under
+    `crates/agentic-uat/tests/` as Rust integration tests. They
+    construct a temporary git repo via `tempfile` + `git2`, seed it
+    with a minimal story fixture and a `StubExecutor`, and invoke
+    the library directly. Nothing in these tests shells out to the
+    top-level `agentic` binary — they exercise the crate as a
+    library so the standalone-resilience claim is self-enforcing.
+
+    Binary-level tests (four tests: `uat_pass_promotes.rs`,
+    `uat_fail_does_not_promote.rs`, `uat_dirty_tree_exits_2.rs`,
+    `uat_requires_verdict_flag.rs`) live under
+    `crates/agentic-cli/tests/` as Rust integration tests. They
+    drive the compiled binary via `assert_cmd` (or equivalent),
+    construct a `tempfile::TempDir` for `--store`, construct a
+    separate `TempDir` seeded with a minimal `stories/` directory
+    and a small git repo (HEAD commit required for the signing
+    path), and invoke `agentic` with its full argv. They do NOT
+    import `agentic_uat::Uat` directly — that would collapse the
+    end-to-end claim back to the library-level claims above. The
+    binary-under-test is whatever `CARGO_BIN_EXE_agentic` resolves
+    to. The fixture `stories/` directory is private to each test;
+    none of these tests touch the repo's real `stories/` directory
+    at `stories/` off the workspace root. This keeps `cargo test`
+    on a developer's machine from accidentally promoting a real
+    story.
 
   Relationship to story 2.
     This story writes to `uat_signings`. Story 2 writes to
@@ -218,6 +385,17 @@ guidance: |
     runtime ordering constraint between the two — `agentic uat`
     does not read `test_runs`, and `agentic-ci-record` does not
     read `uat_signings`.
+
+  Relationship to story 3.
+    Story 3 is the reader; this story is the writer. Story 3's
+    dashboard-via-CLI tests (`health_table_mode.rs`,
+    `health_json_mode.rs`, `health_drilldown.rs`) and its end-to-
+    end "UAT write visible to dashboard read on the same store"
+    test (`cli_uses_configured_store.rs`) live in story 3 because
+    the dashboard already depends on this story and the cycle
+    would otherwise close. Cross-CLI concerns (store location,
+    parser, allowed deps) are stated in full here and referenced
+    from story 3.
 depends_on:
 - 4
 - 6
