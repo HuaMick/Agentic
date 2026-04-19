@@ -4,7 +4,7 @@ outcome: |
   A developer editing a file unrelated to a healthy story sees that
   story remain healthy on the dashboard, because staleness is scoped to
   each story's declared file dependencies rather than to HEAD equality.
-status: under_construction
+status: healthy
 patterns: []
 acceptance:
   tests:
