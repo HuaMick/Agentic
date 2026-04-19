@@ -210,3 +210,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Claude Code — per-project local overrides (regenerated per session)
+.claude/settings.local.json
