@@ -181,3 +181,5 @@ guidance: |
     trait-level tests. Story 6 is independent at runtime but
     will be run alongside this one during Phase 2 acceptance.
 depends_on: []
+related_files:
+- crates/agentic-store/src/lib.rs

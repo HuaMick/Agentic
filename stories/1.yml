@@ -399,3 +399,6 @@ guidance: |
 depends_on:
 - 4
 - 6
+related_files:
+- crates/agentic-uat/src/**
+- crates/agentic-cli/src/**

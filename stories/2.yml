@@ -204,3 +204,5 @@ guidance: |
     neither requires nor invalidates a prior UAT signing.
 depends_on:
 - 4
+related_files:
+- crates/agentic-ci-record/src/**

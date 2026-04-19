@@ -207,3 +207,10 @@ guidance: |
     invariant "existing file is bytes-immutable" already covers it.
 
 depends_on: []
+related_files:
+- crates/agentic-test-builder/src/**
+- crates/agentic-cli/src/**
+- agents/test/test-builder/contract.yml
+- agents/test/test-builder/inputs.yml
+- agents/test/test-builder/process.yml
+- docs/decisions/0005-red-green-is-a-contract.md

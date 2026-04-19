@@ -366,3 +366,7 @@ guidance: |
 depends_on:
 - 3
 - 6
+related_files:
+- schemas/story.schema.json
+- crates/agentic-story/src/**
+- crates/agentic-dashboard/src/**

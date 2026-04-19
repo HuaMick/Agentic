@@ -208,3 +208,6 @@ guidance: |
     runtime (the loader does not persist anything) but share
     Phase 2 acceptance.
 depends_on: []
+related_files:
+- crates/agentic-story/src/**
+- schemas/story.schema.json
