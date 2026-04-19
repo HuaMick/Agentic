@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic uat <id> --verdict <pass|fail>` against a
   story and receives a commit-signed verdict that is the only path by
   which a story's status on disk becomes `healthy`.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
