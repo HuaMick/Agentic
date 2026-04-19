@@ -1,109 +1,97 @@
 id: 8
-title: "Wire the agentic binary to run a UAT and read the dashboard end-to-end"
-
+title: Wire the agentic binary to run a UAT and read the dashboard end-to-end
 outcome: |
   A developer runs the installed `agentic` binary against a checked-out
   repo to sign a UAT verdict and read the resulting story health from
   one shared store without writing any Rust to compose the pieces.
-
-status: under_construction
-
+status: healthy
 patterns: []
-
 acceptance:
   tests:
-    - file: crates/agentic-cli/tests/health_table_mode.rs
-      justification: |
-        Proves the table-mode wiring: running the `agentic` binary
-        with `stories health` against a fixture `stories/` directory
-        and an empty tempdir store writes the table header row, zero
-        data rows (because the fixture stories directory is empty),
-        and exits 0. Without this the CLI-to-`Dashboard::render_table`
-        wire is a library-level claim only — story 3 pins rendering
-        behaviour against `Dashboard` directly, not through the
-        binary, so a broken argv-to-Dashboard path would go unnoticed.
-
-    - file: crates/agentic-cli/tests/health_json_mode.rs
-      justification: |
-        Proves the `--json` flag is plumbed: running
-        `agentic stories health --json` against the same empty
-        fixture emits stdout that `serde_json::from_str` parses into
-        a value with `stories` (array) and `summary` (object) keys,
-        and exits 0. Without this, JSON-mode consumers (future CI
-        status checks, dashboards reading the binary's output) would
-        have to discover via runtime failure whether the flag reached
-        the `Dashboard::render_json` call at all.
-
-    - file: crates/agentic-cli/tests/health_drilldown.rs
-      justification: |
-        Proves the positional `<id>` argument selects drilldown
-        mode: `agentic stories health <id>` against a fixture story
-        emits a single-story view (not the table header) and exits
-        0; running against an id that does not exist on disk exits
-        non-zero with a message naming the missing id. Without this,
-        the only way to access `Dashboard::drilldown` is via Rust,
-        defeating the purpose of the subcommand for an operator.
-
-    - file: crates/agentic-cli/tests/uat_pass_promotes.rs
-      justification: |
-        Proves the happy path end-to-end through the binary:
-        `agentic uat <id> --verdict pass` on a clean fixture repo
-        with a valid story returns exit 0, writes exactly one row
-        to the configured store's `uat_signings` table with
-        `verdict=pass` and the fixture HEAD SHA, and rewrites the
-        fixture's `stories/<id>.yml` to `status: healthy`. Without
-        this we cannot claim the CLI is a real path to `healthy` —
-        story 1 proves the library does it, but the binary could
-        still fail to construct `Uat` correctly or drop the
-        promotion on the floor.
-
-    - file: crates/agentic-cli/tests/uat_fail_does_not_promote.rs
-      justification: |
-        Proves the Fail exit-code contract flows through the binary:
-        `agentic uat <id> --verdict fail` on the same clean fixture
-        returns exit 1 (not 0, not 2), writes exactly one row with
-        `verdict=fail`, and leaves the fixture YAML's `status:`
-        field untouched. Without this a Fail could either silently
-        promote (catastrophic) or surface as exit 2 and be confused
-        with "the CLI itself could not run," which breaks CI's
-        distinction between a real negative verdict and a system
-        fault.
-
-    - file: crates/agentic-cli/tests/uat_dirty_tree_exits_2.rs
-      justification: |
-        Proves the fail-closed contract at the binary boundary:
-        with an uncommitted change in the fixture repo,
-        `agentic uat <id> --verdict pass` exits 2, writes zero rows
-        to `uat_signings`, and leaves the fixture YAML unchanged.
-        Without this, the dirty-tree refusal pinned by story 1 at
-        the library level is not proven to reach the operator via
-        the expected exit code — a wrapper that mistranslated the
-        error to exit 1 would silently turn "could not verdict"
-        into "real failure."
-
-    - file: crates/agentic-cli/tests/uat_requires_verdict_flag.rs
-      justification: |
-        Proves argv validation exits 2, not 0 or 1:
-        `agentic uat <id>` with no `--verdict` flag returns exit 2
-        (malformed args), writes no store row, and does not touch
-        the story YAML. Without this, a user typo or scripted
-        invocation missing the flag could surface as a panic or as
-        exit 1 (which CI would treat as a real UAT failure) rather
-        than as the documented could-not-verdict code.
-
-    - file: crates/agentic-cli/tests/cli_uses_configured_store.rs
-      justification: |
-        Proves the two subcommands share one store: after
-        `agentic uat <id> --verdict pass --store <tempdir>`
-        promotes a fixture story, running
-        `agentic stories health --store <tempdir>` on the same
-        tempdir reports that story as `healthy` with a `Healthy at`
-        cell populated from the just-written `uat_signings` row.
-        Without this end-to-end check, the dashboard could read a
-        different default store than the UAT command wrote to, and
-        the binary would look correct in isolation but produce
-        silently inconsistent state in any real session.
-
+  - file: crates/agentic-cli/tests/health_table_mode.rs
+    justification: |
+      Proves the table-mode wiring: running the `agentic` binary
+      with `stories health` against a fixture `stories/` directory
+      and an empty tempdir store writes the table header row, zero
+      data rows (because the fixture stories directory is empty),
+      and exits 0. Without this the CLI-to-`Dashboard::render_table`
+      wire is a library-level claim only — story 3 pins rendering
+      behaviour against `Dashboard` directly, not through the
+      binary, so a broken argv-to-Dashboard path would go unnoticed.
+  - file: crates/agentic-cli/tests/health_json_mode.rs
+    justification: |
+      Proves the `--json` flag is plumbed: running
+      `agentic stories health --json` against the same empty
+      fixture emits stdout that `serde_json::from_str` parses into
+      a value with `stories` (array) and `summary` (object) keys,
+      and exits 0. Without this, JSON-mode consumers (future CI
+      status checks, dashboards reading the binary's output) would
+      have to discover via runtime failure whether the flag reached
+      the `Dashboard::render_json` call at all.
+  - file: crates/agentic-cli/tests/health_drilldown.rs
+    justification: |
+      Proves the positional `<id>` argument selects drilldown
+      mode: `agentic stories health <id>` against a fixture story
+      emits a single-story view (not the table header) and exits
+      0; running against an id that does not exist on disk exits
+      non-zero with a message naming the missing id. Without this,
+      the only way to access `Dashboard::drilldown` is via Rust,
+      defeating the purpose of the subcommand for an operator.
+  - file: crates/agentic-cli/tests/uat_pass_promotes.rs
+    justification: |
+      Proves the happy path end-to-end through the binary:
+      `agentic uat <id> --verdict pass` on a clean fixture repo
+      with a valid story returns exit 0, writes exactly one row
+      to the configured store's `uat_signings` table with
+      `verdict=pass` and the fixture HEAD SHA, and rewrites the
+      fixture's `stories/<id>.yml` to `status: healthy`. Without
+      this we cannot claim the CLI is a real path to `healthy` —
+      story 1 proves the library does it, but the binary could
+      still fail to construct `Uat` correctly or drop the
+      promotion on the floor.
+  - file: crates/agentic-cli/tests/uat_fail_does_not_promote.rs
+    justification: |
+      Proves the Fail exit-code contract flows through the binary:
+      `agentic uat <id> --verdict fail` on the same clean fixture
+      returns exit 1 (not 0, not 2), writes exactly one row with
+      `verdict=fail`, and leaves the fixture YAML's `status:`
+      field untouched. Without this a Fail could either silently
+      promote (catastrophic) or surface as exit 2 and be confused
+      with "the CLI itself could not run," which breaks CI's
+      distinction between a real negative verdict and a system
+      fault.
+  - file: crates/agentic-cli/tests/uat_dirty_tree_exits_2.rs
+    justification: |
+      Proves the fail-closed contract at the binary boundary:
+      with an uncommitted change in the fixture repo,
+      `agentic uat <id> --verdict pass` exits 2, writes zero rows
+      to `uat_signings`, and leaves the fixture YAML unchanged.
+      Without this, the dirty-tree refusal pinned by story 1 at
+      the library level is not proven to reach the operator via
+      the expected exit code — a wrapper that mistranslated the
+      error to exit 1 would silently turn "could not verdict"
+      into "real failure."
+  - file: crates/agentic-cli/tests/uat_requires_verdict_flag.rs
+    justification: |
+      Proves argv validation exits 2, not 0 or 1:
+      `agentic uat <id>` with no `--verdict` flag returns exit 2
+      (malformed args), writes no store row, and does not touch
+      the story YAML. Without this, a user typo or scripted
+      invocation missing the flag could surface as a panic or as
+      exit 1 (which CI would treat as a real UAT failure) rather
+      than as the documented could-not-verdict code.
+  - file: crates/agentic-cli/tests/cli_uses_configured_store.rs
+    justification: |
+      Proves the two subcommands share one store: after
+      `agentic uat <id> --verdict pass --store <tempdir>`
+      promotes a fixture story, running
+      `agentic stories health --store <tempdir>` on the same
+      tempdir reports that story as `healthy` with a `Healthy at`
+      cell populated from the just-written `uat_signings` row.
+      Without this end-to-end check, the dashboard could read a
+      different default store than the UAT command wrote to, and
+      the binary would look correct in isolation but produce
+      silently inconsistent state in any real session.
   uat: |
     Goal: convince yourself that after installing the `agentic`
     binary you can run a UAT and read its result from the
@@ -210,7 +198,6 @@ acceptance:
          `rm -rf "$AGENTIC_STORE"`.
      14. If you want the installed binary gone from your
          toolchain: `cargo uninstall agentic-cli`.
-
 guidance: |
   This story owns ONLY the CLI-to-library wiring and the
   end-to-end composition. The library-level invariants it rides
@@ -383,5 +370,6 @@ guidance: |
     `MemStore`, that is story 5's defect to catch, not this
     story's. Story 6's loader is used transitively by stories
     1 and 3; we inherit whatever it pins.
-
-depends_on: [1, 3]
+depends_on:
+- 1
+- 3
