@@ -84,6 +84,15 @@
         "minimum": 1
       },
       "description": "IDs of other stories that must reach `healthy` before this story can be marked `healthy`. Cycles are rejected at load time."
+    },
+    "related_files": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Paths or globs (relative to repo root) whose change since the last UAT pass commit marks this story stale. Absent or empty means no file-based staleness signal — the story is healthy as long as the UAT pass row exists and tests are not red."
     }
   }
 }

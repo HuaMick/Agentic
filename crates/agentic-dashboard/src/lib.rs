@@ -37,6 +37,7 @@ pub struct Dashboard {
     store: Arc<dyn Store>,
     stories_dir: PathBuf,
     head_sha: String,
+    repo_root: Option<PathBuf>,
 }
 
 /// Error type for dashboard operations.
@@ -78,6 +79,7 @@ struct StoryHealth {
     test_run_commit: Option<String>,
     test_run_at: Option<String>,
     parse_error: Option<String>,
+    stale_related_files: Vec<String>,
 }
 
 /// The five health statuses.
@@ -98,6 +100,7 @@ type HealthClassification = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Vec<String>,
 );
 
 impl Health {
@@ -124,6 +127,36 @@ impl Dashboard {
             store,
             stories_dir,
             head_sha,
+            repo_root: None,
+        }
+    }
+
+    /// Construct a new Dashboard with repo-aware file-intersection checking.
+    ///
+    /// # Arguments
+    /// - `store`: the evidence store (test_runs, uat_signings)
+    /// - `stories_dir`: the root directory containing story YAML files
+    /// - `repo_root`: the root directory of the git repository
+    ///
+    /// When `repo_root` is provided, the classifier uses file-intersection
+    /// semantics for stories with `related_files` declared. Without it,
+    /// falls back to the legacy strict HEAD-equality rule.
+    pub fn with_repo(store: Arc<dyn Store>, stories_dir: PathBuf, repo_root: PathBuf) -> Self {
+        let repo =
+            git2::Repository::open(&repo_root).expect("repo_root must be a valid git repository");
+        let head_sha = repo
+            .head()
+            .expect("repo must have a HEAD")
+            .peel_to_commit()
+            .expect("HEAD must be a commit")
+            .id()
+            .to_string();
+
+        Self {
+            store,
+            stories_dir,
+            head_sha,
+            repo_root: Some(repo_root),
         }
     }
 
@@ -203,6 +236,7 @@ impl Dashboard {
             Ok(story) => {
                 let title = story.title.clone();
                 let status = story.status;
+                let related_files = story.related_files.clone();
 
                 // Load evidence from the store.
                 let test_run = self.get_test_run(id);
@@ -216,7 +250,8 @@ impl Dashboard {
                     uat_signed_at,
                     test_run_commit,
                     test_run_at,
-                ) = self.classify_health(status, &test_run, &uat_signings);
+                    stale_related_files,
+                ) = self.classify_health(status, &test_run, &uat_signings, &related_files);
 
                 StoryHealth {
                     id,
@@ -228,6 +263,7 @@ impl Dashboard {
                     test_run_commit,
                     test_run_at,
                     parse_error: None,
+                    stale_related_files,
                 }
             }
             Err(e) => {
@@ -255,6 +291,7 @@ impl Dashboard {
                     test_run_commit: None,
                     test_run_at: None,
                     parse_error: Some(e.to_string()),
+                    stale_related_files: vec![],
                 }
             }
         }
@@ -280,12 +317,111 @@ impl Dashboard {
             .unwrap_or_default()
     }
 
+    /// Compute the diff between two commits and return the list of changed
+    /// file paths relative to the repo root.
+    fn compute_git_diff(&self, from_commit: &str, to_commit: &str) -> Result<Vec<String>, String> {
+        let repo_root = self
+            .repo_root
+            .as_ref()
+            .ok_or_else(|| "repo_root not available for git diff computation".to_string())?;
+
+        let repo =
+            git2::Repository::open(repo_root).map_err(|e| format!("failed to open repo: {e}"))?;
+
+        // Parse the OID strings
+        let from_oid = git2::Oid::from_str(from_commit)
+            .map_err(|e| format!("invalid from commit OID: {e}"))?;
+        let to_oid =
+            git2::Oid::from_str(to_commit).map_err(|e| format!("invalid to commit OID: {e}"))?;
+
+        // Get the trees
+        let from_tree = repo
+            .find_tree(
+                repo.find_commit(from_oid)
+                    .map_err(|e| format!("failed to find from commit: {e}"))?
+                    .tree_id(),
+            )
+            .map_err(|e| format!("failed to find from tree: {e}"))?;
+
+        let to_tree = repo
+            .find_tree(
+                repo.find_commit(to_oid)
+                    .map_err(|e| format!("failed to find to commit: {e}"))?
+                    .tree_id(),
+            )
+            .map_err(|e| format!("failed to find to tree: {e}"))?;
+
+        // Compute the diff
+        let diff = repo
+            .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), None)
+            .map_err(|e| format!("failed to compute diff: {e}"))?;
+
+        // Extract changed file paths
+        let mut changed_files = Vec::new();
+        diff.foreach(
+            &mut |delta, _progress| {
+                if let Some(path) = delta.new_file().path() {
+                    if let Some(path_str) = path.to_str() {
+                        changed_files.push(path_str.to_string());
+                    }
+                }
+                true
+            },
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| format!("failed to iterate diff: {e}"))?;
+
+        Ok(changed_files)
+    }
+
+    /// Check if any of the glob patterns in related_files match any of the
+    /// changed files. Returns a list of matched paths if there is an
+    /// intersection, empty vec otherwise.
+    fn check_related_files_intersection(
+        &self,
+        related_files: &[String],
+        changed_files: &[String],
+    ) -> Vec<String> {
+        if related_files.is_empty() {
+            return vec![];
+        }
+
+        // Build a globset from related_files patterns
+        let mut set_builder = globset::GlobSetBuilder::new();
+
+        for pattern in related_files {
+            if let Ok(glob) = globset::Glob::new(pattern) {
+                set_builder.add(glob);
+            }
+        }
+
+        let globset = set_builder.build().unwrap_or_else(|_| {
+            // If globset construction fails, fall back to empty set (no matches)
+            globset::GlobSetBuilder::new()
+                .build()
+                .expect("empty globset must build")
+        });
+
+        // Find all changed files that match any pattern
+        let mut matched = Vec::new();
+        for changed_file in changed_files {
+            if globset.is_match(changed_file) {
+                matched.push(changed_file.clone());
+            }
+        }
+
+        matched
+    }
+
     /// Classify a story's health based on YAML status and evidence.
     fn classify_health(
         &self,
         yaml_status: Status,
         test_run: &Option<Value>,
         uat_signings: &[Value],
+        related_files: &[String],
     ) -> HealthClassification {
         // Extract the latest UAT signing if any.
         let latest_uat = uat_signings.last();
@@ -298,7 +434,7 @@ impl Dashboard {
 
         // Rule 1: proposed ⇔ YAML says proposed (YAML wins).
         if yaml_status == Status::Proposed {
-            return (Health::Proposed, vec![], None, None, None, None);
+            return (Health::Proposed, vec![], None, None, None, None, vec![]);
         }
 
         // Rule 2: under_construction ⇔ YAML says under_construction AND no
@@ -326,10 +462,14 @@ impl Dashboard {
                 None,
                 None,
                 None,
+                vec![],
             );
         }
 
-        // Rule 3: healthy ⇔ latest UAT pass at HEAD AND latest test_run pass.
+        // Rule 3: healthy ⇔ latest UAT pass exists AND latest test_run pass
+        // AND healthy check passes (based on repo_root availability).
+        // - If repo_root: check for related_files file intersection (story 9).
+        // - If no repo_root: check for strict HEAD equality (legacy story 3).
         if let Some(uat_row) = latest_uat_pass {
             let uat_commit = uat_row
                 .get("commit")
@@ -358,20 +498,56 @@ impl Dashboard {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
-            if test_run_pass && uat_commit.as_deref() == Some(self.head_sha.as_str()) {
-                return (
-                    Health::Healthy,
-                    vec![],
-                    uat_commit,
-                    uat_signed_at,
-                    test_run_commit,
-                    test_run_at,
-                );
+            if test_run_pass {
+                // Determine if the story is healthy based on repo availability.
+                let is_healthy = if self.repo_root.is_some() {
+                    // Story 9 logic: if related_files is non-empty, check for
+                    // intersection. If empty, be permissive (don't apply strict
+                    // equality rule).
+                    if !related_files.is_empty() {
+                        if let Some(uat_sha) = uat_commit.as_deref() {
+                            match self.compute_git_diff(uat_sha, &self.head_sha) {
+                                Ok(changed_files) => {
+                                    let stale_files = self.check_related_files_intersection(
+                                        related_files,
+                                        &changed_files,
+                                    );
+                                    stale_files.is_empty()
+                                }
+                                Err(_) => {
+                                    // If diff computation fails, be permissive
+                                    true
+                                }
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        // No repo_root, empty related_files → permissive
+                        true
+                    }
+                } else {
+                    // Legacy (story 3): no repo_root → strict HEAD equality
+                    uat_commit.as_deref() == Some(self.head_sha.as_str())
+                };
+
+                if is_healthy {
+                    return (
+                        Health::Healthy,
+                        vec![],
+                        uat_commit,
+                        uat_signed_at,
+                        test_run_commit,
+                        test_run_at,
+                        vec![],
+                    );
+                }
             }
         }
 
-        // Rule 4: unhealthy ⇔ any historical UAT pass AND (latest test_run fail
-        // OR latest UAT commit != HEAD).
+        // Rule 4: unhealthy ⇔ any historical UAT pass AND
+        // (latest test_run fail OR (repo-aware: related_files intersect C0..HEAD)
+        // OR (legacy: latest UAT commit != HEAD AND no repo_root)).
         if latest_uat_pass.is_some() {
             let test_run_fail = test_run
                 .as_ref()
@@ -385,9 +561,37 @@ impl Dashboard {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
-            let uat_commit_not_head = uat_commit.as_deref() != Some(self.head_sha.as_str());
+            let mut is_unhealthy = test_run_fail;
+            let mut stale_files = vec![];
 
-            if test_run_fail || uat_commit_not_head {
+            // If we have a repo_root and non-empty related_files, check for
+            // intersection. Otherwise fall back to legacy strict-equality rule.
+            if !is_unhealthy {
+                if !related_files.is_empty() && self.repo_root.is_some() {
+                    if let Some(uat_sha) = uat_commit.as_deref() {
+                        match self.compute_git_diff(uat_sha, &self.head_sha) {
+                            Ok(changed_files) => {
+                                stale_files = self.check_related_files_intersection(
+                                    related_files,
+                                    &changed_files,
+                                );
+                                is_unhealthy = !stale_files.is_empty();
+                            }
+                            Err(_) => {
+                                // If diff fails, be permissive
+                                is_unhealthy = false;
+                            }
+                        }
+                    }
+                } else {
+                    // Legacy: no repo_root or empty related_files means strict
+                    // equality check (UAT commit must equal HEAD).
+                    let uat_commit_not_head = uat_commit.as_deref() != Some(self.head_sha.as_str());
+                    is_unhealthy = uat_commit_not_head;
+                }
+            }
+
+            if is_unhealthy {
                 let failing_tests = test_run
                     .as_ref()
                     .and_then(|row| row.get("failing_tests"))
@@ -423,6 +627,7 @@ impl Dashboard {
                     uat_signed_at,
                     test_run_commit,
                     test_run_at,
+                    stale_files,
                 );
             }
         }
@@ -436,6 +641,7 @@ impl Dashboard {
             None,
             None,
             None,
+            vec![],
         )
     }
 
@@ -486,7 +692,7 @@ impl Dashboard {
         let mut story_objects = Vec::new();
 
         for story in stories {
-            let obj = json!({
+            let mut obj = json!({
                 "id": story.id,
                 "title": story.title,
                 "health": story.health.as_str(),
@@ -496,6 +702,12 @@ impl Dashboard {
                 "test_run_commit": story.test_run_commit,
                 "test_run_at": story.test_run_at,
             });
+
+            // Include stale_related_files only if non-empty
+            if !story.stale_related_files.is_empty() {
+                obj["stale_related_files"] = json!(story.stale_related_files.clone());
+            }
+
             story_objects.push(obj);
         }
 

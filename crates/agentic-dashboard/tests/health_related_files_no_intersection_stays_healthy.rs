@@ -9,18 +9,18 @@
 //! strict-equality rule is still in force and the whole point of the
 //! story is unshipped.
 //!
-//! The scaffold constructs a tempdir git repo with two commits:
-//!   - C0: seeds a file under `crates/agentic-uat/src/lib.rs` and a
-//!         `stories/<id>.yml` that declares
-//!         `related_files: ["crates/agentic-uat/src/**"]`.
-//!   - C1: edits `README.md` only (a file NOT under the glob).
-//! It seeds `uat_signings` with a Pass at C0 and `test_runs` with a
-//! Pass at C1 (HEAD). The dashboard is constructed via the new
-//! repo-aware constructor that the story's guidance pins
-//! (`git_diff_name_only(uat_commit, HEAD)` is an internal call). The
-//! assertion: the story's row classifies as `healthy`. Red today is
-//! compile-red via the missing repo-aware `Dashboard` constructor and
-//! the missing `related_files` field on `agentic_story::Story`.
+//! The scaffold constructs a tempdir git repo with two commits. C0
+//! seeds a file under `crates/agentic-uat/src/lib.rs` and a
+//! `stories/<id>.yml` that declares
+//! `related_files: ["crates/agentic-uat/src/**"]`. C1 edits
+//! `README.md` only (a file NOT under the glob). It seeds
+//! `uat_signings` with a Pass at C0 and `test_runs` with a Pass at
+//! C1 (HEAD). The dashboard is constructed via the new repo-aware
+//! constructor that the story's guidance pins (diff between
+//! `uat_commit` and HEAD is an internal call). The assertion: the
+//! story's row classifies as `healthy`. Red today is compile-red via
+//! the missing repo-aware `Dashboard` constructor and the missing
+//! `related_files` field on `agentic_story::Story`.
 
 use std::fs;
 use std::path::{Path, PathBuf};

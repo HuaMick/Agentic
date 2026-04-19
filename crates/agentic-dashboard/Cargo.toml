@@ -20,6 +20,17 @@ serde_json.workspace = true
 # Story 3: timestamp relative-age formatting (e.g. "3h ago").
 chrono.workspace = true
 
+# Story 9: the file-intersection classifier uses git2 to compute the
+# C0..HEAD file diff internally when a repo_root is provided. Promoted
+# from dev-dependency to runtime dependency; pinned to the same version
+# as other crates with default-features = false for consistency.
+git2 = { version = "0.19", default-features = false }
+
+# Story 9: glob-matching against related_files patterns. Patterns are
+# rooted at repo root and must support ** crossing path separators.
+# globset supports all required semantics and is workspace-friendly.
+globset = "0.4"
+
 [dev-dependencies]
 # Story 3: the dashboard is a pure reader over the `Store` trait and the
 # `stories/` directory. Integration tests seed an in-memory `MemStore`

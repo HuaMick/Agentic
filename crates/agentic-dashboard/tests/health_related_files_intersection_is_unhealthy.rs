@@ -11,11 +11,10 @@
 //! changed since it was proven" — the signal the strict rule used to
 //! give us unconditionally.
 //!
-//! The scaffold constructs a tempdir git repo with two commits:
-//!   - C0: seeds `crates/agentic-uat/src/lib.rs` and a story YAML
-//!         declaring `related_files: ["crates/agentic-uat/src/**"]`.
-//!   - C1: edits `crates/agentic-uat/src/lib.rs` — a file INSIDE the
-//!         glob.
+//! The scaffold constructs a tempdir git repo with two commits. C0
+//! seeds `crates/agentic-uat/src/lib.rs` and a story YAML declaring
+//! `related_files: ["crates/agentic-uat/src/**"]`. C1 edits
+//! `crates/agentic-uat/src/lib.rs` — a file INSIDE the glob.
 //! `uat_signings` carries a Pass at C0; `test_runs` carries a Pass at
 //! HEAD (so `test_run_fail` is NOT what drives the unhealth — the
 //! file-intersection rule is). The assertion: the row is `unhealthy`

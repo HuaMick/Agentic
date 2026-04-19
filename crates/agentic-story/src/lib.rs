@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde_yaml::Value;
 
@@ -40,6 +41,7 @@ pub struct Story {
     pub acceptance: Acceptance,
     pub guidance: String,
     pub depends_on: Vec<u32>,
+    pub related_files: Vec<String>,
 }
 
 /// Acceptance block: one or more tests plus the UAT journey.
@@ -162,6 +164,36 @@ impl Story {
     }
 }
 
+/// Deserialize related_files with custom error context so the field name
+/// appears in error messages for type mismatches on individual entries.
+fn deserialize_related_files<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let items: Vec<serde_yaml::Value> = serde::de::Deserialize::deserialize(deserializer)
+        .map_err(|_| de::Error::custom("failed to deserialize related_files"))?;
+    let mut result = Vec::new();
+    for item in items {
+        match item {
+            serde_yaml::Value::String(s) => result.push(s),
+            _ => {
+                return Err(de::Error::custom(format!(
+                    "related_files entry must be a string; got {}",
+                    match &item {
+                        serde_yaml::Value::Number(_) => "number",
+                        serde_yaml::Value::Bool(_) => "bool",
+                        serde_yaml::Value::Null => "null",
+                        serde_yaml::Value::Sequence(_) => "sequence",
+                        serde_yaml::Value::Mapping(_) => "mapping",
+                        _ => "unknown type",
+                    }
+                )))
+            }
+        }
+    }
+    Ok(result)
+}
+
 /// RawStory mirrors the schema one-for-one so we can accept any valid
 /// story and reject anything else with a typed error. `status` is kept
 /// as a `String` here so an out-of-enum value surfaces as
@@ -180,6 +212,8 @@ struct RawStory {
     guidance: String,
     #[serde(default)]
     depends_on: Vec<u32>,
+    #[serde(default, deserialize_with = "deserialize_related_files")]
+    related_files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,9 +259,17 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
 
     // Second pass: derive-deserialise for structural checks
     // (`deny_unknown_fields`, type mismatches, acceptance sub-shape).
-    let raw: RawStory = serde_yaml::from_value(value).map_err(|e| StoryError::SchemaViolation {
-        field: extract_field_from_err(&e).unwrap_or_else(|| "<unknown>".to_string()),
-        message: e.to_string(),
+    let raw: RawStory = serde_yaml::from_value(value).map_err(|e| {
+        let msg = e.to_string();
+        let field = if msg.contains("related_files") {
+            "related_files".to_string()
+        } else {
+            extract_field_from_err(&e).unwrap_or_else(|| "<unknown>".to_string())
+        };
+        StoryError::SchemaViolation {
+            field,
+            message: msg,
+        }
     })?;
 
     // Third pass: enum-boundary validation on status. Custom so the
@@ -264,6 +306,7 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
         },
         guidance: raw.guidance,
         depends_on: raw.depends_on,
+        related_files: raw.related_files,
     })
 }
 
