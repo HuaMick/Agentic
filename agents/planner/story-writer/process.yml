@@ -168,11 +168,39 @@ guidance:
         Non-rule: length is NOT a splitting criterion. A long story with one
         coherent outcome, one shared fixture, and one rebuild brief stays as
         one story.
+    - name: personas-require-real-populations
+      detail: |
+        Distinct starting contexts and distinct user personas are only valid
+        splitting tiebreakers when they correspond to DISTINCT REAL USER
+        POPULATIONS — people (or programs) who would in practice only ever
+        exercise one side of the split. Role labels like "library author",
+        "operator", "CI system", "consumer", or "reviewer" are insufficient
+        on their own: if the same real person wears all those hats in the
+        same session, they are one user and their journey is one journey.
+
+        Test: can you name a concrete user or system that would touch story
+        A and never story B (and vice versa) under realistic usage? If not,
+        the distinction is a label, not a split.
+
+        Interlock with journey-principle and splitting-rule:
+          - journey-principle decides IF to split (default: do not).
+          - splitting-rule's tiebreakers (distinct starting contexts, two
+            rebuild briefs, spike+delivery, internal contradiction) decide
+            WHEN the contexts count.
+          - this rule guards those tiebreakers against label-only
+            distinctions: a "distinct starting context" dressed in a role
+            label but exercised by the same real person is not distinct.
+
+        Diagnostic: if the only thing separating the two candidate stories
+        is the hat the user is wearing (author vs operator, producer vs
+        consumer, builder vs reviewer) and the same human wears both hats
+        in the same workflow, consolidate.
 
   anti_patterns:
     - Outcome describes implementation rather than user-observable value.
     - Outcome uses conjunctions (and / also / as well as) — split the story instead.
     - Splitting stories along crate, module, or component boundaries instead of along user journeys.
+    - "Splitting stories based on role labels (\"library author\", \"operator\", \"consumer\", \"reviewer\") when the same real person exercises all roles in the same workflow."
     - "Two stories covering the same CLI surface or user-action pattern without explicit splitting-rule justification — this is the fragmentation anti-pattern the journey principle warns against."
     - Finalising a story before its `acceptance.uat` prose is coherent — the UAT walkthrough is the sizing test, not a field to backfill.
     - Thickening a thin UAT walkthrough with prose instead of resizing the story that produced it.
