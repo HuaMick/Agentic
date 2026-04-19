@@ -1,70 +1,62 @@
 id: 5
-title: "Back the Store trait with an embedded SurrealDB implementation"
-
+title: Back the Store trait with an embedded SurrealDB implementation
 outcome: |
   A developer can point any consumer crate at a SurrealDB-embedded
   `Store` and get the same behaviour as the in-memory implementation,
   with writes that survive process restart.
-
-status: under_construction
-
+status: healthy
 patterns:
-  - standalone-resilient-library
-
+- standalone-resilient-library
 acceptance:
   tests:
-    - file: crates/agentic-store/tests/surrealstore_trait_parity.rs
-      justification: |
-        Proves the trait-is-a-real-abstraction claim: the exact same
-        trait-level harness that drives `MemStore` in story 4
-        (upsert-replaces, append-preserves, typed-absence, empty-
-        filter, Send+Sync) is re-run against a freshly-constructed
-        `SurrealStore` backed by an embedded SurrealDB at a temp
-        directory, and every assertion that passed for `MemStore`
-        also passes for `SurrealStore`. Without this test, we have
-        two store implementations that are only "alike" by
-        convention — at which point any consumer relying on the
-        trait will eventually discover a divergence in production.
-
-    - file: crates/agentic-store/tests/surrealstore_durability_across_reopen.rs
-      justification: |
-        Proves durability across process lifetime: write N
-        documents to a `SurrealStore` rooted at a temp directory,
-        drop the store, construct a new `SurrealStore` pointing at
-        the same directory, and verify all N documents are
-        readable with identical content. Without this, SurrealDB's
-        commit-is-durable guarantee is assumed rather than
-        enforced at the crate boundary — and a misconfiguration
-        (running an in-memory variant by mistake, missing flush,
-        wrong engine) would slip past story 4's behavioural tests
-        because those use `MemStore`.
-
-    - file: crates/agentic-store/tests/surrealstore_standalone_resilience.rs
-      justification: |
-        Proves the standalone-resilient-library claim: a
-        `SurrealStore` can be constructed and driven end-to-end
-        with only `agentic-store` and its declared backend
-        dependencies (the `surrealdb` crate itself, `serde`,
-        `tokio` if required) wired up — no `agentic-orchestrator`,
-        `agentic-runtime`, `agentic-sandbox`, or CLI crate in the
-        test's link graph. Without this, `agentic-store` could
-        grow an orchestrator dependency through a transitive path
-        and we would only learn when the "system is in flames"
-        case (the one this pattern exists for) actually happened.
-
-    - file: crates/agentic-store/tests/surrealstore_malformed_root_is_typed_error.rs
-      justification: |
-        Proves clean failure on bad construction input: pointing
-        `SurrealStore::open` at a path that exists but is not a
-        valid SurrealDB data directory (e.g. a file, a directory
-        containing unrelated files, a directory the process
-        cannot write to) returns a typed `StoreError`, does not
-        panic, and does not partially initialise. Without this,
-        deployment-time configuration mistakes — a wrong path in
-        an env var, a stale DB from an older schema — surface as
-        panics halfway through the first write rather than as
-        clear "could not open store" errors at startup.
-
+  - file: crates/agentic-store/tests/surrealstore_trait_parity.rs
+    justification: |
+      Proves the trait-is-a-real-abstraction claim: the exact same
+      trait-level harness that drives `MemStore` in story 4
+      (upsert-replaces, append-preserves, typed-absence, empty-
+      filter, Send+Sync) is re-run against a freshly-constructed
+      `SurrealStore` backed by an embedded SurrealDB at a temp
+      directory, and every assertion that passed for `MemStore`
+      also passes for `SurrealStore`. Without this test, we have
+      two store implementations that are only "alike" by
+      convention — at which point any consumer relying on the
+      trait will eventually discover a divergence in production.
+  - file: crates/agentic-store/tests/surrealstore_durability_across_reopen.rs
+    justification: |
+      Proves durability across process lifetime: write N
+      documents to a `SurrealStore` rooted at a temp directory,
+      drop the store, construct a new `SurrealStore` pointing at
+      the same directory, and verify all N documents are
+      readable with identical content. Without this, SurrealDB's
+      commit-is-durable guarantee is assumed rather than
+      enforced at the crate boundary — and a misconfiguration
+      (running an in-memory variant by mistake, missing flush,
+      wrong engine) would slip past story 4's behavioural tests
+      because those use `MemStore`.
+  - file: crates/agentic-store/tests/surrealstore_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim: a
+      `SurrealStore` can be constructed and driven end-to-end
+      with only `agentic-store` and its declared backend
+      dependencies (the `surrealdb` crate itself, `serde`,
+      `tokio` if required) wired up — no `agentic-orchestrator`,
+      `agentic-runtime`, `agentic-sandbox`, or CLI crate in the
+      test's link graph. Without this, `agentic-store` could
+      grow an orchestrator dependency through a transitive path
+      and we would only learn when the "system is in flames"
+      case (the one this pattern exists for) actually happened.
+  - file: crates/agentic-store/tests/surrealstore_malformed_root_is_typed_error.rs
+    justification: |
+      Proves clean failure on bad construction input: pointing
+      `SurrealStore::open` at a path that exists but is not a
+      valid SurrealDB data directory (e.g. a file, a directory
+      containing unrelated files, a directory the process
+      cannot write to) returns a typed `StoreError`, does not
+      panic, and does not partially initialise. Without this,
+      deployment-time configuration mistakes — a wrong path in
+      an env var, a stale DB from an older schema — surface as
+      panics halfway through the first write rather than as
+      clear "could not open store" errors at startup.
   uat: |
     Goal: convince yourself that the embedded SurrealDB
     implementation is drop-in interchangeable with `MemStore` for
@@ -112,7 +104,6 @@ acceptance:
       7. Remove the temp directory `<root>` (and any scratch
          examples you added but do not want to commit).
       8. Confirm `git status` is clean.
-
 guidance: |
   This story adds the production-grade backend for the `Store`
   trait defined in story 4. The load-bearing proof is parity:
@@ -204,5 +195,5 @@ guidance: |
     against either impl at runtime. Phase 2 ships with
     `SurrealStore` as the CLI default and `MemStore` as the
     test-time default.
-
-depends_on: [4]
+depends_on:
+- 4
