@@ -20,6 +20,15 @@ workflow:
             Before writing any substantive guidance in a story, scan patterns/ for
             applicable patterns. Reference them in the story's `patterns:` field.
             Do not restate pattern content in guidance.
+        - step: Draft the UAT walkthrough first.
+          detail: |
+            Before finalising outcome, tests, or guidance, draft `acceptance.uat`
+            as a coherent doc-blind prose journey. This is the sizing test. If you
+            cannot write a coherent walkthrough — the prose feels thin, requires
+            unbuilt pieces, or jumps between distinct starting contexts — the
+            story is wrong-sized. Merge into a neighbour or split out a clearly-
+            separable prerequisite until the UAT is coherent. See
+            `guidance.rules.uat-first-fence`.
         - step: Triage.
           detail: |
             - Exact match: tell the user. No action.
@@ -78,6 +87,71 @@ guidance:
     - "`depends_on` is `[]` unless a real hard blocker exists."
     - "`patterns` is `[]` by default; add only patterns that actually apply."
     - Editing a healthy story is legal and auto-reverts status. Do not tiptoe to preserve proof. The system is designed to re-verify.
+    - name: journey-principle
+      detail: |
+        Each story should encompass a COMPLETE USER JOURNEY toward a single
+        objective. If completing story A naturally leads the user to need
+        story B, they are the SAME journey and belong in ONE story.
+
+        This is the primary scoping rule. The splitting-rule below refines
+        HOW to split when a journey genuinely contains two; the journey
+        principle decides WHETHER to split at all. Default: do not split.
+
+        Source: legacy/AgenticEngineering/modules/AgenticGuidance/agents/build/build-story-writer/process.yml:271-275.
+    - name: story-first-not-boundary-first
+      detail: |
+        Story discovery precedes crate, module, or component-boundary
+        decisions. Do not carve stories along crate lines (one story per
+        crate) or along internal module seams. A story is a user journey;
+        whether it spans one crate or five is an implementation detail the
+        story must not encode.
+
+        Diagnostic: if the only thing distinguishing two candidate stories
+        is which crate implements which half, they are one story.
+
+        Paraphrased from legacy/AgenticEngineering/modules/AgenticGuidance/assets/guidelines/planning-standard.yml:17-38
+        ("Story discovery MUST occur BEFORE phase determination in any
+        planning workflow").
+    - name: consolidate-over-fragment
+      detail: |
+        When two candidate or existing stories share a CLI surface or a
+        common user-action pattern, they consolidate by default. Splitting
+        requires explicit justification against the splitting-rule — not
+        the other way around.
+
+        Diagnostic question (legacy source): "Could this epic have been
+        avoided if the prior story was accurate enough?" If yes, the
+        existing story has a gap; the action is UPDATE, not NEW.
+
+        Source: legacy/AgenticEngineering/modules/AgenticGuidance/agents/build/build-story-writer/process.yml:186-189
+        and legacy/AgenticEngineering/docs/userstories/Planning/10_feedback_recovery.yml
+        ("Two stories validating the same CLI surface is the fragmentation
+        anti-pattern the journey principle warns against").
+    - name: uat-first-fence
+      detail: |
+        Before finalising any story, draft its `acceptance.uat` FIRST. If
+        you cannot write a coherent doc-blind journey for it, the story is
+        the wrong size — split or merge until the uat_plan is coherent.
+
+        The UAT prose is the sizing test, not the last field you fill in.
+        A thin, nonsensical, or unbuilt-piece-dependent walkthrough is
+        the signal to resize the story, not to thicken the prose.
+
+        Source: legacy/AgenticEngineering/modules/AgenticGuidance/assets/specifications/story-schema.yml:200-209.
+    - name: contract-not-checklist
+      detail: |
+        The story describes the COMPONENT'S CONTRACT, not the diff.
+        Acceptance tests name invariants (observable behaviours the
+        component must uphold), not implementation steps. Guidance names
+        behaviour to preserve or patterns to follow, not refactor tasks
+        or PR-level to-dos.
+
+        Diagnostic: if a test title or guidance line reads like a commit
+        message or a ticket, it's a checklist entry and does not belong.
+
+        Source: legacy/AgenticEngineering/modules/AgenticGuidance/agents/build/build-story-writer/process.yml:203-205
+        ("do NOT translate the epic's tickets into a step-by-step checklist
+        on the story").
     - name: splitting-rule
       detail: |
         Split a story when EITHER is true:
@@ -98,6 +172,12 @@ guidance:
   anti_patterns:
     - Outcome describes implementation rather than user-observable value.
     - Outcome uses conjunctions (and / also / as well as) — split the story instead.
+    - Splitting stories along crate, module, or component boundaries instead of along user journeys.
+    - "Two stories covering the same CLI surface or user-action pattern without explicit splitting-rule justification — this is the fragmentation anti-pattern the journey principle warns against."
+    - Finalising a story before its `acceptance.uat` prose is coherent — the UAT walkthrough is the sizing test, not a field to backfill.
+    - Thickening a thin UAT walkthrough with prose instead of resizing the story that produced it.
+    - Acceptance tests phrased as implementation steps rather than invariants.
+    - Guidance phrased as a refactor task list or PR checklist rather than behaviour to preserve.
     - Guidance restates a pattern that exists in patterns/.
     - Guidance restates another story's guidance.
     - Near-duplicate story or pattern creation (search step failed or was skipped).
