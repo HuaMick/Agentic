@@ -1,70 +1,61 @@
 id: 4
-title: "Provide a Store trait with an in-memory implementation"
-
+title: Provide a Store trait with an in-memory implementation
 outcome: |
   A developer writing any consumer crate can persist and retrieve
   structured documents through a single `Store` abstraction whose
   behaviour is identical regardless of which backend is wired in.
-
-status: under_construction
-
+status: healthy
 patterns: []
-
 acceptance:
   tests:
-    - file: crates/agentic-store/tests/memstore_upsert_by_key_replaces.rs
-      justification: |
-        Proves the upsert-by-key contract: performing two upserts to
-        the same (table, key) pair against `MemStore` leaves exactly
-        one document in that table whose content equals the second
-        write. Without this invariant, story 2's `test_runs` table
-        cannot be "one row per story" as its own test asserts — the
-        upsert semantics it relies on would be undefined at the
-        trait level.
-
-    - file: crates/agentic-store/tests/memstore_append_preserves_writes.rs
-      justification: |
-        Proves the append-to-collection contract: three successive
-        appends to the same table yield three retrievable documents,
-        none of which replace or mutate the others, and their
-        relative order is preserved on read-back. Without this,
-        story 1's `uat_signings` append-only table has no trait-level
-        guarantee that a Fail signing will not silently overwrite a
-        prior Pass signing for the same story.
-
-    - file: crates/agentic-store/tests/memstore_get_missing_is_typed_absence.rs
-      justification: |
-        Proves the typed-absence contract: `get` against a (table,
-        key) that was never written returns the library's absence
-        sentinel (Option-style `None`), does not panic, does not
-        error, and does not distinguish "table does not exist" from
-        "key does not exist" at the trait level. Without this, every
-        consumer has to defensively wrap `get` in panic-handlers or
-        invent its own absence encoding, and the dashboard's "no
-        signings yet" classification in story 3 becomes unreliable.
-
-    - file: crates/agentic-store/tests/memstore_query_filter_and_empty.rs
-      justification: |
-        Proves the query-by-filter contract on both the populated
-        and empty cases: a filter that matches N appended documents
-        returns exactly those N documents, and a filter that matches
-        nothing returns an empty collection — NOT an error, NOT a
-        typed absence, just an empty collection. Without this pair
-        of checks, consumers would reasonably treat "no matches" as
-        an error path and every dashboard/reader would grow a
-        special case for first-run empty databases.
-
-    - file: crates/agentic-store/tests/memstore_trait_object_is_send_sync.rs
-      justification: |
-        Proves the thread-sharing contract: `MemStore` can be held
-        behind `Arc<dyn Store + Send + Sync>` and used from more
-        than one thread without introducing data races at the trait
-        boundary. Without this being pinned at story 4, consumers
-        (story 1's UAT gate, story 2's recorder, story 3's
-        dashboard) would each make their own assumption about
-        shareability and we would discover the disagreement only
-        when they are composed in the CLI.
-
+  - file: crates/agentic-store/tests/memstore_upsert_by_key_replaces.rs
+    justification: |
+      Proves the upsert-by-key contract: performing two upserts to
+      the same (table, key) pair against `MemStore` leaves exactly
+      one document in that table whose content equals the second
+      write. Without this invariant, story 2's `test_runs` table
+      cannot be "one row per story" as its own test asserts — the
+      upsert semantics it relies on would be undefined at the
+      trait level.
+  - file: crates/agentic-store/tests/memstore_append_preserves_writes.rs
+    justification: |
+      Proves the append-to-collection contract: three successive
+      appends to the same table yield three retrievable documents,
+      none of which replace or mutate the others, and their
+      relative order is preserved on read-back. Without this,
+      story 1's `uat_signings` append-only table has no trait-level
+      guarantee that a Fail signing will not silently overwrite a
+      prior Pass signing for the same story.
+  - file: crates/agentic-store/tests/memstore_get_missing_is_typed_absence.rs
+    justification: |
+      Proves the typed-absence contract: `get` against a (table,
+      key) that was never written returns the library's absence
+      sentinel (Option-style `None`), does not panic, does not
+      error, and does not distinguish "table does not exist" from
+      "key does not exist" at the trait level. Without this, every
+      consumer has to defensively wrap `get` in panic-handlers or
+      invent its own absence encoding, and the dashboard's "no
+      signings yet" classification in story 3 becomes unreliable.
+  - file: crates/agentic-store/tests/memstore_query_filter_and_empty.rs
+    justification: |
+      Proves the query-by-filter contract on both the populated
+      and empty cases: a filter that matches N appended documents
+      returns exactly those N documents, and a filter that matches
+      nothing returns an empty collection — NOT an error, NOT a
+      typed absence, just an empty collection. Without this pair
+      of checks, consumers would reasonably treat "no matches" as
+      an error path and every dashboard/reader would grow a
+      special case for first-run empty databases.
+  - file: crates/agentic-store/tests/memstore_trait_object_is_send_sync.rs
+    justification: |
+      Proves the thread-sharing contract: `MemStore` can be held
+      behind `Arc<dyn Store + Send + Sync>` and used from more
+      than one thread without introducing data races at the trait
+      boundary. Without this being pinned at story 4, consumers
+      (story 1's UAT gate, story 2's recorder, story 3's
+      dashboard) would each make their own assumption about
+      shareability and we would discover the disagreement only
+      when they are composed in the CLI.
   uat: |
     Goal: convince yourself the `Store` trait's behavioural contract
     holds for the in-memory implementation when driven directly from
@@ -105,7 +96,6 @@ acceptance:
       5. Delete or `git restore` the scratch example if you created
          one; nothing persistent should have been written to disk
          because `MemStore` is in-memory by design.
-
 guidance: |
   This story defines the storage abstraction every other runtime
   crate writes through. It deliberately pins observable behaviour
@@ -190,5 +180,4 @@ guidance: |
     Story 5 adds the SurrealDB impl and reuses this story's
     trait-level tests. Story 6 is independent at runtime but
     will be run alongside this one during Phase 2 acceptance.
-
 depends_on: []
