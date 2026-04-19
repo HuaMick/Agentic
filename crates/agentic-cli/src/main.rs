@@ -99,15 +99,15 @@ fn main() {
                     std::process::exit(2);
                 }
 
-                let head_sha = match get_head_sha() {
-                    Ok(sha) => sha,
+                let repo_root = match git2::Repository::discover(".") {
+                    Ok(r) => r.workdir().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
                     Err(e) => {
-                        eprintln!("failed to get HEAD SHA: {e}");
+                        eprintln!("failed to discover git repo: {e}");
                         std::process::exit(2);
                     }
                 };
 
-                let dashboard = Dashboard::new(Arc::new(store), stories_dir, head_sha);
+                let dashboard = Dashboard::with_repo(Arc::new(store), stories_dir, repo_root);
 
                 let output = if let Some(story_id) = id {
                     match dashboard.drilldown(story_id) {
