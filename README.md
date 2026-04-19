@@ -2,7 +2,7 @@
 
 A Rust-based agent orchestration system built around story-driven development.
 
-**Status:** Phase 2 — vertical slice operational end-to-end. Cargo workspace active (rustc 1.95.0 via rustup in WSL); six crates compile green. Seven stories `healthy` (1, 2, 3, 4, 5, 6, 9); one `proposed` (7). The `agentic` binary is installable via `cargo install --path crates/agentic-cli` and `agentic uat <id>` + `agentic stories health` both drive the four-status model against a shared SurrealStore.
+**Status:** Phase 2 — vertical slice operational end-to-end. Cargo workspace active (rustc 1.95.0 via rustup in WSL); six crates compile green. Seven stories `healthy` (1, 2, 3, 4, 5, 6, 9); one `proposed` (7). The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and `agentic uat <id>` + `agentic stories health` both drive the four-status model against a shared SurrealStore.
 
 ## What this is
 

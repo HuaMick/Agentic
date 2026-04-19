@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Thin wrapper around `docker run agentic:local` so `agentic-docker
+# stories health` feels identical to the native `agentic stories health`.
+#
+# Bind-mounts the current working directory at /workspace so the CLI
+# sees the repo's stories/, schemas/, and git state. Persists the
+# SurrealStore in a named volume so UAT signings survive across runs.
+#
+# Assumes `agentic:local` has been built — run `./install.sh --docker`
+# from the repo root first.
+
+set -euo pipefail
+
+exec docker run --rm \
+    -v "$PWD":/workspace \
+    -v agentic-store:/root/.local/share/agentic \
+    agentic:local "$@"

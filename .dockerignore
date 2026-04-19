@@ -1,0 +1,8 @@
+# Large or irrelevant paths excluded from the Docker build context.
+target/
+.git/
+legacy/
+evidence/
+node_modules/
+.claude/
+*.log

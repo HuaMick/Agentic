@@ -3,9 +3,40 @@
 The `agentic` CLI is the primary interface for running UAT verdicts and viewing
 story health. It's a Rust binary installed via cargo.
 
-## WSL Installation (required)
+## Quick install (recommended)
 
-The binary must be installed inside WSL where the Rust toolchain lives:
+From the repo root on WSL:
+
+```bash
+./install.sh
+```
+
+This verifies `cargo` is available (prompts to install `rustup` if not),
+runs `cargo install --path crates/agentic-cli --locked --force`, ensures
+`~/.cargo/env` is sourced by your `~/.bashrc`, and verifies `agentic --help`
+works. Safe to re-run after `git pull`.
+
+For a containerised install (no local Rust toolchain required):
+
+```bash
+./install.sh --docker
+```
+
+This builds the `agentic:local` Docker image. Run the CLI via the
+`bin/agentic-docker` wrapper (bind-mounts the current directory and a named
+volume for the store):
+
+```bash
+./bin/agentic-docker stories health
+./bin/agentic-docker uat 1 --verdict pass
+```
+
+Put `bin/agentic-docker` on your PATH to use it like the native binary.
+
+## From source (manual)
+
+If you'd rather drive cargo yourself, install inside WSL where the Rust
+toolchain lives:
 
 ```bash
 cd /home/code/Agentic
@@ -74,6 +105,12 @@ accessible from Windows at:
 ## Updating the CLI
 
 After pulling changes to `crates/agentic-cli/`:
+
+```bash
+./install.sh
+```
+
+Or manually:
 
 ```bash
 cd /home/code/Agentic
