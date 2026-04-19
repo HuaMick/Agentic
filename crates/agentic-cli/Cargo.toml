@@ -9,6 +9,15 @@ publish.workspace = true
 name = "agentic"
 path = "src/main.rs"
 
+[dependencies]
+agentic-store = { path = "../agentic-store" }
+agentic-uat = { path = "../agentic-uat" }
+agentic-dashboard = { path = "../agentic-dashboard" }
+clap = { version = "4", features = ["derive"] }
+serde_json.workspace = true
+git2 = { version = "0.19", default-features = false }
+dirs = "5"
+
 [dev-dependencies]
 # Story 8: all eight integration tests drive the compiled `agentic`
 # binary via argv (not the library), so the tests must be able to

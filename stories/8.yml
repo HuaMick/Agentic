@@ -6,7 +6,7 @@ outcome: |
   repo to sign a UAT verdict and read the resulting story health from
   one shared store without writing any Rust to compose the pieces.
 
-status: proposed
+status: under_construction
 
 patterns: []
 

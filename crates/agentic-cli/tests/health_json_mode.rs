@@ -9,8 +9,8 @@
 //! discover via runtime failure whether the flag reached the
 //! `Dashboard::render_json` call at all.
 //!
-//! The scaffold builds an empty fixture `stories/` + a fresh git repo
-//! + an empty tempdir store, invokes `agentic stories health --json
+//! The scaffold builds an empty fixture `stories/`, a fresh git repo,
+//! and an empty tempdir store, invokes `agentic stories health --json
 //! --store <tempdir>`, parses stdout as JSON, and asserts the two
 //! top-level keys named in the justification.
 
