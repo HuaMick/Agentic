@@ -1,0 +1,116 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: schemas/story.schema.json
+    reason: |
+      Contract of the story whose UAT you are running — field shapes, the
+      `acceptance.uat:` free-prose field you execute, and the lifecycle
+      states the CLI transitions the story through on a Pass verdict.
+  - path: docs/decisions/0005-red-green-is-a-contract.md
+    reason: |
+      Defines the prove-it gate and why the UAT signing surface exists.
+      Read so the agent understands it is the Pass-or-Fail hand, not the
+      promotion hand — `agentic uat` is the only path to `healthy`, and
+      this agent is the authored caller of that CLI.
+  - path: stories/<id>.yml
+    reason: |
+      The story whose UAT is being executed. Read in full. The
+      `acceptance.uat:` block is the authoritative walkthrough — follow
+      its prose verbatim, not a summary. The `guidance:` block often
+      names environment details (store location, exit-code contract,
+      cleanup steps) the prose takes for granted.
+
+context:
+  - pattern: patterns/*.yml
+    reason: |
+      Read every pattern named in the story's `patterns:` field. A
+      pattern sometimes changes what "observable" means for a step — for
+      example, `fail-closed-on-dirty-tree` tells the runner which exit
+      code to expect on a dirty tree rather than having every story
+      restate it.
+  - pattern: evidence/runs/<story-id>/*
+    reason: |
+      Prior red-state JSONL (test-builder's output) and any prior UAT
+      observation transcripts for the same story. Reading these is
+      orientation only, not a re-execution — the CLI's `uat_signings`
+      row is the authoritative verdict history.
+  - pattern: crates/agentic-cli/README.md
+    reason: |
+      The CLI binary whose subcommand this agent invokes. The README
+      documents the `--verdict` flag, the `--store` flag, the exit-code
+      mapping, and any environment variables the binary honours. Match
+      whatever the README says over this agent's command catalog if
+      they ever drift.
+
+parameters:
+  - name: story_id
+    description: |
+      Integer id of the story whose UAT walkthrough to execute. The
+      agent reads `stories/<id>.yml`, runs every step in its
+      `acceptance.uat:` block, and invokes
+      `agentic uat <story_id> --verdict <pass|fail>` at the end.
+  - name: store_path
+    description: |
+      Optional override for the `--store` flag / `AGENTIC_STORE`
+      environment variable passed to the CLI. Use a tempdir
+      (`mktemp -d`) by default so the signing run is isolated from
+      any prior state; pass an explicit path only when re-running
+      against an existing store is the whole point of the session.
+    required_when: a persistent store location is required by the caller (otherwise default to a per-session tempdir).
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Write
+  - Edit
+  - Bash
+
+commands:
+  - name: git-status-porcelain
+    invocation_example: git status --porcelain
+    purpose: |
+      Confirm the working tree is clean at session start AND again
+      immediately before invoking `agentic uat`. The CLI fail-closes on
+      a dirty tree (exit code 2); running the clean-tree check yourself
+      first produces a clearer error surface than letting the CLI
+      refuse.
+  - name: git-rev-parse-head
+    invocation_example: git rev-parse HEAD
+    purpose: |
+      Record the commit the verdict will be signed against. Stamp this
+      into the run summary so the caller can cross-reference against
+      the `uat_signings` row the CLI writes.
+  - name: agentic-uat-invoke
+    invocation_example: agentic uat <id> --verdict pass --store "$AGENTIC_STORE"
+    purpose: |
+      The promotion call. `--verdict pass` or `--verdict fail` is
+      mandatory; the flag is the agent's whole-walkthrough judgement.
+      On exit code 0 the story is promoted to `healthy` on disk. On
+      exit code 1 a Fail verdict was recorded, no promotion. On exit
+      code 2 the CLI could not produce a verdict (dirty tree, bad id,
+      store unavailable) — treat as an escalation, not as a Fail.
+  - name: cargo-install-cli
+    invocation_example: cargo install --path crates/agentic-cli --locked
+    purpose: |
+      Install the `agentic` binary from this workspace when the story's
+      UAT setup step prescribes it (story 1 does). Run only when the
+      prose names this exact command; otherwise the `agentic` binary is
+      assumed to already be on PATH from a prior session.
+  - name: cargo-run-example
+    invocation_example: cargo run --example <name> -p <crate>
+    purpose: |
+      Execute a scratch `examples/<name>.rs` file that a story's UAT
+      prose explicitly prescribes (e.g. stories 4, 5, 6 walkthroughs).
+      The example is written to the crate, driven via `cargo run
+      --example`, its observables are compared to the prose, and the
+      file is deleted before the `agentic uat` invocation. Never write
+      an example whose path is not literally named in the story.
+  - name: wsl-cargo
+    invocation_example: wsl bash -c "source ~/.cargo/env && cd /home/code/Agentic && cargo <cmd>"
+    purpose: |
+      Environment-specific routing when the session is invoked from
+      Windows rather than directly from WSL (per CLAUDE.md). If cargo
+      is on PATH directly, use cargo unquoted. The routing is a
+      convenience, not a contract — only the commands the story's UAT
+      prose names are authoritative.

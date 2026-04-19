@@ -51,3 +51,4 @@ current_consumers:
   - agents/build/build-rust/inputs.yml
   - agents/teacher/guidance-writer/inputs.yml
   - agents/test/test-builder/inputs.yml
+  - agents/test/test-uat/inputs.yml

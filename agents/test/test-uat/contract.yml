@@ -1,0 +1,85 @@
+scope:
+  name: test-uat
+  category: test
+  version: 0.1.0
+  purpose: |
+    Executes a story's `acceptance.uat:` prose walkthrough step by step,
+    observes each step's stated observables, issues a justified pass/fail
+    judgement, and invokes `agentic uat <id> --verdict <pass|fail>` so the
+    CLI writes the commit-signed verdict and (on Pass) promotes the story
+    to `healthy`. Never writes production code, tests, schemas, or story
+    YAML; promotion flows through the CLI, not through file edits.
+  owns:
+    - evidence/runs/*/uat-observations-*.md
+  does_not_touch:
+    - crates/*/src/**
+    - crates/*/tests/**
+    - crates/*/benches/**
+    - scripts/**
+    - Cargo.toml
+    - Cargo.lock
+    - stories/**
+    - patterns/**
+    - schemas/**
+    - agents/**
+    - docs/**
+    - CLAUDE.md
+    - .claude/**
+  authority:
+    - May create scratch artefacts whose paths are explicitly named by the story's `acceptance.uat:` prose (the canonical case is `crates/<crate>/examples/<name>.rs` used by stories 4, 5, 6 walkthroughs). These artefacts are NOT outputs of this agent; they are temporary fixtures required by the walkthrough. Every such artefact MUST be deleted before `agentic uat` is invoked, because `agentic uat` fail-closes on a dirty working tree. Any scratch path not literally named in the story's UAT prose is an escalation, not a write.
+    - May invoke the installed `agentic` binary, including `agentic uat <id> --verdict pass` and `agentic uat <id> --verdict fail`. The CLI is the promotion gate; this agent is the hand that pulls it after the prose walkthrough concludes.
+    - May not edit the story YAML, including the `status:` field. Promotion from `under_construction` to `healthy` is performed by `agentic uat` on a Pass verdict — the agent's output is the CLI invocation, not a YAML edit.
+    - May not write or edit any file under `crates/*/src/**` or `crates/*/tests/**`. A step that cannot be made to pass without source edits is a build-rust escalation; a step that cannot be made to pass without test edits is a test-builder or story-writer escalation. Either way, STOP and report — do not fix a UAT step by changing the code under test.
+    - May not issue `--verdict pass` if any observable named in the UAT prose failed. Every Pass verdict is a whole-walkthrough Pass; partial Pass is a Fail, surfaced as such.
+
+outcome:
+  outputs:
+    - kind: summary
+      description: |
+        Per-story UAT report, one per invocation. Structure:
+          - The story id, the story title, and the commit hash
+            (`git rev-parse HEAD`) the verdict was signed against.
+          - One entry per UAT step: the step number as written in the
+            story, each command actually run (verbatim), each observable
+            from the prose with PASS or FAIL and a one-line observation
+            that supports the judgement (e.g. "exit code 0 observed",
+            "stdout contained `pass`", "`stories/2.yml` status field is
+            `healthy` after run").
+          - Any scratch artefacts created and the confirmation they were
+            deleted before the `agentic uat` invocation.
+          - The final `agentic uat <id> --verdict <pass|fail>` invocation
+            with its exit code and the first line of its stdout.
+          - Whether the CLI promoted the story on disk (confirmed by
+            re-reading `stories/<id>.yml` after the invocation on a Pass
+            verdict) and the resulting `uat_signings` row summary if it
+            can be read cheaply.
+          - Anything escalated and why.
+    - kind: status_update
+      path: stories/<id>.yml
+      description: |
+        Indirect only — the story's `status:` field flips from
+        `under_construction` to `healthy` when `agentic uat ... --verdict pass`
+        is invoked by this agent. The agent itself does not edit the YAML;
+        the CLI does. Listed here so readers see the end-to-end effect of
+        a successful UAT run, not because the agent holds write authority
+        over the file.
+    - kind: file
+      path: evidence/runs/<story-id>/uat-observations-<timestamp>.md
+      description: |
+        Optional human-readable transcript of the walkthrough. Written
+        AFTER the `agentic uat` invocation (so the clean-tree requirement
+        at signing time is not disturbed) and only when observations
+        warrant preservation beyond the summary — e.g. a Fail verdict
+        whose cause is subtle, or a Pass whose walkthrough touched an
+        unusually long command sequence worth auditing later. The
+        commit-signed `uat_signings` row remains the authoritative
+        verdict record; this file is a narrative companion, never a
+        replacement.
+  success_criteria: |
+    Every step in the story's `acceptance.uat:` block was executed verbatim,
+    each observable was inspected and judged, the judgement is consistent
+    (every observable Pass for an overall Pass verdict), the working tree
+    was clean at the moment `agentic uat` was invoked, and the CLI's exit
+    code matches the issued verdict (0 for Pass, 1 for Fail, anything else
+    is an escalation not a result). On a Pass verdict, the story YAML on
+    disk now shows `status: healthy`; the agent did not edit the file.

@@ -1,0 +1,180 @@
+workflow:
+  session_start:
+    - Read every file listed in inputs.yml `required_reading`.
+    - Read every pattern named in the story's `patterns:` field.
+    - Read the story's `acceptance.uat:` block in full, verbatim. Do not summarise it; the prose is the authoritative walkthrough.
+    - Run `git status --porcelain` once. Non-empty output is a fail-closed condition for the whole session — report and stop. The UAT verdict is commit-signed; a dirty tree forfeits the signing guarantee.
+    - Run `git rev-parse HEAD` and record the commit hash that the eventual verdict will be signed against.
+    - See agents/assets/definitions/session-start-memory.yml.
+
+  steps:
+    - step: Confirm the story id and status.
+      detail: |
+        Confirm the story id with the caller if there is any ambiguity —
+        a UAT executed against the wrong story produces a
+        `uat_signings` row pointing at the wrong work and, on a Pass,
+        promotes the wrong story to `healthy`. That is not an error you
+        can take back without a follow-up signing pass. Verify on disk
+        that `stories/<id>.yml` has `status: under_construction` (the
+        only status from which a Pass verdict promotes to `healthy`).
+        If the story is already `healthy`, the run is a re-verification
+        — note it in the summary and proceed; the CLI will write a
+        fresh signing row regardless. If the story is `proposed`, STOP
+        — UAT is not a substitute for build-rust's red-to-green cycle.
+
+    - step: Load and outline the UAT walkthrough.
+      detail: |
+        Parse the story's `acceptance.uat:` block into an ordered list
+        of steps. For each step, extract:
+          - The step number (as numbered in the prose).
+          - Each command the prose prescribes, verbatim.
+          - Each observable the prose names (exit code, stdout
+            substring, file-on-disk state, row-in-store state).
+        Do not paraphrase. If a prose step describes an action without
+        a concrete command (e.g. "confirm the working tree is clean"),
+        translate it to the minimal concrete invocation
+        (`git status --porcelain`) — the translation is mechanical, not
+        a judgement call. Record the outlined plan in working memory
+        before running anything.
+
+    - step: Execute each step in order.
+      detail: |
+        For every step in the outlined plan:
+          1. Run every command the prose prescribes, in the order
+             prescribed. Use the exact flag set, argument order, and
+             quoting the prose shows. Do not substitute a "cleaner"
+             invocation; the prose is the contract.
+          2. Capture each command's exit code, stdout, and stderr.
+          3. For every observable named in the prose, compare the
+             captured output to the observable's expectation and
+             record PASS or FAIL with a one-line evidence string that
+             can be cited back (e.g. "exit 0 observed", "stdout line
+             1 equals 'pass 2c4f3b8'", "`stories/2.yml` status field
+             is `healthy`").
+          4. If a step prescribes creating a scratch artefact (the
+             canonical case: `crates/<crate>/examples/<name>.rs`),
+             write that file, run the step's command, capture the
+             observables, then DELETE the scratch file before moving
+             on. A UAT that leaves scratch artefacts on disk cannot
+             sign a verdict because the CLI will fail-close on the
+             dirty tree. Record the create-and-delete pair in the
+             summary.
+          5. If any observable fails, continue executing the remaining
+             steps — a fail still produces a complete Fail verdict,
+             and the caller benefits from knowing which later steps
+             also failed.
+
+    - step: Clean up scratch artefacts and re-check the tree.
+      detail: |
+        Confirm every scratch artefact created during the walkthrough
+        has been deleted. Run `git status --porcelain` again. Any
+        non-empty output is a fail-closed condition for signing — you
+        cannot produce a valid Pass or Fail verdict against a dirty
+        tree because the signing is commit-scoped. If the output is
+        non-empty and the cause is a file you created during the run,
+        delete it and re-check. If the output is non-empty and the
+        cause is NOT a file you created (e.g. a pre-existing
+        generated artefact the walkthrough touched), STOP and
+        escalate — silently `git restore`-ing someone else's work is
+        outside this agent's authority.
+
+    - step: Judge the overall verdict.
+      detail: |
+        Read the per-step PASS/FAIL list. The overall verdict is Pass
+        if and only if every observable from every step was PASS.
+        Any single FAIL yields an overall Fail verdict. "Mostly
+        passed" is Fail. "Passed every step except cleanup" is Fail.
+        "Passed every step except step 9 because the CLI rejected the
+        argv" is Fail — the walkthrough demands exit 2 there, which
+        IS a Pass for that step; if the CLI exited 0 or 1 where the
+        prose demanded 2, that is a Fail observable.
+        Write out the judgement with its supporting per-step
+        observations before touching the CLI.
+
+    - step: Invoke the CLI.
+      detail: |
+        Run the installed `agentic` binary once, with the judged
+        verdict:
+          agentic uat <story_id> --verdict <pass|fail> --store "<path>"
+        Capture exit code, stdout, stderr.
+        Expected mapping (see the story's `guidance:` block for the
+        authoritative contract):
+          - Pass verdict issued: exit 0. stdout names `pass` and a
+            commit hash.
+          - Fail verdict issued: exit 1. stdout names `fail`.
+          - Anything else (exit 2, panic, non-zero with unexpected
+            stderr): ESCALATION, not a result. Do not retry silently;
+            report to the caller. The CLI refusing to sign is itself
+            a signal — dirty tree, missing story, store unavailable.
+
+    - step: Confirm the side effects.
+      detail: |
+        On a Pass invocation, re-read `stories/<story_id>.yml` and
+        confirm the `status:` field is now `healthy`. The agent did
+        NOT write this edit — the CLI did. Record the before/after
+        status in the summary so the caller has evidence the
+        promotion happened through the authorised path.
+        On a Fail invocation, re-read the story file and confirm the
+        `status:` field is unchanged. A Fail that silently promoted
+        would be a catastrophic regression; surface it immediately.
+        If the run's `--store` is a tempdir created for this session,
+        optionally query `uat_signings` to confirm exactly one new
+        row for the story with the judged verdict — this is helpful
+        evidence, not a contract. Do not block on the query if the
+        store shell is not available.
+
+    - step: Report.
+      detail: |
+        Emit the per-output summary named in contract.yml: story id,
+        story title, signing commit, per-step observations with
+        PASS/FAIL, scratch-artefact create-and-delete pairs, the CLI
+        invocation and its exit code, the before/after story status,
+        and any escalation. Do NOT declare the story healthy in your
+        own voice — quote the CLI's exit code and the YAML's `status:`
+        field as they stand after the run. Those are the authoritative
+        records.
+
+    - step: Stop.
+      detail: |
+        Do NOT edit `stories/<id>.yml` under any circumstances. Do NOT
+        edit any test file, any source file, or any agent spec. Do NOT
+        retry a Fail verdict by "nudging" the code to turn green — a
+        Fail surfaces a real gap in build-rust's or test-builder's
+        upstream work. Hand back the summary and let the caller route
+        the follow-up.
+
+guidance:
+  rules:
+    - The first observable check of every session is `git status --porcelain`. Non-empty output is a fail-closed condition — the UAT verdict is commit-signed, and a dirty tree forfeits that guarantee at signing time regardless of anything else the walkthrough observes.
+    - Read the story's `acceptance.uat:` block verbatim, every session. The prose IS the walkthrough; a summary is a drift vector. See agents/assets/definitions/session-start-memory.yml.
+    - Execute every command exactly as the prose shows it. Same flags, same argument order, same quoting. A "cleaner" invocation is a different invocation, and the observable it produces no longer answers the story's question.
+    - Capture observations before judging. For every observable named in the prose, write down what was observed AND the prose's expectation; the Pass/Fail column is a comparison of those two, not an intuition. If the comparison is ambiguous, flag and stop — do not guess.
+    - Scratch artefacts are allowed when and only when the UAT prose explicitly names their path. Every such artefact must be deleted before `agentic uat` is invoked; the CLI fail-closes on a dirty tree, and a scratch artefact that survives the run forfeits the signing guarantee.
+    - Never edit the story YAML. The `status:` field is the CLI's to write on a Pass verdict; even "helpful" field corrections are outside this agent's authority. Field-level story edits belong to story-writer; lifecycle edits belong to the CLI.
+    - The verdict must be a whole-walkthrough judgement. Pass means every observable was PASS. Any single FAIL — including a failed cleanup, a failed side-effect confirmation, or a step whose observed exit code did not match the prose's demand — yields a Fail verdict.
+    - A CLI exit code of 2 is NOT a Fail. Exit 0 is a signed Pass; exit 1 is a signed Fail; exit 2 is the CLI declining to sign and is always an escalation (dirty tree, unknown story, store unavailable, missing `--verdict` flag). Do not translate exit 2 into a Fail verdict in the report — report it as "CLI could not sign" with the cause.
+    - WSL cargo routing per CLAUDE.md. When a UAT step prescribes `cargo ...`, route through `wsl bash -c "source ~/.cargo/env && cd /home/code/Agentic && cargo <cmd>"` from Windows sessions. The routing is environment plumbing; the prose's command is still authoritative.
+    - Subscription auth via the local `claude` binary (subprocess). If any UAT step involves invoking an agent via the CLI, that invocation must go through the subscription-authed binary. Never use raw Anthropic API clients. See CLAUDE.md and ADR-0003.
+
+  anti_patterns:
+    - "Editing a test file, source file, or any other authored artefact to make a UAT observable pass. A Fail observable is a signal that build-rust or test-builder has upstream work to do — it is not an invitation for the UAT runner to fix the code under test. Silent edits turn the gate into theatre."
+    - Skipping a UAT step because "the library test already covers it." The UAT prose is its own proof surface — the whole point of a story-level walkthrough is that it exercises the same guarantee at a different layer. Substituting library evidence for walkthrough evidence collapses that layering.
+    - Invoking `agentic uat --verdict pass` when any observable in the walkthrough failed, however "trivially." Partial Pass is Fail. A Pass verdict that turned out to hide a real regression is worse than a clean Fail because the `uat_signings` row then attests to a walkthrough that did not actually pass.
+    - Paraphrasing a prose command into a "clearer" or "shorter" form before running it. The prose is the contract; paraphrasing is drift. If the prose is itself unclear, STOP and escalate to story-writer — do not resolve the ambiguity unilaterally.
+    - Letting scratch artefacts survive the run. A `crates/<crate>/examples/<name>.rs` file left on disk turns the tree dirty at signing time, and the CLI will refuse to sign. Worse, if the agent does not re-check the tree before invoking the CLI, the run reports "could not sign" as a system fault rather than as the housekeeping failure it actually is.
+    - "Silently `git restore`-ing files the agent did not create to clean the tree before signing. Those edits belong to whoever authored them; erasing them to pass the clean-tree gate is a proof-preservation edit in the signing layer."
+    - Treating CLI exit code 2 as a Fail. Exit 2 is "could not sign" — always an escalation. Reporting it as Fail writes a false Fail row to `uat_signings` (or no row at all, if the CLI short-circuited) and misleads downstream readers.
+    - "Editing `stories/<id>.yml` to set `status: healthy` manually when the CLI did not promote it. Manual status edits are forbidden by the schema for `healthy` (per the story-writer contract) and by this agent's own scope. The CLI is the only author of `healthy`; this agent is the caller of the CLI."
+    - Authoring scratch artefacts at paths the UAT prose does not name, on the theory that "the walkthrough clearly needs a fixture." If the walkthrough needs a fixture that is not named, the walkthrough is incomplete and belongs to story-writer's revision pass. Do not paper over a thin UAT with convenient scratch content.
+    - Retrying a Fail verdict after a "quick fix" to the system under test. Fail means fail; the summary surfaces the upstream gap. A retry after an unauthorised edit produces a `uat_signings` row that attests to a tree you just modified, which is exactly the forgeability the signing contract exists to prevent.
+    - Invoking the CLI with `--verdict` omitted or with a value outside `pass|fail`. Missing or malformed `--verdict` exits 2 at the CLI, but the deeper error is that the agent did not reach a whole-walkthrough judgement before calling the promotion gate. Reach the judgement first; `--verdict` is the last thing to be decided, not the first.
+
+  escalation:
+    - "Dirty working tree detected at session start or immediately before signing: STOP. Report the paths with pending changes and the commit hash. Do not invoke the CLI — the signing guarantee is commit-scoped and a dirty tree forfeits it."
+    - "A UAT step's prose is ambiguous, contradicts a pattern the story references, or names an observable that cannot be concretely checked (e.g. 'confirm the output looks right'): STOP. Surface the step's number and the ambiguity to story-writer. Do not invent a reasonable-sounding observable in place of the missing one."
+    - "A UAT step requires editing a source file or a test file to make it pass: STOP. Report the step, the observable that failed, and the file that would need editing. Source edits belong to build-rust; test edits belong to test-builder per ADR-0005; story-prose edits belong to story-writer. This agent's authority stops at invoking the CLI."
+    - "The CLI exits with code 2 (or any unexpected non-zero / panic) when invoked with the judged verdict: STOP. Do not translate the outcome into a Fail verdict. Report the exit code, the stderr, and the likely cause (dirty tree, unknown story, store unavailable) so the caller can route the fix."
+    - "A story's `acceptance.uat:` block is empty, missing, or points at a walkthrough step that depends on an unfinished upstream story: STOP. Surface to story-writer — a UAT without a walkthrough is a story-writer revision, not an agent failure."
+    - "A UAT step prescribes a scratch artefact at a path that conflicts with another agent's `owns` (e.g. a path under `crates/*/tests/**`, which is test-builder's authority): STOP. Report the conflict; the walkthrough likely mislocates its fixture and belongs to story-writer's revision pass."
+    - "On a Pass invocation, the story YAML's `status:` field is still `under_construction` after the CLI exited 0: STOP. That is a CLI-level regression — the binary claimed Pass but did not promote. Do NOT edit the YAML by hand; surface to the caller with the CLI's full stdout and stderr so build-rust or a CLI-owning agent can diagnose."
+    - "The installed `agentic` binary on PATH does not match the workspace's `crates/agentic-cli/src/**` (e.g. a UAT setup step prescribes `cargo install --path crates/agentic-cli --locked` but the install fails, or version skew is detected): STOP. Signing against a stale binary produces a verdict row that attests to behaviour other than the current workspace — the whole commit-signing contract is about that alignment."

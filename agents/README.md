@@ -15,7 +15,7 @@ The schemas enforce exactly these five buckets (scope, outcome, inputs, workflow
 - `orchestration/` — orchestration-planning, orchestration-executor (route work, execute phases). None authored yet.
 - `planner/` — **story-writer** (active). epic-creator, planner-build, planner-test, planner-audit still to come.
 - `build/` — **build-rust** (active). build-docs-writer still to come.
-- `test/` — **test-builder** (active). test-audit, test-uat still to come.
+- `test/` — **test-builder** (active), **test-uat** (active). test-audit still to come.
 - `teacher/` — **guidance-writer** (active). Curates agent specs and the shared `assets/` layer.
 
 ## Assets
@@ -39,16 +39,16 @@ When you add a new agent here, add a matching pointer under `.claude/agents/` th
 
 ## Current state
 
-Four agents are active:
+Five agents are active:
 
 - **`planner/story-writer/`** — curator of the story and pattern corpora. Search-and-edit is the default; writing new is the exception. Handles stories AND patterns (until a dedicated `pattern-writer` is warranted).
 - **`build/build-rust/`** — implements Rust code to make a story's acceptance tests green. Runs the full workspace test suite after every change to detect regressions; refuses to leave baseline-green tests red. Never promotes past `under_construction`.
 - **`test/test-builder/`** — writes the failing test scaffolds a story's `acceptance.tests[].file` entries point at, and records the red-state evidence proving the story was red before implementation began. Never writes production source. Never edits an existing test file. Refuses to run on a dirty tree. See ADR-0005.
+- **`test/test-uat/`** — executes a story's `acceptance.uat:` prose walkthrough step by step, judges each observable, and invokes `agentic uat <id> --verdict <pass|fail>` so the CLI writes the commit-signed verdict and (on Pass) promotes the story to `healthy`. Refuses to run on a dirty tree; never edits source, tests, or the story YAML — promotion flows through the CLI.
 - **`teacher/guidance-writer/`** — curator of agent specs and the shared assets layer. Edit-first; extracts to assets only when 2+ agents would share. Keeps pointer files and READMEs in sync. Cannot author a new agent without explicit user authorization.
 
 Still to come (order roughly follows Phase 2 demand):
 
-- `test/test-uat` — executes a story's UAT prose journey and emits the verdict that promotes a story to `healthy`.
 - `planner/planner-build` — plans a story's implementation phases.
 - `orchestration/orchestration-executor` — runs phases deterministically. Natural home for enforcing the ADR-0005 sequence (story-writer → test-builder → build-rust → uat).
 
