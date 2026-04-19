@@ -1,72 +1,63 @@
 id: 2
-title: "Record per-story test results to test_runs on every CI run"
-
+title: Record per-story test results to test_runs on every CI run
 outcome: |
   After each acceptance-test run, the system has a single up-to-date row
   per story in the `test_runs` table that the dashboard can read to
   surface which stories' tests are currently red.
-
-status: under_construction
-
+status: healthy
 patterns:
-  - standalone-resilient-library
-
+- standalone-resilient-library
 acceptance:
   tests:
-    - file: crates/agentic-ci-record/tests/record_pass.rs
-      justification: |
-        Proves the happy path: given a passing acceptance-test run for
-        story id `<n>`, `Recorder::record` upserts a row to `test_runs`
-        with `story_id=<n>`, `verdict=pass`, `failing_tests=[]`,
-        `commit` set to HEAD's SHA, and `ran_at` set to now (RFC3339).
-        Without this the dashboard cannot distinguish "tests pass" from
-        "we never ran them," which is the whole reason we're recording.
-
-    - file: crates/agentic-ci-record/tests/record_fail.rs
-      justification: |
-        Proves the failure path: given a failing acceptance-test run
-        for story id `<n>` where two test files failed,
-        `Recorder::record` upserts a row with `verdict=fail` and
-        `failing_tests` containing exactly those two test file
-        basenames (no paths, no extensions stripped — basename only,
-        e.g. `verify_pass.rs`). Without this the dashboard's
-        `Failing tests` column has nothing to render and "fell from
-        grace" detection in story 3 cannot name what fell.
-
-    - file: crates/agentic-ci-record/tests/record_replaces_not_appends.rs
-      justification: |
-        Proves upsert-by-story_id semantics: after recording a Pass
-        for story `<n>` and then a Fail for the same story, a query
-        of `test_runs` filtered by `story_id=<n>` returns exactly one
-        row (the Fail), not two. Without this the table grows
-        unboundedly per CI run and the dashboard would have to choose
-        a "latest" row by timestamp at read time — moving correctness
-        from a write-time invariant to a read-time computation we'd
-        get wrong eventually.
-
-    - file: crates/agentic-ci-record/tests/record_malformed_input_preserves_row.rs
-      justification: |
-        Proves the corruption-resistance contract: given an existing
-        Pass row for story `<n>`, when `Recorder::record` is invoked
-        with malformed test-runner output (e.g. truncated JSON,
-        missing required fields, empty input), it returns
-        `RecordError::MalformedInput` and the existing row in
-        `test_runs` is unchanged. Without this, a flaky CI step that
-        emitted garbage could silently overwrite a known-good row
-        with an empty or corrupt one, and the dashboard would
-        misreport the story's health.
-
-    - file: crates/agentic-ci-record/tests/record_standalone_resilience.rs
-      justification: |
-        Proves the standalone-resilient-library claim: the recorder
-        library is driven directly with only `agentic-store`,
-        `agentic-events`, and `git2` wired up (no orchestrator, no
-        runtime, no sandbox), and produces the same row shape as the
-        CLI / CI hook path. Without this the recorder becomes
-        coupled to whatever invokes it; we want the CI hook, a
-        future local pre-commit hook, and the orchestrator to all be
-        valid callers of the same library.
-
+  - file: crates/agentic-ci-record/tests/record_pass.rs
+    justification: |
+      Proves the happy path: given a passing acceptance-test run for
+      story id `<n>`, `Recorder::record` upserts a row to `test_runs`
+      with `story_id=<n>`, `verdict=pass`, `failing_tests=[]`,
+      `commit` set to HEAD's SHA, and `ran_at` set to now (RFC3339).
+      Without this the dashboard cannot distinguish "tests pass" from
+      "we never ran them," which is the whole reason we're recording.
+  - file: crates/agentic-ci-record/tests/record_fail.rs
+    justification: |
+      Proves the failure path: given a failing acceptance-test run
+      for story id `<n>` where two test files failed,
+      `Recorder::record` upserts a row with `verdict=fail` and
+      `failing_tests` containing exactly those two test file
+      basenames (no paths, no extensions stripped — basename only,
+      e.g. `verify_pass.rs`). Without this the dashboard's
+      `Failing tests` column has nothing to render and "fell from
+      grace" detection in story 3 cannot name what fell.
+  - file: crates/agentic-ci-record/tests/record_replaces_not_appends.rs
+    justification: |
+      Proves upsert-by-story_id semantics: after recording a Pass
+      for story `<n>` and then a Fail for the same story, a query
+      of `test_runs` filtered by `story_id=<n>` returns exactly one
+      row (the Fail), not two. Without this the table grows
+      unboundedly per CI run and the dashboard would have to choose
+      a "latest" row by timestamp at read time — moving correctness
+      from a write-time invariant to a read-time computation we'd
+      get wrong eventually.
+  - file: crates/agentic-ci-record/tests/record_malformed_input_preserves_row.rs
+    justification: |
+      Proves the corruption-resistance contract: given an existing
+      Pass row for story `<n>`, when `Recorder::record` is invoked
+      with malformed test-runner output (e.g. truncated JSON,
+      missing required fields, empty input), it returns
+      `RecordError::MalformedInput` and the existing row in
+      `test_runs` is unchanged. Without this, a flaky CI step that
+      emitted garbage could silently overwrite a known-good row
+      with an empty or corrupt one, and the dashboard would
+      misreport the story's health.
+  - file: crates/agentic-ci-record/tests/record_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim: the recorder
+      library is driven directly with only `agentic-store`,
+      `agentic-events`, and `git2` wired up (no orchestrator, no
+      runtime, no sandbox), and produces the same row shape as the
+      CLI / CI hook path. Without this the recorder becomes
+      coupled to whatever invokes it; we want the CI hook, a
+      future local pre-commit hook, and the orchestrator to all be
+      valid callers of the same library.
   uat: |
     Goal: convince yourself that one CI run produces exactly one row per
     story in `test_runs`, that Pass and Fail rows look right, and that
@@ -135,7 +126,6 @@ acceptance:
       9. If you want a pristine `test_runs` table, drop and recreate
          the local store DB. The `uat_signings` table from story 1
          is independent and not affected.
-
 guidance: |
   This story's recorder is the writer side of the continuous test-
   health bookkeeping. The reader side is story 3's dashboard. The
@@ -212,5 +202,5 @@ guidance: |
     layer; the join happens in story 3's dashboard. There is
     no runtime ordering constraint — recording a test result
     neither requires nor invalidates a prior UAT signing.
-
-depends_on: [4]
+depends_on:
+- 4
