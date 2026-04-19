@@ -4,8 +4,9 @@
 
 Persistence. Defines the `Store` trait — the single point every runtime
 crate writes through — and ships both the in-memory `MemStore`
-implementation (used by tests and fast-path consumers) and, eventually, a
-SurrealDB-backed impl delivered by story 5.
+implementation (used by tests and fast-path consumers) and the
+SurrealDB-backed `SurrealStore` (story 5, shipped) backed by the
+`surrealkv` embedded LSM.
 
 ## Why it's a separate crate
 
@@ -19,10 +20,10 @@ SurrealDB-backed impl delivered by story 5.
 3. **Concentrates I/O.** Domain crates stay pure (no I/O); all disk /
    network touches funnel through here.
 
-## Current state (story 4 shipped)
+## Current state (stories 4 + 5 shipped)
 
-The trait and `MemStore` land in this crate. Five behavioural contracts
-are pinned as integration tests under `tests/`:
+The trait, `MemStore`, and `SurrealStore` land in this crate. Five behavioural contracts
+are pinned as integration tests under `tests/` (each runs against both impls):
 
 1. **Upsert-by-key replaces.** Two upserts to the same `(table, key)`
    leave exactly one row, equal to the second write.
@@ -36,7 +37,7 @@ are pinned as integration tests under `tests/`:
 5. **Send + Sync at the trait-object level.** Consumers hold the store as
    `Arc<dyn Store + Send + Sync>`; the trait is object-safe.
 
-Story 5 delivers the SurrealDB impl and reuses the same tests as its
+Story 5 delivered the SurrealDB impl and reuses the same five tests as its
 contract harness. That reuse is what proves the trait is a real
 abstraction rather than a one-impl stub.
 

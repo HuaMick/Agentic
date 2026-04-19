@@ -1,7 +1,7 @@
-//! Story 8 acceptance test: missing `--verdict` flag exits 2 with no
+//! Story 1 acceptance test: missing `--verdict` flag exits 2 with no
 //! side effects.
 //!
-//! Justification (from stories/8.yml): proves argv validation exits 2,
+//! Justification (from stories/1.yml): proves argv validation exits 2,
 //! not 0 or 1: `agentic uat <id>` with no `--verdict` flag returns
 //! exit 2 (malformed args), writes no store row, and does not touch
 //! the story YAML. Without this, a user typo or scripted invocation
@@ -24,7 +24,7 @@ use tempfile::TempDir;
 const STORY_ID: u32 = 88805;
 
 const FIXTURE_YAML: &str = r#"id: 88805
-title: "Fixture story for story 8 CLI missing-verdict-flag"
+title: "Fixture story for story 1 CLI missing-verdict-flag"
 
 outcome: |
   A fixture used only to exercise the missing-verdict-flag refusal
@@ -44,7 +44,7 @@ acceptance:
     Invoke `agentic uat <id>` with no verdict flag; assert exit 2.
 
 guidance: |
-  Fixture authored inline for the story-8 missing-verdict-flag
+  Fixture authored inline for the story-1 missing-verdict-flag
   scaffold. Not a real story.
 
 depends_on: []
@@ -81,7 +81,7 @@ fn agentic_uat_without_verdict_flag_exits_two_writes_no_rows_and_leaves_yaml_unc
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let status = output.status;
 
-    // Exit code 2 EXACTLY: per story 8 guidance's exit-code contract,
+    // Exit code 2 EXACTLY: per story 1 guidance's exit-code contract,
     // "unparseable args" / "missing --verdict flag" is a could-not-
     // verdict condition (2), not a real Fail (1) and not success (0).
     assert_eq!(

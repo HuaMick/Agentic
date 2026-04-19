@@ -1,6 +1,6 @@
-//! Story 8 acceptance test: the `--json` flag is plumbed end-to-end.
+//! Story 3 acceptance test: the `--json` flag is plumbed end-to-end.
 //!
-//! Justification (from stories/8.yml): proves the `--json` flag is
+//! Justification (from stories/3.yml): proves the `--json` flag is
 //! plumbed: running `agentic stories health --json` against the same
 //! empty fixture emits stdout that `serde_json::from_str` parses into
 //! a value with `stories` (array) and `summary` (object) keys, and

@@ -85,8 +85,12 @@ This is the validated pattern. The story-writer agent was invoked this way twice
 ## Current agents you can invoke
 
 - **`story-writer`** — authors and maintains stories and patterns. Search-first, edit-default. Full spec: `agents/planner/story-writer/process.yml`. Pointer: `.claude/agents/story-writer.md`.
+- **`build-rust`** — implements Rust source to turn test-builder scaffolds green without editing tests. Full spec: `agents/build/build-rust/process.yml`. Pointer: `.claude/agents/build-rust.md`.
+- **`test-builder`** — writes failing test scaffolds for a story and records red-state evidence per ADR-0005. Refuses to run on a dirty tree. Full spec: `agents/test/test-builder/process.yml`. Pointer: `.claude/agents/test-builder.md`.
+- **`test-uat`** — executes a story's `acceptance.uat` prose walkthrough and invokes `agentic uat <id> --verdict <pass|fail>` so the CLI signs the verdict. Full spec: `agents/test/test-uat/process.yml`. Pointer: `.claude/agents/test-uat.md`.
+- **`guidance-writer`** — curator of agent specs and the shared `assets/` layer. Full spec: `agents/teacher/guidance-writer/process.yml`. Pointer: `.claude/agents/guidance-writer.md`.
 
-More will be added as Phase 2 stories demand them (expected: `build-rust`, `test-builder`, `test-uat`, `planner-build`, `orchestration-executor`).
+More will be added as demand arises (expected: `planner-build`, `orchestration-executor`).
 
 ## Invoking the story-writer — concrete example
 

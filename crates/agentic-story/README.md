@@ -4,7 +4,14 @@
 
 The **hero crate**. Defines what a story is: the `Story` type, its acceptance structure (tests + UAT), pattern references, lifecycle state machine, proof-hash algorithm, verdict records, and evidence wiring.
 
-This is the primary entity in the entire system. Epics group stories. Phases execute story work. Agents produce story work. Nothing is "done" without a story in `tested` state.
+This is the primary entity in the entire system. Epics group stories. Phases execute story work. Agents produce story work. Nothing is "done" without a story in `healthy` state.
+
+## Current state (stories 6 + 9 shipped)
+
+Story 6 shipped the loader: YAML parse, schema validation, DAG check on
+`depends_on`, and typed errors naming the offending field. Story 9
+extended the loader to accept an optional `related_files: Vec<String>`
+field; absent / empty is permissive and preserved round-trip.
 
 ## Why it's a separate crate
 

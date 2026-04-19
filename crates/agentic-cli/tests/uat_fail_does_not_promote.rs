@@ -1,7 +1,7 @@
-//! Story 8 acceptance test: Fail verdict surfaces as exit 1 and does
+//! Story 1 acceptance test: Fail verdict surfaces as exit 1 and does
 //! not promote.
 //!
-//! Justification (from stories/8.yml): proves the Fail exit-code
+//! Justification (from stories/1.yml): proves the Fail exit-code
 //! contract flows through the binary: `agentic uat <id> --verdict fail`
 //! on the same clean fixture returns exit 1 (not 0, not 2), writes
 //! exactly one row with `verdict=fail`, and leaves the fixture YAML's
@@ -25,7 +25,7 @@ use tempfile::TempDir;
 const STORY_ID: u32 = 88803;
 
 const FIXTURE_YAML: &str = r#"id: 88803
-title: "Fixture story for story 8 CLI fail-does-not-promote"
+title: "Fixture story for story 1 CLI fail-does-not-promote"
 
 outcome: |
   A fixture that the CLI uat subcommand must NOT promote when
@@ -45,7 +45,7 @@ acceptance:
     Run `agentic uat <id> --verdict fail`; assert non-promotion.
 
 guidance: |
-  Fixture authored inline for the story-8 fail-does-not-promote
+  Fixture authored inline for the story-1 fail-does-not-promote
   scaffold. Not a real story.
 
 depends_on: []
@@ -82,7 +82,7 @@ fn agentic_uat_verdict_fail_exits_one_writes_fail_row_and_leaves_yaml_unchanged(
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let status = output.status;
 
-    // Exit code 1 EXACTLY. Story 8 guidance is explicit: a Fail verdict
+    // Exit code 1 EXACTLY. Story 1 guidance is explicit: a Fail verdict
     // is a real negative result (exit 1) and must NOT collapse to
     // exit 2 (could-not-verdict) or exit 0 (success).
     assert_eq!(

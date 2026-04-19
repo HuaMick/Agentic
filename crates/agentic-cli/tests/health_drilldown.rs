@@ -1,7 +1,7 @@
-//! Story 8 acceptance test: the positional `<id>` selects drilldown
+//! Story 3 acceptance test: the positional `<id>` selects drilldown
 //! mode and unknown ids surface non-zero.
 //!
-//! Justification (from stories/8.yml): proves the positional `<id>`
+//! Justification (from stories/3.yml): proves the positional `<id>`
 //! argument selects drilldown mode — `agentic stories health <id>`
 //! against a fixture story emits a single-story view (not the table
 //! header) and exits 0; running against an id that does not exist on
@@ -26,7 +26,7 @@ const MISSING_ID: u32 = 99999;
 fn fixture_yaml(id: u32) -> String {
     format!(
         r#"id: {id}
-title: "Fixture story for story 8 CLI drilldown"
+title: "Fixture story for story 3 CLI drilldown"
 
 outcome: |
   Fixture authored inline so the CLI drilldown subcommand has one
@@ -47,7 +47,7 @@ acceptance:
     table.
 
 guidance: |
-  Fixture authored inline for the story-8 drilldown scaffold. Not a
+  Fixture authored inline for the story-3 drilldown scaffold. Not a
   real story.
 
 depends_on: []

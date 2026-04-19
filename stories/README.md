@@ -50,13 +50,14 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 | id | title | status |
 |----|-------|--------|
-| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | under_construction |
+| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | healthy |
 | 2 | `agentic-ci-record` records test-builder test results to `test_runs` | healthy |
-| 3 | `agentic stories health` dashboard (library + CLI) | under_construction |
+| 3 | `agentic stories health` dashboard (library + CLI) | healthy |
 | 4 | `Store` trait + `MemStore` impl | healthy |
 | 5 | `SurrealStore` backed by `surrealkv` | healthy |
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
 | 7 | test-builder meta-story — red-state evidence is a committable atomic | proposed |
+| 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather

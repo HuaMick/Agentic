@@ -1,13 +1,13 @@
-//! Story 8 acceptance test: the table-mode wiring end-to-end.
+//! Story 3 acceptance test: the table-mode wiring end-to-end.
 //!
-//! Justification (from stories/8.yml): proves the table-mode wiring —
+//! Justification (from stories/3.yml): proves the table-mode wiring —
 //! running the `agentic` binary with `stories health` against a fixture
 //! `stories/` directory and an empty tempdir store writes the table
 //! header row, zero data rows (because the fixture stories directory
 //! is empty), and exits 0. Without this the CLI-to-`Dashboard::render_table`
-//! wire is a library-level claim only — story 3 pins rendering
-//! behaviour against `Dashboard` directly, not through the binary, so
-//! a broken argv-to-Dashboard path would go unnoticed.
+//! wire is a library-level claim only — story 3's library-level tests
+//! pin rendering behaviour against `Dashboard` directly, not through
+//! the binary, so a broken argv-to-Dashboard path would go unnoticed.
 //!
 //! The scaffold builds a `TempDir` containing an empty `stories/`
 //! directory and a fresh git repo (HEAD required so the binary's own
@@ -56,8 +56,8 @@ fn stories_health_emits_table_header_with_zero_data_rows_and_exits_zero() {
          stderr:\n{stderr}"
     );
 
-    // Table header exactly as pinned by story 3 and named in story 8
-    // guidance. The story's table columns are ID, Title, Health,
+    // Table header exactly as pinned by story 3. The story's
+    // table columns are ID, Title, Health,
     // Failing tests, Healthy at — we assert each column label appears
     // in a single header line so the row is unambiguously the header.
     let header_line = stdout

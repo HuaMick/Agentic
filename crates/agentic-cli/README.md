@@ -2,31 +2,27 @@
 
 ## What this crate is
 
-The command-line interface. `clap`-based subcommand tree that dispatches to library crates. Owns human-vs-machine output formatting (`--json` flag).
+The `agentic` binary. `clap`-based subcommand tree that dispatches to library crates. Owns human-vs-machine output formatting (`--json` flag) and the exit-code contract (0 = pass, 1 = real fail, 2 = could-not-verdict).
 
 ## Why it's a separate crate
 
-Keeping the CLI separate from the binary (`agentic-entry`) means tests and other tools can drive commands programmatically. Keeping the CLI separate from the domain crates means the command surface can evolve without rippling into the types.
+Domain crates (`agentic-uat`, `agentic-dashboard`, ...) stay usable as libraries without pulling in `clap` or the argv-parsing surface. Keeping the CLI separate means the command surface can evolve without rippling into the types.
 
-## Public API sketch
+## Current subcommands (shipped)
 
-```rust
-pub fn run(argv: Vec<String>) -> ExitCode;
-
-// Subcommand modules mirror the command tree:
-mod commands {
-    mod story;    // agentic story {new, list, verify, show}
-    mod epic;     // agentic epic {new, list, archive}
-    mod agent;    // agentic agent {list, validate, check-pointers}
-    mod verify;   // agentic verify <story-id>
-    mod config;
-}
 ```
+agentic uat <id> --verdict <pass|fail> [--store <path>]   # story 1
+agentic stories health [<id>] [--json] [--store <path>]   # story 3
+```
+
+Both subcommands honour `--store` and `AGENTIC_STORE` consistently; see `stories/1.yml` "Store location — default and override" for the authoritative resolution rule.
 
 ## Dependencies
 
-- Depends on: `agentic-story`, `agentic-verify`, `agentic-agent-defs`, `agentic-store`, `agentic-orchestrator`
-- Depended on by: `agentic-entry`
+- Depends on: `agentic-store`, `agentic-uat`, `agentic-dashboard`, `clap` (derive), `serde_json`, `git2`, `dirs`.
+- Depended on by: nothing (the `[[bin]]` target `agentic` is the binary consumed by `cargo install --path crates/agentic-cli`).
+
+The `agentic-entry` crate's latency-fast-path sketch (see its README) is not yet wired; day-one operators install `agentic-cli` directly.
 
 ## Design decisions
 

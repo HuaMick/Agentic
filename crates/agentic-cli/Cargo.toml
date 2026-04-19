@@ -19,34 +19,35 @@ git2 = { version = "0.19", default-features = false }
 dirs = "5"
 
 [dev-dependencies]
-# Story 8: all eight integration tests drive the compiled `agentic`
+# Stories 1 + 3: the integration tests drive the compiled `agentic`
 # binary via argv (not the library), so the tests must be able to
 # resolve the binary path and inspect its exit code, stdout, stderr.
 # `assert_cmd` is the idiomatic Rust-ecosystem choice for this and is
-# named in story 8's guidance as the recommended test harness.
+# named in story 1's and story 3's guidance as the recommended test
+# harness.
 assert_cmd = "2"
 
-# Story 8: every test roots its fixture `stories/` directory and its
-# `--store` argument under `TempDir`s so the developer's real repo
+# Stories 1 + 3: every test roots its fixture `stories/` directory and
+# its `--store` argument under `TempDir`s so the developer's real repo
 # stories/ and real store are never mutated. Same idiom the
 # agentic-uat and agentic-dashboard tests use.
 tempfile.workspace = true
 
-# Story 8: the `--json` flag's output is parsed back via
+# Story 3: the `--json` flag's output is parsed back via
 # `serde_json::from_str` so the scaffolds assert on the JSON shape
 # rather than the raw bytes. Also used for the `cli_uses_configured_store`
 # end-to-end scaffold to assert the dashboard sees the UAT write.
 serde_json.workspace = true
 
-# Story 8: tests init a minimal git repo inside the fixture `TempDir`
-# and commit a seed, so the binary's UAT path (which discovers a git
-# repo and resolves HEAD) has a real commit to sign against. For the
-# dirty-tree scaffold, a post-seed untracked file makes the tree
-# dirty. Same `git2` pin as the `agentic-uat` and `agentic-ci-record`
-# test suites.
+# Stories 1 + 3: tests init a minimal git repo inside the fixture
+# `TempDir` and commit a seed, so the binary's UAT path (which
+# discovers a git repo and resolves HEAD) has a real commit to sign
+# against. For the dirty-tree scaffold, a post-seed untracked file
+# makes the tree dirty. Same `git2` pin as the `agentic-uat` and
+# `agentic-ci-record` test suites.
 git2 = { version = "0.19", default-features = false }
 
-# Story 8: the `uat_pass_promotes`, `uat_fail_does_not_promote`,
+# Story 1: the `uat_pass_promotes`, `uat_fail_does_not_promote`,
 # `uat_dirty_tree_exits_2`, and `uat_requires_verdict_flag` scaffolds
 # re-open the configured `SurrealStore` from the SAME tempdir the
 # binary was pointed at and read `uat_signings` rows back to prove

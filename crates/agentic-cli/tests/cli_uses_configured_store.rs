@@ -1,6 +1,6 @@
-//! Story 8 acceptance test: the two subcommands share one store.
+//! Story 3 acceptance test: the two subcommands share one store.
 //!
-//! Justification (from stories/8.yml): proves the two subcommands
+//! Justification (from stories/3.yml): proves the two subcommands
 //! share one store: after `agentic uat <id> --verdict pass --store
 //! <tempdir>` promotes a fixture story, running `agentic stories
 //! health --store <tempdir>` on the same tempdir reports that story
@@ -9,6 +9,8 @@
 //! the dashboard could read a different default store than the UAT
 //! command wrote to, and the binary would look correct in isolation
 //! but produce silently inconsistent state in any real session.
+//! (Lives here rather than in story 1 because story 3 already
+//! depends on story 1; the reverse would close a dependency cycle.)
 //!
 //! The scaffold seeds the fixture, invokes `agentic uat ... --verdict
 //! pass --store <X>`, then invokes `agentic stories health --store
@@ -27,7 +29,7 @@ use tempfile::TempDir;
 const STORY_ID: u32 = 88806;
 
 const FIXTURE_YAML: &str = r#"id: 88806
-title: "Fixture story for story 8 CLI shared-store end-to-end"
+title: "Fixture story for story 3 CLI shared-store end-to-end"
 
 outcome: |
   A fixture that the CLI uat subcommand promotes and then the CLI
@@ -48,7 +50,7 @@ acceptance:
     --json; assert the dashboard sees the write.
 
 guidance: |
-  Fixture authored inline for the story-8 shared-store scaffold. Not a
+  Fixture authored inline for the story-3 shared-store scaffold. Not a
   real story.
 
 depends_on: []

@@ -1,14 +1,14 @@
-//! Story 8 acceptance test: dirty tree surfaces as exit 2 with no side
+//! Story 1 acceptance test: dirty tree surfaces as exit 2 with no side
 //! effects.
 //!
-//! Justification (from stories/8.yml): proves the fail-closed contract
+//! Justification (from stories/1.yml): proves the fail-closed contract
 //! at the binary boundary: with an uncommitted change in the fixture
 //! repo, `agentic uat <id> --verdict pass` exits 2, writes zero rows
 //! to `uat_signings`, and leaves the fixture YAML unchanged. Without
-//! this, the dirty-tree refusal pinned by story 1 at the library
-//! level is not proven to reach the operator via the expected exit
-//! code — a wrapper that mistranslated the error to exit 1 would
-//! silently turn "could not verdict" into "real failure."
+//! this, the dirty-tree refusal pinned at the library level is not
+//! proven to reach the operator via the expected exit code — a
+//! wrapper that mistranslated the error to exit 1 would silently turn
+//! "could not verdict" into "real failure."
 //!
 //! The scaffold seeds the fixture repo and commits, then writes an
 //! untracked file (so the working tree is dirty in the sense
@@ -26,7 +26,7 @@ use tempfile::TempDir;
 const STORY_ID: u32 = 88804;
 
 const FIXTURE_YAML: &str = r#"id: 88804
-title: "Fixture story for story 8 CLI dirty-tree refusal"
+title: "Fixture story for story 1 CLI dirty-tree refusal"
 
 outcome: |
   A fixture used only to exercise the dirty-tree refusal contract via
@@ -47,7 +47,7 @@ acceptance:
     exit 2.
 
 guidance: |
-  Fixture authored inline for the story-8 dirty-tree scaffold. Not a
+  Fixture authored inline for the story-1 dirty-tree scaffold. Not a
   real story.
 
 depends_on: []
@@ -92,7 +92,7 @@ fn agentic_uat_on_dirty_tree_exits_two_writes_no_rows_and_leaves_yaml_unchanged(
     let status = output.status;
 
     // Exit code 2 EXACTLY: the could-not-verdict contract from story
-    // 8 guidance. 0 would be silent promotion (catastrophic); 1 would
+    // 1 guidance. 0 would be silent promotion (catastrophic); 1 would
     // be confused with a real Fail verdict.
     assert_eq!(
         status.code(),

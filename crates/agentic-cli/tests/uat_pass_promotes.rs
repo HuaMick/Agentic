@@ -1,14 +1,14 @@
-//! Story 8 acceptance test: Pass-and-promote end-to-end through the binary.
+//! Story 1 acceptance test: Pass-and-promote end-to-end through the binary.
 //!
-//! Justification (from stories/8.yml): proves the happy path end-to-end
+//! Justification (from stories/1.yml): proves the happy path end-to-end
 //! through the binary: `agentic uat <id> --verdict pass` on a clean
 //! fixture repo with a valid story returns exit 0, writes exactly one
 //! row to the configured store's `uat_signings` table with
 //! `verdict=pass` and the fixture HEAD SHA, and rewrites the fixture's
 //! `stories/<id>.yml` to `status: healthy`. Without this we cannot
-//! claim the CLI is a real path to `healthy` — story 1 proves the
-//! library does it, but the binary could still fail to construct `Uat`
-//! correctly or drop the promotion on the floor.
+//! claim the CLI is a real path to `healthy` — the library-level
+//! scaffolds prove the library does it, but the binary could still
+//! fail to construct `Uat` correctly or drop the promotion on the floor.
 //!
 //! The scaffold builds a fresh fixture repo + stories dir + SurrealStore
 //! tempdir, invokes the compiled `agentic` binary, then re-opens the
@@ -26,7 +26,7 @@ use tempfile::TempDir;
 const STORY_ID: u32 = 88802;
 
 const FIXTURE_YAML: &str = r#"id: 88802
-title: "Fixture story for story 8 CLI pass-and-promote"
+title: "Fixture story for story 1 CLI pass-and-promote"
 
 outcome: |
   A fixture that the CLI uat subcommand promotes to healthy when
@@ -46,7 +46,7 @@ acceptance:
     Run `agentic uat <id> --verdict pass`; assert promotion.
 
 guidance: |
-  Fixture authored inline for the story-8 pass-and-promote scaffold.
+  Fixture authored inline for the story-1 pass-and-promote scaffold.
   Not a real story.
 
 depends_on: []

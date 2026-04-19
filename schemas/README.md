@@ -6,7 +6,7 @@ One file per schema. If it's authored by humans and parsed by code, it has a sch
 
 ## Current schemas
 
-- **`story.schema.json`** — user story YAML shape. Authoritative for `stories/<id>.yml`. Authoring guide: `docs/guides/story-authoring.md`.
+- **`story.schema.json`** — user story YAML shape. Authoritative for `stories/<id>.yml`. Carries the optional `related_files` array (story 9) — globs a story declares as its file-level interests for the dashboard's staleness classifier. Authoring guide: `docs/guides/story-authoring.md`.
 - **`pattern.schema.json`** — pattern YAML shape. Authoritative for `patterns/<slug>.yml`. Authoring guide: `docs/guides/pattern-authoring.md`.
 
 ## Schemas to be added (Phase 2+)
