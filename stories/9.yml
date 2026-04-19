@@ -1,0 +1,368 @@
+id: 9
+title: Scope dashboard staleness to each story's declared file dependencies
+outcome: |
+  A developer editing a file unrelated to a healthy story sees that
+  story remain healthy on the dashboard, because staleness is scoped to
+  each story's declared file dependencies rather than to HEAD equality.
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-story/tests/load_related_files_round_trips.rs
+    justification: |
+      Proves the schema-and-loader happy path for the new field: a
+      story YAML whose `related_files` is a non-empty array of
+      strings loads into a `Story` value whose `related_files`
+      field is semantically equal to what's on disk, preserving
+      order. Without this the field is invisible downstream and
+      the classifier has nothing to intersect against.
+  - file: crates/agentic-story/tests/load_related_files_absent_is_empty.rs
+    justification: |
+      Proves backward compatibility of the schema change: a story
+      YAML that omits `related_files` entirely (as every existing
+      story on disk does today) loads successfully and the typed
+      `Story`'s `related_files` is an empty collection, NOT a
+      parse error, NOT an absent-sentinel that downstream code
+      has to unwrap. Without this, shipping the schema change
+      would break every existing story at load time — the whole
+      corpus would need back-population before the dashboard
+      could render at all.
+  - file: crates/agentic-story/tests/load_related_files_rejects_non_string_entry.rs
+    justification: |
+      Proves the type boundary: a story YAML whose
+      `related_files` is present but contains a non-string entry
+      (e.g. `[42]`, `[null]`, or a nested array) is rejected by
+      the loader with a typed error naming the field. Without
+      this, a malformed entry would surface downstream as a
+      panic inside the dashboard's glob-matching step rather
+      than at parse time where the author can act on it.
+  - file: crates/agentic-dashboard/tests/health_related_files_no_intersection_stays_healthy.rs
+    justification: |
+      Proves the core relaxation: a story whose latest
+      `uat_signings.verdict=pass` commit is older than HEAD, but
+      where the set of files changed between that commit and
+      HEAD has no intersection with the story's `related_files`
+      globs, renders as `healthy` (not `unhealthy`). Without this
+      the legacy strict-equality rule is still in force and the
+      whole point of the story is unshipped.
+  - file: crates/agentic-dashboard/tests/health_related_files_intersection_is_unhealthy.rs
+    justification: |
+      Proves the staleness trigger: a story whose latest UAT pass
+      commit is older than HEAD, where at least one file changed
+      between that commit and HEAD matches at least one of the
+      story's `related_files` entries (including glob expansion
+      for entries like `crates/foo/src/**`), renders as
+      `unhealthy` with a reason distinguishable from
+      "tests went red." Without this the dashboard can no longer
+      surface "code that mattered to this story changed since
+      it was proven" — the signal the strict rule used to give
+      us unconditionally.
+  - file: crates/agentic-dashboard/tests/health_related_files_absent_is_permissive.rs
+    justification: |
+      Proves the default-policy choice: a story whose YAML omits
+      `related_files` (or declares it as an empty array), with a
+      latest UAT pass commit older than HEAD and no failing
+      tests, renders as `healthy`. Without this pinning, the
+      absent-field behaviour is an implementation detail and
+      future drift could silently turn "I haven't declared
+      dependencies yet" into "every unrelated edit knocks me
+      red," which is exactly the ergonomic failure this story
+      exists to fix.
+  - file: crates/agentic-dashboard/tests/health_related_files_glob_matches_nested_path.rs
+    justification: |
+      Proves glob semantics at the boundary downstream code has
+      to get right: `related_files: ["crates/agentic-uat/src/**"]`
+      matches a change to `crates/agentic-uat/src/nested/mod.rs`
+      (double-star crosses path separators) and does NOT match
+      `crates/agentic-uat/Cargo.toml` (the glob is rooted at
+      `src/`). Without this, glob semantics become
+      implementation-defined across implementations — and the
+      difference between "watches the whole crate" and "watches
+      only the top-level module" is the difference between a
+      useful field and a trap.
+  uat: |
+    Goal: convince yourself that editing a file unrelated to a
+    healthy story leaves it healthy; that editing a file the story
+    declares as related turns it unhealthy; and that a story with no
+    `related_files` declared is treated permissively rather than
+    strictly.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status`
+         and confirm the working tree is clean.
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the
+         just-installed binary.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. Pick a pre-existing story id `<scoped-id>` whose acceptance
+         tests you can drive to a Pass verdict quickly (or set one up
+         in a scratch fixture). On disk, edit its YAML to add
+         `related_files: ["crates/agentic-uat/src/**"]` and nothing
+         else changed. Commit this change as commit `C0`.
+
+    Seed a healthy row:
+      5. Drive the story through `agentic uat <scoped-id> --verdict
+         pass --store "$AGENTIC_STORE"` at commit `C0`. Confirm
+         `stories/<scoped-id>.yml` now says `status: healthy` and a
+         Pass row exists in the store (use `agentic stories health
+         <scoped-id> --store "$AGENTIC_STORE"` and note the
+         `Healthy at` SHA matches `C0`).
+
+    No-intersection walkthrough (the one that used to fail):
+      6. Make a commit `C1` that edits ONLY `README.md` (or any file
+         demonstrably outside `crates/agentic-uat/src/`). Confirm
+         `git diff --name-only C0..HEAD` prints only that file.
+      7. Run `agentic stories health --store "$AGENTIC_STORE"`. Observe:
+         - Process exits 0.
+         - `<scoped-id>` still renders as `healthy` in the table.
+         - The `Healthy at` cell still shows the short SHA for `C0`.
+         - Under the previous strict-equality rule this row would
+           have rendered `unhealthy`; confirm by eye that the
+           classifier relaxed correctly.
+
+    Intersection walkthrough:
+      8. Make a commit `C2` that edits a file matching the story's
+         `related_files` glob (e.g. touch or add a byte to any file
+         under `crates/agentic-uat/src/`). Confirm
+         `git diff --name-only C0..HEAD` now includes at least one
+         `crates/agentic-uat/src/**` path.
+      9. Run `agentic stories health --store "$AGENTIC_STORE"`.
+         Observe:
+         - `<scoped-id>` now renders as `unhealthy`.
+         - The reason is distinguishable from "tests went red" — the
+           dashboard surfaces that a related file changed (the exact
+           cell and wording are implementation decisions the library
+           tests pin down; confirm it isn't silent).
+
+    Permissive-default walkthrough:
+     10. Edit the story YAML to delete the `related_files` field
+         entirely (return it to its pre-step-4 shape). Commit as
+         `C3`.
+     11. Re-record a UAT Pass at `C3` so the story is healthy again
+         with a fresh signing (same command as step 5, but at `C3`).
+     12. Make a commit `C4` that edits any file in the repo — pick
+         one that clearly used to live under the previous
+         `related_files` glob (e.g. `crates/agentic-uat/src/lib.rs`),
+         so the test is meaningful.
+     13. Run `agentic stories health --store "$AGENTIC_STORE"`.
+         Observe:
+         - `<scoped-id>` renders as `healthy`. An absent
+           `related_files` does NOT fall back to strict HEAD-
+           equality; it is treated as "no declared dependencies, so
+           no file-based staleness signal applies."
+
+    Cleanup:
+     14. `git reset --hard <SHA-before-step-4>` to drop every commit
+         made during this UAT and restore the story file to its
+         original shape. Confirm `git status --porcelain` is empty.
+     15. `rm -rf "$AGENTIC_STORE"` to clear the synthetic rows.
+     16. If you want the installed binary gone: `cargo uninstall
+         agentic-cli`.
+guidance: |
+  This story replaces the strict "latest UAT commit == HEAD" branch of
+  the healthy-classifier (story 3) with a file-intersection rule, and
+  introduces the per-story `related_files` field that the rule
+  intersects against. It ships three things as one journey, along a
+  single observable (the dashboard classification of a specific
+  story): the schema extension, the loader parse + validate, and the
+  dashboard classifier change. Splitting along crate boundaries
+  (`schemas/` vs `agentic-story` vs `agentic-dashboard`) would violate
+  story-first-not-boundary-first — the user's journey is "unrelated
+  edits don't nag me about a healthy story," and the crates are just
+  where that journey lands.
+
+  Why this is a separate story from 3.
+    Story 3's guidance explicitly reserves the relaxation as "a
+    separate later story" — it ships the strict rule today and names
+    this follow-up by design. Folding the relaxation into story 3
+    would both (a) contradict that commitment and (b) widen an
+    already twelve-test story that owns the whole four-status
+    classifier. Consolidate-over-fragment's diagnostic ("could this
+    have been avoided if the prior story was accurate enough?")
+    answers no here: story 3 was deliberately accurate about its
+    scope, and the omission is flagged forward, not a gap.
+
+  Why this is a separate story from 6.
+    Story 6 is the parse/validate boundary for story YAML. Adding
+    `related_files` does touch that boundary, but the field is
+    inert at the loader layer — no cycle check, no DAG, no
+    semantic load-time validation beyond "it's an array of
+    strings." The reason `related_files` exists is entirely
+    downstream (the dashboard). Story 6 remains the place where
+    the loader contract is proven; this story extends the shape
+    the loader accepts in service of a separate user journey.
+
+  Schema change.
+    `schemas/story.schema.json` grows one optional property:
+
+      "related_files": {
+        "type": "array",
+        "default": [],
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Paths or globs (relative to repo root)
+          whose change since the last UAT pass commit marks this
+          story stale. Absent or empty means no file-based
+          staleness signal — the story is healthy as long as the
+          UAT pass row exists and tests are not red."
+      }
+
+    The property is NOT added to `required`. Every existing
+    story on disk validates against the new schema unchanged.
+    Back-populating `related_files` across stories 1–7 is
+    deliberately OUT OF SCOPE for this story (see "Back-population
+    policy" below).
+
+  Loader surface.
+    `agentic-story`'s `Story` struct grows one field:
+
+      pub related_files: Vec<String>,
+
+    Default on deserialization is an empty vec. Each entry must
+    be non-empty after trim. Anything more complex (glob syntax
+    validation, absolute-path rejection, wildcard-without-
+    basename warnings) is explicitly NOT validated at load time.
+    The loader keeps its current posture: parse, type-check, and
+    let downstream consumers (the dashboard) decide semantic
+    validity per use.
+
+  Classifier change (the payload).
+    Inside `agentic-dashboard`, the `healthy` branch's
+    "uat_commit == HEAD" subcheck becomes:
+
+      let changed = git_diff_name_only(uat_commit, HEAD);
+      let stale = story.related_files.iter().any(|pat|
+                    glob_matches_any(pat, &changed));
+      let healthy = latest_uat_pass
+                    && latest_test_verdict == Pass
+                    && !stale;
+
+    Mirror the negation into the `unhealthy` branch: a story is
+    "fell from grace" when a historical UAT pass exists AND
+    (latest test_runs.verdict == fail OR
+     any `related_files` entry matches any changed file).
+
+    The `uat_commit == HEAD` predicate is REMOVED. Strict
+    equality no longer appears in the classifier at all.
+
+  Default policy when `related_files` is absent or empty.
+    Permissive — the file-intersection check contributes no
+    staleness signal. Rationale: the legacy strict-equality rule
+    is exactly what this story is replacing; retaining it as the
+    absent-field fallback would make the field effectively
+    mandatory to keep any story green, which is a worse
+    ergonomic than the rule we're removing. Operators who want
+    strict-equality-for-this-specific-story behaviour opt in by
+    listing the files they actually care about.
+
+    This is a deliberate divergence from the legacy system's
+    `global_watch` concept — we are not reintroducing a global
+    "everything watches everything" default. If that need
+    reappears, extract a pattern-level `watch_files` in a
+    separate later story (see "Deferred neighbours" below).
+
+  Glob semantics — what this story pins.
+    The tests pin two glob properties the dashboard implementer
+    MUST preserve regardless of crate choice:
+      - `**` crosses path separators. A pattern like
+        `crates/foo/src/**` matches
+        `crates/foo/src/nested/mod.rs`.
+      - Patterns are rooted at repo root. A pattern like
+        `crates/foo/src/**` does NOT match `crates/foo/Cargo.toml`.
+    The `glob` crate (already in the Rust ecosystem with
+    documented semantics matching the above) is the default
+    choice; any equivalent impl is acceptable if the two
+    pinned properties hold. The nuances of case-sensitivity,
+    hidden-file matching, and trailing-slash behaviour are
+    left to the impl for now — later stories can pin more if
+    they need to.
+
+  Unhealthy reason channel.
+    Story 3's dashboard already renders `Failing tests` as a
+    comma-separated list of basenames. This story does NOT
+    widen that column's contract — when a story is unhealthy
+    solely because of a `related_files` intersection (no
+    failing tests), the `Failing tests` cell stays empty and
+    the unhealth signal shows up in the drilldown view as
+    "stale: <N> related files changed since <short-sha>". In
+    `--json` mode, the per-story object grows an optional
+    `stale_related_files` array field listing the matched
+    paths (full paths, not basenames — the dashboard mode
+    handles truncation). Absent when not stale. Tests pin
+    this so downstream consumers (future CI integrations)
+    don't have to distinguish "unhealthy because tests" from
+    "unhealthy because files" by scraping strings.
+
+  Back-population policy — explicit out of scope.
+    This story does NOT populate `related_files` across
+    stories 1 through 7. Reasons: (a) those are corpus edits,
+    not mechanism changes; (b) the schema and classifier must
+    exist before population can be done usefully; (c) tangling
+    population into the mechanism's UAT would require seven
+    unrelated commits inside the single walkthrough. The
+    follow-up is a one-shot `story-writer` curation pass, not
+    a story. Once this story is `healthy`, a single directed
+    story-writer run can add `related_files` to every current
+    story. The UAT for THIS story only needs one fixture story
+    with a populated field, not seven.
+
+  Deferred neighbours — explicitly NOT in this story.
+    The legacy system had two adjacent mechanics this story
+    deliberately does not include:
+      - Pattern-level `watch_files` inheritance (patterns
+        contribute globs to every story that references
+        them). Deferred because the patterns crate is not
+        first-class yet (we have two pattern files, both
+        referenced inline) and folding it in would require
+        unbuilt pieces in the UAT (uat-first-fence). A later
+        story revisits this when the patterns corpus pressure
+        justifies the mechanism.
+      - Global `global_watch` everything-watches-everything
+        default. Deferred permanently unless reintroduced by
+        an ADR — the permissive absent-field default above
+        supersedes the legacy global-watch for our
+        ergonomics.
+
+  Test file locations.
+    Three loader-level tests under `crates/agentic-story/tests/`
+    cover the schema-and-parse surface
+    (`load_related_files_round_trips.rs`,
+    `load_related_files_absent_is_empty.rs`,
+    `load_related_files_rejects_non_string_entry.rs`). Four
+    classifier-level tests under
+    `crates/agentic-dashboard/tests/` cover the dashboard
+    semantics
+    (`health_related_files_no_intersection_stays_healthy.rs`,
+    `health_related_files_intersection_is_unhealthy.rs`,
+    `health_related_files_absent_is_permissive.rs`,
+    `health_related_files_glob_matches_nested_path.rs`). No
+    binary-level tests are added — the CLI surface is
+    unchanged by this story, and story 3's existing binary
+    tests already prove the argv-to-Dashboard wire. Adding
+    more would restate story 3's proofs rather than this
+    story's.
+
+  Relationship to story 3.
+    When this story ships `healthy`, story 3's YAML content
+    becomes stale (its guidance still says "a future story
+    may relax this to 'HEAD touches no related files'"). The
+    correct fix is a small guidance edit on story 3 after
+    THIS story passes UAT — done by a subsequent story-writer
+    pass, which will auto-revert story 3 to
+    `under_construction` per the system design. That is
+    correct behaviour: a classifier change invalidates the
+    proof of the story that pinned the old classifier.
+    Attempting to pre-edit story 3 at this story's authoring
+    time would re-open story 3 prematurely.
+
+  Relationship to story 6.
+    This story extends the shape story 6's loader accepts but
+    does not change any of story 6's pinned contracts
+    (typed-error shapes, missing-field names, cycle
+    detection, enum-boundary enforcement). Story 6's proof
+    hash will invalidate when the `Story` struct grows the
+    field; re-verification will rebuild it. No contract
+    fight.
+depends_on:
+- 3
+- 6
