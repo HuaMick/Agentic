@@ -1,70 +1,61 @@
 id: 1
-title: "Sign a UAT verdict and promote the story to healthy"
-
+title: Sign a UAT verdict and promote the story to healthy
 outcome: |
   A developer runs `agentic uat <id>` against a story and receives a
   commit-signed Pass or Fail verdict that is the only path by which a
   story's status on disk becomes `healthy`.
-
-status: under_construction
-
+status: healthy
 patterns:
-  - standalone-resilient-library
-
+- standalone-resilient-library
 acceptance:
   tests:
-    - file: crates/agentic-uat/tests/uat_pass.rs
-      justification: |
-        Proves the happy path: given a story whose UAT walkthrough
-        executes successfully (driven by a stub `UatExecutor` that
-        returns Pass) on a clean working tree, `Uat::run` returns a
-        Pass verdict, writes exactly one row to `uat_signings` with
-        verdict=pass and the current commit hash, and rewrites the
-        story YAML so `status: healthy`. Without this the gate cannot
-        promote a story at all — and promotion-to-healthy is the
-        whole point of the command.
-
-    - file: crates/agentic-uat/tests/uat_fail.rs
-      justification: |
-        Proves the failure path: given a stub `UatExecutor` that
-        returns Fail, `Uat::run` returns a Fail verdict, writes a
-        `uat_signings` row with verdict=fail and the current commit,
-        and does NOT mutate the story YAML's `status` field. Without
-        this a Fail could either silently promote (catastrophic) or
-        leave no audit trail (we'd lose the negative evidence the
-        dashboard needs to compute "fell from grace").
-
-    - file: crates/agentic-uat/tests/uat_fail_closed_dirty_tree.rs
-      justification: |
-        Proves the fail-closed contract on a dirty git working tree:
-        with uncommitted changes present, `Uat::run` refuses to
-        produce a verdict, returns `UatError::DirtyTree`, writes no
-        row to `uat_signings`, and does not touch the story YAML.
-        Without this the commit-signed guarantee is forgeable —
-        someone could run UAT, see Pass, then edit code and claim
-        the old verdict still applies to the new tree.
-
-    - file: crates/agentic-uat/tests/uat_bad_story_id.rs
-      justification: |
-        Proves clean failure on bad input: invoking `Uat::run` with
-        a non-existent story id returns `UatError::UnknownStory`,
-        does not panic, writes no row to `uat_signings`, and does
-        not create or touch any YAML file. Without this a typo or
-        stale id could produce a panic trace that looks like a
-        system fault when it is actually user error — eroding trust
-        in the verdict precisely when we need it.
-
-    - file: crates/agentic-uat/tests/uat_standalone_resilience.rs
-      justification: |
-        Proves the standalone-resilient-library claim: the UAT
-        library is driven directly with only `agentic-store`,
-        `agentic-events`, `agentic-story`, and `git2` wired up (no
-        orchestrator, no runtime, no sandbox), and produces the
-        same verdict-and-signing shape as the CLI path. Without
-        this we cannot claim `agentic uat` is the layer that still
-        promotes stories when the rest of the system is in flames;
-        it would be just another thing that breaks together.
-
+  - file: crates/agentic-uat/tests/uat_pass.rs
+    justification: |
+      Proves the happy path: given a story whose UAT walkthrough
+      executes successfully (driven by a stub `UatExecutor` that
+      returns Pass) on a clean working tree, `Uat::run` returns a
+      Pass verdict, writes exactly one row to `uat_signings` with
+      verdict=pass and the current commit hash, and rewrites the
+      story YAML so `status: healthy`. Without this the gate cannot
+      promote a story at all — and promotion-to-healthy is the
+      whole point of the command.
+  - file: crates/agentic-uat/tests/uat_fail.rs
+    justification: |
+      Proves the failure path: given a stub `UatExecutor` that
+      returns Fail, `Uat::run` returns a Fail verdict, writes a
+      `uat_signings` row with verdict=fail and the current commit,
+      and does NOT mutate the story YAML's `status` field. Without
+      this a Fail could either silently promote (catastrophic) or
+      leave no audit trail (we'd lose the negative evidence the
+      dashboard needs to compute "fell from grace").
+  - file: crates/agentic-uat/tests/uat_fail_closed_dirty_tree.rs
+    justification: |
+      Proves the fail-closed contract on a dirty git working tree:
+      with uncommitted changes present, `Uat::run` refuses to
+      produce a verdict, returns `UatError::DirtyTree`, writes no
+      row to `uat_signings`, and does not touch the story YAML.
+      Without this the commit-signed guarantee is forgeable —
+      someone could run UAT, see Pass, then edit code and claim
+      the old verdict still applies to the new tree.
+  - file: crates/agentic-uat/tests/uat_bad_story_id.rs
+    justification: |
+      Proves clean failure on bad input: invoking `Uat::run` with
+      a non-existent story id returns `UatError::UnknownStory`,
+      does not panic, writes no row to `uat_signings`, and does
+      not create or touch any YAML file. Without this a typo or
+      stale id could produce a panic trace that looks like a
+      system fault when it is actually user error — eroding trust
+      in the verdict precisely when we need it.
+  - file: crates/agentic-uat/tests/uat_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim: the UAT
+      library is driven directly with only `agentic-store`,
+      `agentic-events`, `agentic-story`, and `git2` wired up (no
+      orchestrator, no runtime, no sandbox), and produces the
+      same verdict-and-signing shape as the CLI path. Without
+      this we cannot claim `agentic uat` is the layer that still
+      promotes stories when the rest of the system is in flames;
+      it would be just another thing that breaks together.
   uat: |
     Goal: convince yourself that `agentic uat` is the only path to
     `healthy`, that it refuses to run on a dirty tree, and that bad
@@ -136,7 +127,6 @@ acceptance:
          signing in this exercise is a real product claim). Document
          this in your UAT report so reviewers know the rows were
          exercise-only.
-
 guidance: |
   This story supersedes the original `agentic verify` story. The
   prove-it gate has been split: continuous test bookkeeping moved to
@@ -228,5 +218,6 @@ guidance: |
     runtime ordering constraint between the two — `agentic uat`
     does not read `test_runs`, and `agentic-ci-record` does not
     read `uat_signings`.
-
-depends_on: [4, 6]
+depends_on:
+- 4
+- 6
