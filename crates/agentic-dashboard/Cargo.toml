@@ -48,3 +48,11 @@ serde_json.workspace = true
 # `TempDir` so the live `stories/` at repo root is never touched.
 # Matches the fixture idiom used by `agentic-uat`'s tests.
 tempfile.workspace = true
+
+# Story 9: the file-intersection scaffolds construct tempdir git repos
+# with two commits each so the C0..HEAD diff the classifier computes
+# against `related_files` is exercised end-to-end. `git2` is already the
+# workspace's libgit2 binding choice (see crates/agentic-uat/Cargo.toml
+# and crates/agentic-ci-record/Cargo.toml); pinned to the same version
+# with `default-features = false` for the same reason.
+git2 = { version = "0.19", default-features = false }

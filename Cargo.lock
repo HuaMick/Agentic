@@ -33,6 +33,7 @@ dependencies = [
  "agentic-store",
  "agentic-story",
  "chrono",
+ "git2",
  "serde_json",
  "tempfile",
 ]
