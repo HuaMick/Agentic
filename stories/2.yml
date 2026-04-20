@@ -4,7 +4,7 @@ outcome: |
   After each acceptance-test run, the system has a single up-to-date row
   per story in the `test_runs` table that the dashboard can read to
   surface which stories' tests are currently red.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:

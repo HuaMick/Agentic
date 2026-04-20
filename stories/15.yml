@@ -230,22 +230,61 @@ acceptance:
      17. If you want the installed binary gone: `cargo
          uninstall agentic-cli`.
 guidance: |
-  This story replaces `stories/14.yml` (healthy at commit
-  `cb163e2`). The two stories cover the same CLI verb
-  (`agentic test-build`) and the same crate
-  (`agentic-test-builder`), so the journey-principle's
-  consolidation bias would normally rule. They split because
-  story 14's contract embeds AI inference INSIDE the library
-  (the library spawns `claude`, parses its stdout, wraps
-  results in `ClaudeUnavailable` / `ClaudeTimeout` /
-  `ScaffoldParseError`) and this story rejects that shape in
-  favour of a plan/record split whose library never spawns an
-  LLM. They cannot co-exist as healthy; one describes
-  claude-as-component, the other claude-as-user, and the
-  codebase can only implement one. When this story reaches
-  healthy, story 14 is retired (its YAML deleted, its tests
-  and cached scaffolds removed, its ID not reused per the
-  id-never-reused rule in the authoring guide).
+  This story is the single authority on `agentic test-build`'s
+  contract after the 2026-04-20 corpus realignment. It absorbs
+  and supersedes TWO retired stories, and it is the only story
+  future readers should consult for what the verb does and how
+  its evidence is shaped.
+
+  Story 14 (retired 2026-04-20). The prior story 14's contract
+    embedded AI inference INSIDE the library — the library spawned
+    `claude`, parsed its stdout, and wrapped results in typed
+    `ClaudeUnavailable` / `ClaudeTimeout` / `ScaffoldParseError`
+    errors. This story rejects that shape wholesale in favour of
+    a plan/record split whose library never spawns an LLM. The
+    two contracts could not co-exist as healthy; one describes
+    claude-as-component, the other claude-as-user, and the
+    codebase can only implement one. Story 14's YAML was deleted
+    with its tests and cached scaffolds; its ID is not reused.
+
+  Story 7 (retired, folded into this story 2026-04-20). Story 7
+    originally owned the evidence-atomicity contract (the
+    red-state record is committable, fail-closed on dirty tree,
+    preservation-safe, typed-errored) WHEN SCAFFOLDS ARE PRESENT.
+    It did not take a position on who writes the scaffolds.
+    Rather than keep story 7 alongside a narrower story about
+    authoring, the system is young and consolidation wins: story
+    7's substantive contracts are re-pinned by this story's
+    `acceptance.tests[]` and `guidance`. Specifically:
+      - Evidence-row atomicity (whole run succeeds or leaves no
+        trace) is pinned by `record_evidence_row_is_atomic.rs`
+        and restated under "Atomicity" below.
+      - Fail-closed-on-dirty-tree is pinned by
+        `record_refuses_on_dirty_tree.rs` and restated under
+        "Failure modes" below.
+      - Preservation semantics (existing non-empty files are
+        bytes-immutable) survive in the form "the CLI never
+        writes to a scaffold path; it only probes it" —
+        preservation is trivial because the library is no
+        longer the author.
+      - Thin-justification refusal (`ThinJustification`) and
+        zero-acceptance-tests refusal (`NoAcceptanceTests`)
+        are inherited through the shared story-loader (story 6)
+        and named under "Failure modes" below.
+      - Evidence-row shape (`run_id`, `story_id`, `commit`,
+        `timestamp`, `verdicts[]` with per-verdict `file`,
+        `verdict`, and for `red` only `red_path` and
+        `diagnostic`) is pinned verbatim by this story's
+        acceptance tests and restated in the evidence-row
+        section below. Downstream agents parse this shape
+        unchanged; the schema is not extended.
+      - Narrow `[dev-dependencies]` authority is preserved by
+        virtue of the library no longer authoring at all — the
+        library never edits any `Cargo.toml`, so the guard-rail
+        collapses into a stronger "library edits zero files
+        outside `evidence/runs/<id>/`" invariant.
+    Story 7's ID is not reused. Future readers asking "what is
+    test-build's contract?" stop here.
 
   Claude-as-user vs claude-as-component (the directive).
     The user's directive for this replacement, in their words:
@@ -282,7 +321,7 @@ guidance: |
     This story does not close that door; it reinforces which
     side of it test-builder sits on.
 
-  What is UNCHANGED from story 7.
+  Contracts absorbed from the retired story 7.
     - The fail-closed-on-dirty-tree gate on record, the
       exit-code mapping, and the typed
       `TestBuilderError::DirtyTree`.
@@ -318,8 +357,8 @@ guidance: |
        expects every scaffold named in the plan to exist on
        disk as parseable Rust staged in the working tree,
        probes each for red state via `cargo check` then
-       `cargo test` (the same probe logic story 7 and the
-       old story 14 shared), and writes the evidence row
+       `cargo test` (the probe logic this story retains from
+       the retired stories 7 and 14), and writes the evidence row
        atomically on success. On any refusal (missing,
        unparseable, green, dirty-tree-elsewhere) the
        library rolls back: no evidence directory created,
@@ -379,9 +418,9 @@ guidance: |
          --nocapture`. Non-zero → `red_path: runtime`;
          capture first panic line as `diagnostic`. Exit 0
          → `ScaffoldNotRed`.
-    The probe is the same shape story 7's test-builder used
-    when it also authored scaffolds; this story keeps the
-    probe and drops the authoring.
+    The probe is the same shape the retired stories 7 and 14
+    specified; this story keeps the probe and drops the
+    authoring.
 
   Failure modes (all fail-closed with exit code 2 on
   record; plan never exits 2 on the story itself — plan is
@@ -396,8 +435,8 @@ guidance: |
       scaffold exists but does not parse as Rust.
     - `ScaffoldNotRed { file, probe }`: a scaffold parses
       but the probe (compile or runtime) exited 0.
-    - `ThinJustification { index }`: inherited from story
-      7 via the shared story-loader; fires on either plan
+    - `ThinJustification { index }`: inherited via the
+      shared story-loader (story 6); fires on either plan
       or record.
     - `NoAcceptanceTests`: inherited likewise.
 
@@ -409,32 +448,22 @@ guidance: |
     14's roll-back-on-subprocess-timeout guarantee, because
     there is no subprocess to partially complete.
 
-  Why not consolidate with story 7.
+  Why this story now owns the whole `agentic test-build`
+  journey (and story 7 did not stay split off).
     The consolidate-over-fragment bias says "same CLI
-    surface → one story." Story 7 and this story do share
-    `agentic test-build`. The split reasoning is the same
-    the author of story 14 applied, only now it refines:
-      - Story 7 pins the evidence-atomicity contract (the
-        red-state record is committable, fail-closed,
-        preservation-safe, typed-errored) WHEN THE
-        SCAFFOLDS ARE PRESENT. It does not take a position
-        on who writes the scaffolds.
-      - This story pins the CLI's authoring boundary: the
-        library plans and records, the user writes. Its
-        UAT centres on a human (or claude-as-agent) using
-        Edit/Write on real files, which is a distinct
-        starting context from story 7's "panic-stub
-        scaffolds authored by the CLI" mental model.
-    Consolidating would push story 7 from healthy to
-    under_construction on a contract addition that
-    materially changes its UAT shape and its mental model
-    of who authors. Per the splitting-rule's tiebreakers
-    (distinct observables, distinct starting contexts) and
-    the journey-principle's diagnostic ("could this epic
-    have been avoided if the prior story was accurate
-    enough?" — no, story 7's authoring-agnostic shape is
-    correct and this story is the natural next layer), the
-    split holds.
+    surface → one story." Stories 7, 14, and this story all
+    shared `agentic test-build`. Story 7 and this story
+    could plausibly have lived side-by-side — story 7
+    pinning the evidence-atomicity contract assuming
+    scaffolds exist, this story pinning the authoring
+    boundary — but the system is young and the cleanest
+    foundation wins over incremental stability. Story 7
+    was folded in and retired; its substantive contracts
+    (enumerated under "Story 7 (retired, folded into this
+    story)" above) are now this story's contracts, pinned
+    by this story's `acceptance.tests[]`. Future readers
+    looking for the `agentic test-build` contract stop
+    here.
 
   Why not an ADR amendment.
     ADR-0005 (red-green is a contract) survives unchanged —
@@ -502,7 +531,7 @@ guidance: |
     CLI contract the agent will exercise, not to rewrite
     the agent.
 depends_on:
-- 7
+- 6
 related_files:
 - crates/agentic-test-builder/src/**
 - crates/agentic-cli/src/**

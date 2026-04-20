@@ -27,7 +27,7 @@ when_to_use: |
   to depend on the world.
 
 how_we_do_it: |
-  Three concrete conventions, all enforced by tests rather than docs:
+  Four concrete conventions, all enforced by tests rather than docs:
 
   1. **Dependency floor.** The library's `Cargo.toml` lists only the
      minimal crates it needs. Forbidden by convention: `agentic-cli`,
@@ -51,6 +51,14 @@ how_we_do_it: |
      exit code per the crate's documented contract. No business logic,
      no fallback paths, no "if the library is unavailable then..."
      branches. If the library can't be loaded, the CLI failed to build.
+
+  4. **No LLM subprocess inside the library.** A standalone-resilient
+     library does not spawn `claude` (or any other LLM subprocess) in
+     its own code. Claude is a user of the system — the library's
+     correctness when the rest of the system is in flames depends on
+     it being AI-free. LLM-driven work belongs in agents (under
+     `agents/<category>/<name>/`) that invoke the CLI as users, not
+     in libraries the CLI wraps.
 
   Canonical example: `crates/agentic-uat` (see `stories/1.yml`) and
   `crates/agentic-ci-record` (see `stories/2.yml`).

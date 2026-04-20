@@ -4,7 +4,7 @@ outcome: |
   A developer can point any consumer crate at a SurrealDB-embedded
   `Store` and get the same behaviour as the in-memory implementation,
   with writes that survive process restart.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:

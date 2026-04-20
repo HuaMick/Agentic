@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic uat <id> --verdict <pass|fail>` against a
   story and receives a commit-signed verdict that is the only path by
   which a story's status on disk becomes `healthy`.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -204,15 +204,16 @@ guidance: |
   UAT executor is a trait, not a concrete agent.
     The library defines `trait UatExecutor { fn execute(&self, story:
     &Story) -> ExecutionOutcome; }` where `ExecutionOutcome` is a
-    minimal `{ verdict: Pass | Fail, transcript: String }`. For this
-    story's library-level tests the impl is a stub
-    (`StubExecutor::always_pass()`, `StubExecutor::always_fail()`).
-    The real impl — an agent-driven executor that drives a human or
-    sub-agent through the prose journey — is a later story. Keeping
-    it a trait now means we can ship the signing-and-promotion
-    contract without blocking on the journey runner, and a future
-    Phase 3 work can swap the real executor in without changing the
-    signed-verdict contract.
+    minimal `{ verdict: Pass | Fail, transcript: String }`. The
+    only impl this story ships is the stub
+    (`StubExecutor::always_pass()`, `StubExecutor::always_fail()`);
+    `--verdict pass|fail` maps directly to the stub. The trait
+    shape exists so the signing-and-promotion contract does not
+    hard-code the stub's always-returns behaviour into its public
+    API — not as scaffolding for a later LLM-wrapped executor.
+    Any future executor is an orchestration concern that lives
+    outside this standalone-resilient library; this crate never
+    spawns `claude` or any other LLM subprocess.
 
   Orchestrator-driven UAT at the binary boundary.
     `agentic uat <id> --verdict <pass|fail>` is the orchestrator-
@@ -222,11 +223,10 @@ guidance: |
     decision. Internally, the binary maps `--verdict pass` to
     constructing `agentic_uat::StubExecutor::always_pass()` and
     `--verdict fail` to `agentic_uat::StubExecutor::always_fail()`,
-    then calls `Uat::run`. A future story may add an agent-driven
-    executor behind a different flag (e.g. `--executor claude`);
-    keep the `--verdict` flag mandatory for now rather than
-    defaulting it, so the operator's decision is always explicit in
-    the command line.
+    then calls `Uat::run`. The `--verdict` flag is mandatory; the
+    CLI signs the operator's decision, it does not generate one.
+    The operator (human or Claude Code acting as orchestrator) has
+    already walked through the prose UAT before invoking the CLI.
 
   Fail-closed on dirty tree — see the fail-closed-on-dirty-tree
   pattern. Applied at the library boundary (`Uat::run` refuses on

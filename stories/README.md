@@ -50,24 +50,18 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 | id | title | status |
 |----|-------|--------|
-| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | healthy |
-| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | healthy |
+| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | under_construction |
+| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | under_construction |
 | 3 | `agentic stories health` dashboard (library + CLI) | healthy |
 | 4 | `Store` trait + `MemStore` impl | healthy |
-| 5 | `SurrealStore` backed by `surrealkv` | healthy |
+| 5 | `SurrealStore` backed by `surrealkv` | under_construction |
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
-| 7 | test-builder meta-story — red-state evidence is a committable atomic | healthy* |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
 | 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | under_construction |
 | 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | proposed |
 | 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | proposed |
 | 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | proposed |
-| 14 | test-builder authors real acceptance tests via the local claude subprocess | under_construction |
-
-\* Story 7 shipped `healthy` at commit `e5f4997` but its implementation
-was mutated by story 14's in-flight work; 5 of its 9 tests currently
-fail. The YAML still reads `status: healthy` pending a re-UAT pass that
-will correct it.
+| 15 | test-build is a plan-and-record CLI whose user writes the scaffolds | proposed |
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather
@@ -76,13 +70,21 @@ two distinct observables (signing a verdict AND reading the dashboard).
 See each story's `acceptance.tests` for the library-level vs. binary-level
 test split.
 
-Story 14 is a hard prerequisite for the `dag-primary-lens` epic (stories
-10-13) picked up during story 10's implementation attempt: the `agentic
-test-build` binary shipped by story 7 writes panic-stub scaffolds that
-build-rust cannot drive to green, so every proposed story in the epic
-needs story 14's real-acceptance-test scaffolding to cross the red-green
-line. See `stories/14.yml` for the full scope and the splitting analysis
-against story 7.
+Stories 7 and 14 were retired on 2026-04-20 in favour of story 15, which
+is now the single authority on `agentic test-build`'s contract. Story 14
+embedded AI inference INSIDE the test-builder library (the library spawned
+`claude` to author scaffold bodies) — the claude-as-component shape the
+legacy Python system died of. Story 7's substantive contracts (evidence
+atomicity, fail-closed-on-dirty-tree, preservation semantics, thin-
+justification refusal, evidence-row shape) were folded into story 15
+rather than kept split off, on the principle that a young system
+prioritises the cleanest foundation over incremental stability. Story 15
+replaces both with a plan/record split whose library never spawns an LLM:
+the user (human or claude-as-agent) writes scaffolds with their own
+tools, and the CLI atomically verifies and records red-state evidence.
+Stories 7 and 14 do not retain their IDs for reuse. Story 15 is a hard
+prerequisite for the `dag-primary-lens` epic (stories 10-13). See
+`stories/15.yml` for the full scope.
 
 Stories 10, 11, 12, and 13 form the `dag-primary-lens` epic
 (`epics/live/dag-primary-lens/epic.yml`). They share a unifying
