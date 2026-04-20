@@ -157,7 +157,7 @@ impl TestBuilder {
         fs::create_dir_all(&evidence_dir).map_err(|e| TestBuilderError::Other(e.to_string()))?;
 
         let evidence_path = evidence_dir.join(format!(
-            "{}.jsonl",
+            "{}-red.jsonl",
             timestamp
                 .replace(":", "-")
                 .split('.')
@@ -500,12 +500,22 @@ fn add_dev_dep(
 fn probe_scaffold(
     repo_root: &Path,
     crate_name: &str,
-    _test_name: &str,
+    test_name: &str,
     _expected_red_path: &str,
 ) -> Result<(String, String), TestBuilderError> {
-    // Try to build and test; capture both stdout and stderr.
+    // Narrow the probe to the specific test file so the diagnostic reflects
+    // THIS scaffold, not whichever sibling test rustc happened to barf on
+    // first. `--test <name>` builds only the named integration test.
     let test_output = Command::new("cargo")
-        .args(["test", "--package", crate_name, "--", "--nocapture"])
+        .args([
+            "test",
+            "--package",
+            crate_name,
+            "--test",
+            test_name,
+            "--",
+            "--nocapture",
+        ])
         .current_dir(repo_root)
         .output()
         .map_err(|e| TestBuilderError::Other(format!("failed to run cargo test: {}", e)))?;
@@ -513,39 +523,59 @@ fn probe_scaffold(
     let stdout = String::from_utf8_lossy(&test_output.stdout);
     let stderr = String::from_utf8_lossy(&test_output.stderr);
 
-    // Check stderr first for compile errors (these start with "error[E" for rustc errors)
+    // Compile-red detection: rustc writes `error[E<code>]: <msg>` (default
+    // format) or `<path>:<line>:<col>: error[E<code>]: <msg>` (short format).
+    // Match on `error[E` specifically so we do NOT falsely promote cargo's
+    // own error lines (e.g. `error: test failed, to rerun pass ...`) to
+    // compile-red when the actual failure was a runtime panic.
     for line in stderr.lines() {
-        if line.starts_with("error[") {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("error[E") {
+            return Ok(("compile".to_string(), trimmed.to_string()));
+        }
+        if line.contains(": error[E") {
             return Ok(("compile".to_string(), line.to_string()));
         }
     }
 
-    // Look for runtime panic in test output.
-    // Test panics show up in patterns like:
-    // "thread 'test_name' panicked at 'message'"
-    for line in stdout.lines().chain(stderr.lines()) {
-        if line.contains("panicked") {
-            // Extract the panic message
-            if let Some(idx) = line.find("panicked at") {
-                let after = &line[idx + "panicked at".len()..];
-                return Ok(("runtime".to_string(), after.trim().to_string()));
+    // Runtime-red detection: test panic shows up as
+    //   thread 'fn_name' panicked at <file:line:col>:
+    //   <message>
+    // or (older format)
+    //   thread 'fn_name' panicked at '<message>', <file>:<line>:<col>
+    // Capture the next non-empty line after "panicked at" so the diagnostic
+    // matches the justification's first line the scaffold panics with.
+    let combined: Vec<&str> = stdout.lines().chain(stderr.lines()).collect();
+    for (i, line) in combined.iter().enumerate() {
+        if let Some(idx) = line.find("panicked at") {
+            let after = &line[idx + "panicked at".len()..];
+            let inline = after.trim().trim_start_matches('\'').trim_end_matches(',');
+            // Case A: older format "panicked at 'msg', file:line" — the message
+            // is between single quotes on the same line.
+            if let Some(end) = inline.find('\'') {
+                let msg = &inline[..end];
+                if !msg.is_empty() {
+                    return Ok(("runtime".to_string(), msg.to_string()));
+                }
             }
-            return Ok(("runtime".to_string(), line.to_string()));
+            // Case B: newer format — the next non-empty line is the message.
+            if let Some(msg_line) = combined[i + 1..].iter().find(|l| !l.trim().is_empty()) {
+                return Ok(("runtime".to_string(), msg_line.trim().to_string()));
+            }
+            // Fallback: whatever followed "panicked at" on the same line.
+            if !inline.is_empty() {
+                return Ok(("runtime".to_string(), inline.to_string()));
+            }
         }
     }
 
-    // If test execution failed, that's runtime-red.
     if !test_output.status.success() {
-        // Look for any test failure indicator
-        for line in stdout.lines().chain(stderr.lines()) {
-            if line.contains("FAILED") || line.contains("test result: FAILED") {
-                return Ok(("runtime".to_string(), "test failed with panic".to_string()));
-            }
-        }
-        return Ok(("runtime".to_string(), "test execution failed".to_string()));
+        return Ok((
+            "runtime".to_string(),
+            "test execution failed with no extractable diagnostic".to_string(),
+        ));
     }
 
-    // Default: runtime-red
     Ok((
         "runtime".to_string(),
         "test completed with failure".to_string(),
