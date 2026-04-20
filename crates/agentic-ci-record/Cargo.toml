@@ -21,3 +21,11 @@ serde_json.workspace = true
 # current working directory (any ancestor qualifies) so the recorder
 # runs from any workspace crate's directory.
 git2 = { version = "0.19", default-features = false }
+
+[dev-dependencies]
+# Story 12: the library-level selector scaffolds build a fixture
+# `stories/` directory under a `TempDir` per test so the developer's
+# real `stories/` is never read. Same idiom the agentic-story loader
+# tests use.
+tempfile.workspace = true
+

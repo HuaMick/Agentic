@@ -9,6 +9,7 @@ dependencies = [
  "agentic-store",
  "git2",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
