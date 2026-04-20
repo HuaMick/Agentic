@@ -67,3 +67,18 @@ tempfile.workspace = true
 # and crates/agentic-ci-record/Cargo.toml); pinned to the same version
 # with `default-features = false` for the same reason.
 git2 = { version = "0.19", default-features = false }
+
+# Story 10: two scaffolds (expand-rejects-with-selector, all-rejects-
+# with-selector) whose justifications pin argv-parse-time rejection
+# behaviour at the compiled-binary layer. They live under
+# `crates/agentic-dashboard/tests/` (per stories/10.yml) but must drive
+# the `agentic` binary to observe exit-code-2 argv rejection — only
+# the CLI sees argv. Same `assert_cmd` pin as `agentic-cli`'s tests.
+assert_cmd = "2"
+
+# Note: `agentic-cli` is NOT a dev-dep here because it has no lib
+# target and Cargo would ignore the line with a warning. `assert_cmd`
+# falls back to searching the workspace `target/` directory for the
+# named binary, which works for `cargo test --workspace` runs. The
+# workspace-level cargo invocation builds the `agentic` binary by
+# virtue of the cli crate being a workspace member.

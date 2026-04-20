@@ -35,6 +35,7 @@ version = "0.1.0"
 dependencies = [
  "agentic-store",
  "agentic-story",
+ "assert_cmd",
  "chrono",
  "git2",
  "globset",
