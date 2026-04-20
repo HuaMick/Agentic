@@ -59,6 +59,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentic-test-builder"
+version = "0.1.0"
+dependencies = [
+ "git2",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agentic-uat"
 version = "0.1.0"
 dependencies = [

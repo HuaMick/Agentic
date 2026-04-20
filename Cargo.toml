@@ -7,6 +7,7 @@ members = [
     "crates/agentic-ci-record",
     "crates/agentic-dashboard",
     "crates/agentic-cli",
+    "crates/agentic-test-builder",
 ]
 
 [workspace.package]

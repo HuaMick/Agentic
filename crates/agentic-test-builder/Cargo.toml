@@ -1,0 +1,37 @@
+[package]
+name = "agentic-test-builder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Story 7 scaffold bootstrap: the crate exists only as a compile-anchor so
+# the failing test scaffolds in `tests/` can be discovered and run via
+# `cargo test --package agentic-test-builder`. No runtime dependencies are
+# declared — the public surface (`TestBuilder`, `TestBuilderError`,
+# `run`, etc.) is build-rust's to author once red-state evidence is on
+# disk. This file will grow a real `[dependencies]` block when build-rust
+# picks the story up; until then the red evidence proves nothing has been
+# prematurely implemented.
+
+[dependencies]
+
+[dev-dependencies]
+# Story 7 scaffolds: the dirty-tree scaffold initialises a fresh git repo
+# inside a `TempDir` and intentionally leaves a tracked-but-unstaged or
+# untracked change so the fail-closed precondition fires. Same libgit2
+# binding + pin used by `agentic-uat` and `agentic-ci-record` for the
+# same reason (see their Cargo.toml notes).
+git2 = { version = "0.19", default-features = false }
+
+# Story 7 scaffolds: the happy-path scaffolds author a fixture story inline
+# as YAML, write it to a `TempDir`, and read the JSONL evidence row back as
+# `serde_json::Value`. `serde_json` is already a workspace dep (story 4);
+# this entry only adds dev-scope visibility to this crate.
+serde_json.workspace = true
+
+# Story 7 scaffolds: every test roots its fixture story + repo at a
+# `TempDir` so no test ever writes to the live `stories/` directory or
+# the real repo. Matches the fixture idiom used by `agentic-uat` and
+# `agentic-story`'s own tests.
+tempfile.workspace = true
