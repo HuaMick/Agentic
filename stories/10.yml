@@ -6,7 +6,7 @@ outcome: |
   showing its DAG depth and how many downstream stories it blocks, so
   the dashboard points at what can be started right now instead of
   listing the whole corpus.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -21,7 +21,6 @@ acceptance:
       Without this, the default view degenerates to "every
       not-healthy story" and the operator is back to a flat list of
       work they cannot start.
-
   - file: crates/agentic-dashboard/tests/health_frontier_default_hides_healthy_stories.rs
     justification: |
       Proves the healthy-hidden rule: given a fixture corpus with
@@ -31,7 +30,6 @@ acceptance:
       grows healthy noise and the attention-focused shape the
       frontier was built for is diluted to "a list with most of the
       stories the operator does not need to look at today."
-
   - file: crates/agentic-dashboard/tests/health_frontier_default_shows_proposed.rs
     justification: |
       Proves the status-range rule: a story whose status is
@@ -40,7 +38,6 @@ acceptance:
       not yet been started is invisible until it enters
       `under_construction` — the classic "my roadmap is not in my
       dashboard" gap the frontier view is supposed to close.
-
   - file: crates/agentic-dashboard/tests/health_lvl_uses_longest_path_to_dag_leaf.rs
     justification: |
       Proves the `lvl` computation: given a fixture where story `X`
@@ -50,7 +47,6 @@ acceptance:
       "how much work unblocks" signals get the same `lvl` number and
       the primary sort (`lvl` ascending) lies about which frontier
       story unblocks the most downstream work.
-
   - file: crates/agentic-dashboard/tests/health_blast_radius_column.rs
     justification: |
       Proves the `↓` column contract: for a frontier story `S` whose
@@ -62,7 +58,6 @@ acceptance:
       operator cannot distinguish a frontier story that unblocks one
       leaf from one that unblocks a whole subtree — which is the
       primary signal "fix this first" depends on.
-
   - file: crates/agentic-dashboard/tests/health_expand_shows_full_not_healthy_subtree.rs
     justification: |
       Proves `--expand` semantics: running the dashboard with
@@ -73,7 +68,6 @@ acceptance:
       the frontier. Healthy stories remain hidden. Without this, an
       operator diagnosing "why is my frontier root deep" has no
       view between "frontier only" and "everything."
-
   - file: crates/agentic-dashboard/tests/health_expand_rejects_with_selector.rs
     justification: |
       Proves argv validation: `--expand` combined with any positional
@@ -83,7 +77,6 @@ acceptance:
       has no coherent meaning. Without this, the CLI accepts argv it
       cannot faithfully honour and the operator gets a silently
       surprising row set.
-
   - file: crates/agentic-dashboard/tests/health_all_mode_renders_flat_list.rs
     justification: |
       Proves the escape hatch: running the dashboard with `--all`
@@ -93,7 +86,6 @@ acceptance:
       list view that tooling and muscle memory depend on has no
       path — the default shift would be a capability removal, not a
       lens shift.
-
   - file: crates/agentic-dashboard/tests/health_all_rejects_with_selector.rs
     justification: |
       Proves the mutual-exclusion rule: `--all` combined with any
@@ -103,7 +95,6 @@ acceptance:
       `--expand` already defines a different row set; layering
       `--all` over either makes the command's intent unreadable.
       Without this the CLI accepts argv it cannot faithfully honour.
-
   - file: crates/agentic-dashboard/tests/health_drilldown_subtree_view.rs
     justification: |
       Proves the subtree drilldown: `Dashboard::drilldown(<id>)`
@@ -115,7 +106,6 @@ acceptance:
       health. Without this, drilldown is still the story-3 single-
       row view and the "lineage view" half of the epic objective is
       unshipped.
-
   - file: crates/agentic-dashboard/tests/health_selector_plus_id_lists_ancestors.rs
     justification: |
       Proves the `+<id>` selector at the library boundary:
@@ -126,7 +116,6 @@ acceptance:
       surgical "show me this story's upstream" slice and the dbt-style
       lineage grammar the epic commits to is unshipped at the library
       boundary where the CLI wires plug in.
-
   - file: crates/agentic-dashboard/tests/health_selector_id_plus_lists_descendants.rs
     justification: |
       Proves the `<id>+` selector at the library boundary:
@@ -137,7 +126,6 @@ acceptance:
       selector grammar is asymmetric — operators could look upstream
       but not downstream, and story 12's CI-subtree use case has no
       shared primitive to reuse.
-
   - file: crates/agentic-dashboard/tests/health_selector_plus_id_plus_lists_full_subtree.rs
     justification: |
       Proves the `+<id>+` selector at the library boundary:
@@ -147,7 +135,6 @@ acceptance:
       third leg of the dbt grammar is unshipped and the drilldown view
       (which uses the same traversal internally) has no tested
       primitive to share.
-
   - file: crates/agentic-dashboard/tests/health_selector_cycle_rejected.rs
     justification: |
       Proves the invariant defence: given a fixture `stories/`
@@ -160,7 +147,6 @@ acceptance:
       regression in the loader's cycle check would produce either a
       panic trace or a silently-wrong frontier — both worse than a
       loud failure.
-
   - file: crates/agentic-dashboard/tests/health_selector_unknown_id.rs
     justification: |
       Proves clean failure on bad input at the library boundary:
@@ -171,7 +157,6 @@ acceptance:
       CLI wrappers (and story 12's CI selector caller) get either a
       crash or an empty list indistinguishable from "no ancestors" —
       either one is a worse operator experience than a named error.
-
   - file: crates/agentic-cli/tests/health_frontier_default_via_binary.rs
     justification: |
       Proves the frontier default reaches the operator through the
@@ -183,7 +168,6 @@ acceptance:
       claim is a library-level claim only — the argv-to-library
       wire could quietly pass `all: true` (or its future equivalent)
       and the operator would never notice.
-
   - file: crates/agentic-cli/tests/health_all_flag_renders_flat_list.rs
     justification: |
       Proves the `--all` flag is plumbed through the binary: running
@@ -192,7 +176,6 @@ acceptance:
       matching the row set the story-3 dashboard used to emit by
       default. Without this the escape hatch exists in the library
       but not at the hand operators and scripts type on.
-
   - file: crates/agentic-cli/tests/health_selectors_via_binary.rs
     justification: |
       Proves the selector argv reaches the library through the binary:
@@ -202,7 +185,6 @@ acceptance:
       `agentic stories health +99999` (unknown id) exits non-zero with
       a named error. Without this, the dbt-style grammar is a Rust
       API only and the CLI surface the epic commits to is unshipped.
-
   uat: |
     Goal: convince yourself that the dashboard's default view is the
     frontier of not-healthy work (with `healthy` stories hidden and
