@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: under_construction
+status: healthy
 patterns: []
 acceptance:
   tests:
