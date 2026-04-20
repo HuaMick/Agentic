@@ -6,7 +6,7 @@ outcome: |
   each justification, so build-rust can drive the story from red to green
   without editing the tests.
 
-status: proposed
+status: under_construction
 
 patterns:
 - standalone-resilient-library
@@ -291,15 +291,14 @@ guidance: |
     zero-tests refusals. The invariant in story 7's guidance is a
     guidance claim, not a test-pinned contract. Upgrading the
     scaffold body to a claude-authored real acceptance test leaves
-    every test in story 7 still passing. The follow-up curator pass
-    (by the guidance-writer or a subsequent story-writer invocation
-    AFTER this story ships `healthy`) updates story 7's guidance to
-    read "Scaffold shape is a claude-authored real acceptance test
-    whose reproducibility is content-hash cached" and auto-reverts
-    story 7 to `under_construction` per the lifecycle rule. Pre-
-    editing story 7 at this story's authoring time would re-open it
-    prematurely, and its current guidance is not so wrong that it
-    cannot wait.
+    every test in story 7 still passing. A subsequent story-writer
+    invocation AFTER this story ships `healthy` updates story 7's
+    guidance to read "Scaffold shape is a claude-authored real
+    acceptance test whose reproducibility is content-hash cached"
+    and auto-reverts story 7 to `under_construction` per the
+    lifecycle rule. Pre-editing story 7 at this story's authoring
+    time would re-open it prematurely, and its current guidance is
+    not so wrong that it cannot wait.
 
   Why this is a separate story from 7.
     Story 7 ships the evidence-atomicity contract (the red-state
@@ -328,11 +327,7 @@ guidance: |
     subprocess for subscription auth. No new evidence shape
     (ADR-0005 unchanged — this story layers inside story 7's shape,
     not outside it). No deprecation of a crate or cross-crate
-    reshuffle. The `agents/test/test-builder/` agent-spec is
-    affected (its write authority becomes redundant once the binary
-    does real authoring) but that is a guidance-writer pass on the
-    agent corpus, NOT a schema or ADR change. The scope of this
-    shift is a single story.
+    reshuffle. The scope of this shift is a single story.
 
   Prompt contract (auditable).
     The binary sends `claude -p` a prompt composed of the following
@@ -438,20 +433,6 @@ guidance: |
     the Nth entry can fail after entries 1..N-1 have already been
     written). Roll-back restores the atomicity.
 
-  Subagent-spec interaction.
-    The existing `agents/test/test-builder/` agent-spec authorises
-    a Claude-driven subagent to write test files directly. Once
-    this story ships healthy, that write authority is redundant —
-    the binary does the same thing, better-bounded, with a
-    committable audit trail. A follow-up guidance-writer pass
-    deprecates the subagent spec's write authority and rewrites
-    its role to "operator helper that explains test-builder's
-    output and escalates thin justifications to story-writer" —
-    a thinner, read-oriented role. That rewrite is explicitly
-    deferred to a guidance-writer session AFTER this story
-    reaches healthy. Do NOT pre-edit the agent specs at this
-    story's authoring time.
-
   Standalone-resilience posture.
     `agentic-test-builder` remains standalone-resilient-library-
     shaped (see the referenced pattern). The `claude` subprocess
@@ -541,15 +522,11 @@ guidance: |
     `proposed` and will hit the same wall when test-builder runs
     against their acceptance.tests[] entries. This story is a
     hard prerequisite for any of them reaching `healthy`. The
-    epic's `depends_on` list should gain `14` — a note to the
-    guidance-writer follow-up pass. The epic.yml itself is
-    touched only to record the new dependency; no other fields
-    change.
+    epic's `depends_on` list should gain `14`; the epic.yml
+    itself is touched only to record the new dependency, no
+    other fields change.
 
   What this story explicitly does NOT do.
-    - Does NOT deprecate the test-builder subagent. That is a
-      guidance-writer pass on `agents/test/test-builder/` after
-      this story ships healthy.
     - Does NOT extend the story schema (no new fields on story
       YAML). The scaffold cache is an on-disk side-artefact
       outside the story corpus.
@@ -562,10 +539,6 @@ guidance: |
       rules; pre-specifying the linter here would over-constrain
       the claude-authored output before we know what the corpus
       looks like.
-    - Does NOT port content from the test-builder subagent's
-      process.yml into the binary. The binary has its own prompt
-      contract (enumerated above); the subagent's prompt shape
-      is a separate artefact on a deprecation path.
 
   Relationship to story 7.
     Story 7 remains `healthy`. Its tests continue to pass against
@@ -583,8 +556,5 @@ depends_on:
 related_files:
 - crates/agentic-test-builder/src/**
 - crates/agentic-cli/src/**
-- agents/test/test-builder/contract.yml
-- agents/test/test-builder/inputs.yml
-- agents/test/test-builder/process.yml
 - docs/decisions/0003-claude-code-subscription-subprocess.md
 - docs/decisions/0005-red-green-is-a-contract.md

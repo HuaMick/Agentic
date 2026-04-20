@@ -332,6 +332,22 @@ fn main() {
                     eprintln!("OutOfScopeEdit: scaffold requested a non-dev-dependency mutation");
                     std::process::exit(2);
                 }
+                Err(TestBuilderError::ClaudeUnavailable) => {
+                    eprintln!("ClaudeUnavailable: claude subprocess not on PATH or auth failed");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::ClaudeTimeout { index }) => {
+                    eprintln!("ClaudeTimeout: acceptance.tests[{index}] exceeded the scaffold authoring budget");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::ScaffoldParseError { path, stderr }) => {
+                    eprintln!(
+                        "ScaffoldParseError: claude-authored scaffold at {} did not parse as Rust: {}",
+                        path.display(),
+                        stderr
+                    );
+                    std::process::exit(2);
+                }
                 Err(TestBuilderError::Other(msg)) => {
                     eprintln!("test-build failed: {msg}");
                     std::process::exit(2);
