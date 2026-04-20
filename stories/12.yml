@@ -5,7 +5,7 @@ outcome: |
   executes the acceptance-test suites only for the stories in the
   selected DAG subtree, so a commit touching one leaf of the corpus
   does not burn the whole test surface to prove itself.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
