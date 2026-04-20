@@ -31,6 +31,17 @@ const STORY_ID: u32 = 7003;
 
 const EXISTING_TEST_BYTES: &[u8] = b"//! Hand-authored before test-builder ran. Its bytes must survive.\n\n#[test]\nfn already_written_by_human() {\n    panic!(\"human-authored\");\n}\n";
 
+// Deterministic Rust body the stubbed `claude` emits on stdout for the
+// missing (freshly_scaffolded) acceptance entry. The fixture crate's
+// src/lib.rs is empty so the body uses no imports and is runtime-red
+// via a false assert_eq.
+const STUBBED_CLAUDE_STDOUT: &str = r#"//! Story 7003 scaffold authored by stubbed `claude` shim.
+#[test]
+fn scaffold_runtime_red() {
+    assert_eq!(1u32, 2u32, "scaffold observable not yet satisfied");
+}
+"#;
+
 const FIXTURE_STORY_YAML: &str = r#"id: 7003
 title: "Preservation fixture: one existing file, one missing file"
 
@@ -92,6 +103,12 @@ edition = "2021"
     let existing_path = fixture_root.join("tests/already_written_by_human.rs");
     fs::write(&existing_path, EXISTING_TEST_BYTES).expect("write pre-existing test");
 
+    // Stub `claude` onto a tempdir-rooted PATH so the library's
+    // subprocess wire is exercised without needing real claude auth.
+    let path_override = install_claude_shim(repo_root, STUBBED_CLAUDE_STDOUT);
+    std::env::set_var("PATH", &path_override);
+    std::env::set_var("AGENTIC_CACHE", repo_root.join(".agentic-cache"));
+
     // Commit everything so the tree is clean.
     init_repo_and_commit_seed(repo_root);
 
@@ -145,6 +162,33 @@ edition = "2021"
         .expect("one red verdict");
     assert!(red["red_path"].is_string());
     assert!(red["diagnostic"].is_string());
+}
+
+/// Install a `claude` shim onto a tempdir and return a PATH string
+/// that prepends that tempdir — so spawning `claude` from a child
+/// process finds the shim, which writes `stdout_body` verbatim on
+/// stdout regardless of argv/stdin.
+fn install_claude_shim(repo_root: &Path, stdout_body: &str) -> String {
+    let shim_dir = repo_root.join(".bin");
+    fs::create_dir_all(&shim_dir).expect("shim dir");
+    let shim_path = shim_dir.join("claude");
+    // Drain stdin first to avoid a Broken-pipe race — the library
+    // writes the prompt to our stdin; if we exit before reading, the
+    // parent's write racily fails with EPIPE.
+    let script = format!(
+        "#!/bin/sh\ncat >/dev/null\ncat <<'__AGENTIC_EOF__'\n{body}__AGENTIC_EOF__\n",
+        body = stdout_body
+    );
+    fs::write(&shim_path, script).expect("write shim");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&shim_path).expect("shim metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&shim_path, perms).expect("chmod shim");
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{}", shim_dir.display(), old_path)
 }
 
 fn collect_jsonl_rows(dir: &Path) -> Vec<serde_json::Value> {
