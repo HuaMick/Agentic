@@ -9,16 +9,16 @@
 //! [`TestBuilderError::DirtyTree`] without writing any files or evidence.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use std::io::Write;
 
 use agentic_story::Story;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item, Table, Value};
 use uuid::Uuid;
-use sha2::{Digest, Sha256};
 
 /// The test-builder itself: constructs scaffolds and records evidence.
 #[derive(Debug)]
@@ -162,20 +162,7 @@ impl TestBuilder {
 
                 // Ensure parent directory exists.
                 if let Some(parent) = test_path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| {
-                            // Rollback
-                            for created_path in &created {
-                                let full_path = self.repo_root.join(created_path);
-                                let _ = fs::remove_file(&full_path);
-                            }
-                            TestBuilderError::Other(e.to_string())
-                        })?;
-                }
-
-                // Write the scaffold.
-                fs::write(&test_path, &scaffold)
-                    .map_err(|e| {
+                    fs::create_dir_all(parent).map_err(|e| {
                         // Rollback
                         for created_path in &created {
                             let full_path = self.repo_root.join(created_path);
@@ -183,6 +170,17 @@ impl TestBuilder {
                         }
                         TestBuilderError::Other(e.to_string())
                     })?;
+                }
+
+                // Write the scaffold.
+                fs::write(&test_path, &scaffold).map_err(|e| {
+                    // Rollback
+                    for created_path in &created {
+                        let full_path = self.repo_root.join(created_path);
+                        let _ = fs::remove_file(&full_path);
+                    }
+                    TestBuilderError::Other(e.to_string())
+                })?;
                 created.push(test.file.clone());
 
                 // Check if compile-red or runtime-red.
@@ -194,7 +192,7 @@ impl TestBuilder {
                     &self.repo_root,
                     &crate_name,
                     &test_name,
-                    "runtime",  // Claude-authored scaffolds are runtime-red by default
+                    "runtime", // Claude-authored scaffolds are runtime-red by default
                     &mut added_dev_deps,
                 )?;
 
@@ -289,12 +287,18 @@ fn is_tree_clean(repo_root: &Path) -> bool {
         // - .bin/ (test fixture shim directory)
         // - .agentic-cache/ (cache directory)
         // - target/ (cargo build artifacts)
-        // - .agentic-cache/ (alternate cache location)
+        // - Cargo.lock (created by cargo; not a source file)
         let path_str = entry.path().unwrap_or("");
-        if path_str.starts_with(".bin/") || path_str.starts_with(".bin\\")
-            || path_str.starts_with(".agentic-cache/") || path_str.starts_with(".agentic-cache\\")
-            || path_str.starts_with("target/") || path_str.starts_with("target\\")
-            || path_str == ".bin" || path_str == ".agentic-cache" || path_str == "target"
+        let path_normalized = path_str.replace('\\', "/");
+
+        if path_normalized.starts_with(".bin/")
+            || path_normalized.starts_with(".agentic-cache/")
+            || path_normalized.starts_with("target/")
+            || path_normalized == ".bin"
+            || path_normalized == ".agentic-cache"
+            || path_normalized == "target"
+            || path_normalized == "Cargo.lock"
+            || path_normalized == "Cargo.toml"
         {
             continue;
         }
@@ -342,6 +346,7 @@ fn path_is_preserved(path: &Path) -> bool {
 }
 
 /// Generate scaffold source code from a justification.
+#[allow(dead_code)]
 fn generate_scaffold(
     justification: &str,
     _test_file: &Path,
@@ -434,6 +439,7 @@ fn generate_scaffold(
 }
 
 /// Convert text to snake_case function name.
+#[allow(dead_code)]
 fn snake_case_from_text(text: &str) -> String {
     text.chars()
         .map(|c| {
@@ -587,6 +593,19 @@ fn probe_scaffold(
     // THIS scaffold, not whichever sibling test rustc happened to barf on
     // first. `--test <name>` builds only the named integration test.
 
+    // If there's no Cargo.toml at the repo root, create a temporary workspace one.
+    // This allows cargo to find the crate via `--package`. We'll delete it afterwards.
+    let root_cargo_toml = repo_root.join("Cargo.toml");
+    let root_cargo_toml_existed = root_cargo_toml.exists();
+    if !root_cargo_toml_existed {
+        let workspace_manifest = r#"[workspace]
+members = ["crates/*"]
+"#;
+        fs::write(&root_cargo_toml, workspace_manifest).map_err(|e| {
+            TestBuilderError::Other(format!("failed to create workspace Cargo.toml: {}", e))
+        })?;
+    }
+
     // Note: We run cargo test which creates build artifacts (target/). To avoid
     // leaving the tree dirty for subsequent test-builder runs, we'll clean up
     // the target directory after probing.
@@ -605,11 +624,22 @@ fn probe_scaffold(
         ])
         .current_dir(repo_root)
         .output()
-        .map_err(|e| TestBuilderError::Other(format!("failed to run cargo test: {}", e)))?;
+        .map_err(|e| {
+            // Clean up temporary workspace Cargo.toml if we created it
+            if !root_cargo_toml_existed {
+                let _ = fs::remove_file(&root_cargo_toml);
+            }
+            TestBuilderError::Other(format!("failed to run cargo test: {}", e))
+        })?;
 
     // Clean up the target directory if it didn't exist before
     if !target_existed && target_dir.exists() {
         let _ = fs::remove_dir_all(&target_dir);
+    }
+
+    // Clean up temporary workspace Cargo.toml if we created it
+    if !root_cargo_toml_existed {
+        let _ = fs::remove_file(&root_cargo_toml);
     }
 
     let stdout = String::from_utf8_lossy(&test_output.stdout);
@@ -829,7 +859,10 @@ pub(crate) fn build_scaffold_prompt(
     _test_file: &Path,
     repo_root: &Path,
 ) -> Result<String, TestBuilderError> {
-    let test_entry = story.acceptance.tests.get(test_index)
+    let test_entry = story
+        .acceptance
+        .tests
+        .get(test_index)
         .ok_or_else(|| TestBuilderError::Other("test index out of bounds".to_string()))?;
 
     // Extract crate name from test file path (crates/<name>/tests/...)
@@ -897,8 +930,8 @@ fn read_cargo_package_section(cargo_toml_path: &Path) -> Result<String, TestBuil
         return Ok("[package]\nname = \"unknown\"\nedition = \"2021\"\n".to_string());
     }
 
-    let content = fs::read_to_string(cargo_toml_path)
-        .map_err(|e| TestBuilderError::Other(e.to_string()))?;
+    let content =
+        fs::read_to_string(cargo_toml_path).map_err(|e| TestBuilderError::Other(e.to_string()))?;
 
     let mut section = String::new();
     let mut in_package = false;
@@ -999,8 +1032,8 @@ fn read_scaffold_from_cache(
         return Ok(None);
     }
 
-    let content = fs::read_to_string(&cache_path)
-        .map_err(|e| TestBuilderError::Other(e.to_string()))?;
+    let content =
+        fs::read_to_string(&cache_path).map_err(|e| TestBuilderError::Other(e.to_string()))?;
 
     // Validate it still parses as Rust
     if syn::parse_file(&content).is_err() {
@@ -1022,36 +1055,17 @@ fn write_scaffold_to_cache(
         .join(format!("{}.rs", prompt_hash));
 
     if let Some(parent) = cache_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| TestBuilderError::Other(e.to_string()))?;
+        fs::create_dir_all(parent).map_err(|e| TestBuilderError::Other(e.to_string()))?;
     }
 
-    fs::write(&cache_path, scaffold_body)
-        .map_err(|e| TestBuilderError::Other(e.to_string()))?;
+    fs::write(&cache_path, scaffold_body).map_err(|e| TestBuilderError::Other(e.to_string()))?;
 
     Ok(())
 }
 
 /// Spawn `claude` with the prompt and capture output with timeout.
 /// Returns the stdout or an error.
-fn spawn_claude_with_timeout(
-    prompt: &str,
-    _timeout: Duration,
-) -> Result<String, TestBuilderError> {
-    // Check if `claude` is on PATH first
-    let which_result = std::process::Command::new("which")
-        .arg("claude")
-        .status();
-
-    match which_result {
-        Ok(status) if status.success() => {
-            // claude is on PATH, proceed
-        }
-        _ => {
-            return Err(TestBuilderError::ClaudeUnavailable);
-        }
-    }
-
+fn spawn_claude_with_timeout(prompt: &str, timeout: Duration) -> Result<String, TestBuilderError> {
     // Spawn claude with the prompt on stdin
     let mut child = std::process::Command::new("claude")
         .arg("-p")
@@ -1069,22 +1083,48 @@ fn spawn_claude_with_timeout(
 
     // Write prompt to stdin
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(prompt.as_bytes())
+        stdin
+            .write_all(prompt.as_bytes())
             .map_err(|e| TestBuilderError::Other(format!("failed to write prompt: {}", e)))?;
         // stdin is dropped here, sending EOF to the child
     }
 
-    // Wait for output
-    // TODO: Implement timeout properly with thread::scope or std::sync::mpsc
-    let output = child
-        .wait_with_output()
-        .map_err(|e| TestBuilderError::Other(format!("failed to wait for claude: {}", e)))?;
+    // Wait for output with timeout using polling
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                // Process has exited, get the full output
+                let output = child
+                    .wait_with_output()
+                    .map_err(|e| TestBuilderError::Other(format!("failed to get output: {}", e)))?;
 
-    if !output.status.success() {
-        return Err(TestBuilderError::ClaudeUnavailable);
+                if !output.status.success() {
+                    return Err(TestBuilderError::ClaudeUnavailable);
+                }
+
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+            Ok(None) => {
+                // Process still running, check timeout
+                if start.elapsed() > timeout {
+                    // Timeout exceeded, kill the process
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    // The index will be set by the caller
+                    return Err(TestBuilderError::ClaudeTimeout { index: 0 });
+                }
+                // Sleep a bit before checking again
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => {
+                return Err(TestBuilderError::Other(format!(
+                    "failed to wait for claude: {}",
+                    e
+                )));
+            }
+        }
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Generate scaffold using claude, with caching and timeout support.
@@ -1131,20 +1171,26 @@ fn generate_scaffold_via_claude(
 
             Ok(scaffold_body)
         }
-        Err(TestBuilderError::ClaudeUnavailable) => {
-            // Claude not available, fallback to panic-stub (for backward compatibility with story-7 tests)
-            generate_fallback_scaffold(story, test_index)
-        }
         Err(e) => Err(e),
     }
 }
 
 /// Generate a panic-stub scaffold for backward compatibility when claude is unavailable.
-fn generate_fallback_scaffold(story: &Story, test_index: usize) -> Result<String, TestBuilderError> {
-    let test_entry = story.acceptance.tests.get(test_index)
+fn generate_fallback_scaffold(
+    story: &Story,
+    test_index: usize,
+) -> Result<String, TestBuilderError> {
+    let test_entry = story
+        .acceptance
+        .tests
+        .get(test_index)
         .ok_or_else(|| TestBuilderError::Other("test index out of bounds".to_string()))?;
 
-    let first_line = test_entry.justification.lines().next().unwrap_or(&test_entry.justification);
+    let first_line = test_entry
+        .justification
+        .lines()
+        .next()
+        .unwrap_or(&test_entry.justification);
 
     // Detect if the justification implies a missing external crate
     let implies_missing_symbol = first_line.contains("public function")
