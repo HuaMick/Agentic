@@ -5,13 +5,10 @@ outcome: |
   receives scaffolds whose bodies are real acceptance tests derived from
   each justification, so build-rust can drive the story from red to green
   without editing the tests.
-
-status: under_construction
-
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
-
 acceptance:
   tests:
   - file: crates/agentic-test-builder/tests/scaffold_body_imports_target_crate_symbols.rs
@@ -30,7 +27,6 @@ acceptance:
       gap this story closes. The scaffold must read as a real
       acceptance test whose path to green is "implement the named
       symbol."
-
   - file: crates/agentic-test-builder/tests/scaffold_body_asserts_on_justification_observable.rs
     justification: |
       Proves runtime-red via a real assertion derived from the
@@ -46,7 +42,6 @@ acceptance:
       degrades to the panic-stub shape, which cannot be turned green by
       editing the implementation — only by editing the test, which
       build-rust is forbidden from doing.
-
   - file: crates/agentic-test-builder/tests/scaffold_body_survives_implementation_turning_it_green.rs
     justification: |
       Proves the greenability contract: given the fixture from
@@ -60,7 +55,6 @@ acceptance:
       this, the scaffold is ungreenable by implementation and the
       red-green contract ADR-0005 names is theatre — an implementer
       could write any code and the scaffold would still panic.
-
   - file: crates/agentic-test-builder/tests/scaffold_body_is_parseable_rust.rs
     justification: |
       Proves syntactic validation: given any fixture story whose
@@ -76,7 +70,6 @@ acceptance:
       produce a half-written scaffold that breaks the workspace's
       `cargo check` for reasons unrelated to the story's contract — a
       corruption mode distinct from any currently-pinned failure.
-
   - file: crates/agentic-test-builder/tests/scaffold_body_is_cached_by_content_hash.rs
     justification: |
       Proves determinism within a commit: given a fixture story and a
@@ -92,7 +85,6 @@ acceptance:
       different scaffolds every time, breaking the reproducibility
       downstream audits and the dashboard's `uat_signings.commit`
       comparisons rely on.
-
   - file: crates/agentic-test-builder/tests/claude_unavailable_is_fail_closed.rs
     justification: |
       Proves the fail-closed contract on an unavailable `claude` binary:
@@ -107,7 +99,6 @@ acceptance:
       a CI runner without `claude` auth would silently skip real
       scaffolding and produce evidence rows claiming red against empty
       or partial files.
-
   - file: crates/agentic-test-builder/tests/claude_timeout_is_fail_closed.rs
     justification: |
       Proves the fail-closed contract on a `claude` subprocess that
@@ -122,7 +113,6 @@ acceptance:
       `claude` would either block the CI runner indefinitely or leave
       a partially-scaffolded story whose evidence row disagrees with
       the files on disk.
-
   - file: crates/agentic-cli/tests/test_build_invokes_claude_and_writes_real_scaffold.rs
     justification: |
       Proves the contract reaches the operator through the binary:
@@ -137,7 +127,6 @@ acceptance:
       library-level claims only — the argv-to-subprocess wire could
       drop the prompt or mangle the captured output and the operator
       would never notice.
-
   uat: |
     Goal: convince yourself that `agentic test-build <id>` produces
     scaffolds whose bodies are real acceptance tests (not panic-stubs),
@@ -224,7 +213,6 @@ acceptance:
      16. Revert to `main` and delete the scratch branch.
      17. If you want the installed binary gone: `cargo uninstall
          agentic-cli`.
-
 guidance: |
   This story upgrades `agentic test-build <id>` from the panic-stub
   demonstration shape story 7 landed with to a claude-backed real-
@@ -549,10 +537,8 @@ guidance: |
     `under_construction` per the system design. That is correct
     behaviour; attempting to pre-edit story 7 at this story's
     authoring time would re-open it prematurely.
-
 depends_on:
 - 7
-
 related_files:
 - crates/agentic-test-builder/src/**
 - crates/agentic-cli/src/**
