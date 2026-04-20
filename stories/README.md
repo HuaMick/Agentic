@@ -56,12 +56,13 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 4 | `Store` trait + `MemStore` impl | healthy |
 | 5 | `SurrealStore` backed by `surrealkv` | healthy |
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
-| 7 | test-builder meta-story — red-state evidence is a committable atomic | proposed |
+| 7 | test-builder meta-story — red-state evidence is a committable atomic | healthy |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
-| 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | proposed |
+| 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | under_construction |
 | 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | proposed |
 | 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | proposed |
 | 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | proposed |
+| 14 | test-builder authors real acceptance tests via the local claude subprocess | proposed |
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather
@@ -69,6 +70,14 @@ than along user journeys — and that story 8's outcome explicitly joined
 two distinct observables (signing a verdict AND reading the dashboard).
 See each story's `acceptance.tests` for the library-level vs. binary-level
 test split.
+
+Story 14 is a hard prerequisite for the `dag-primary-lens` epic (stories
+10-13) picked up during story 10's implementation attempt: the `agentic
+test-build` binary shipped by story 7 writes panic-stub scaffolds that
+build-rust cannot drive to green, so every proposed story in the epic
+needs story 14's real-acceptance-test scaffolding to cross the red-green
+line. See `stories/14.yml` for the full scope and the splitting analysis
+against story 7.
 
 Stories 10, 11, 12, and 13 form the `dag-primary-lens` epic
 (`epics/live/dag-primary-lens/epic.yml`). They share a unifying

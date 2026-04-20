@@ -46,6 +46,7 @@ depends_on:
   - 3
   - 6
   - 9
+  - 14
 
 branch: dag-primary-lens
 
@@ -110,6 +111,16 @@ notes: |
   without needing story 13 to have shipped. Story 13 ships
   independently and the view re-reads the richer classification
   without re-authoring.
+
+  Story 14 is a hard prerequisite for the epic (added to the
+  `depends_on` list above). Story 7 shipped `agentic test-build`
+  with a deterministic panic-stub scaffold body that is not
+  greenable by implementation — a gap discovered during story 10's
+  implementation attempt. Story 14 upgrades the binary to author
+  real acceptance-test bodies via the local `claude` subprocess
+  (per ADR-0003), closing the gap permanently. Stories 10, 11, 12,
+  and 13 are scaffolded by the subagent as a one-off bridge until
+  story 14 ships healthy; subsequent stories use the binary.
 
   Relationship to stories 3 and 9. Both are `healthy` today.
   Story 10 will, on UAT pass, invalidate story 3's proof (the
