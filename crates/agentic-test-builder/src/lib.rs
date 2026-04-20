@@ -538,6 +538,14 @@ fn extract_missing_crate_from_error(error: &str) -> Option<String> {
         }
     }
 
+    // Look for "cannot find module or crate `crate_name`"
+    if let Some(start) = error.find("cannot find module or crate `") {
+        let after = &error[start + "cannot find module or crate `".len()..];
+        if let Some(end) = after.find('`') {
+            return Some(after[..end].to_string());
+        }
+    }
+
     None
 }
 
