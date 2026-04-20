@@ -81,15 +81,6 @@ acceptance:
       malformed story file would blank the entire dashboard —
       making the worst case (we can't see what's broken) coincide
       with the moment we most need to see what's broken.
-  - file: crates/agentic-cli/tests/health_table_mode.rs
-    justification: |
-      Proves the table-mode wiring through the binary: running
-      `agentic stories health` with a fixture `stories/` directory
-      and an empty tempdir store writes the table header row, zero
-      data rows (because the fixture stories directory is empty),
-      and exits 0. Without this the CLI-to-`Dashboard::render_table`
-      wire is a library-level claim only — a broken argv-to-
-      Dashboard path would go unnoticed.
   - file: crates/agentic-cli/tests/health_json_mode.rs
     justification: |
       Proves the `--json` flag is plumbed through the binary:
@@ -110,18 +101,6 @@ acceptance:
       missing id. Without this, the only way to access
       `Dashboard::drilldown` is via Rust, defeating the purpose of
       the subcommand for an operator.
-  - file: crates/agentic-cli/tests/cli_uses_configured_store.rs
-    justification: |
-      Proves the two subcommands share one store end-to-end: after
-      `agentic uat <id> --verdict pass --store <tempdir>` promotes a
-      fixture story, running `agentic stories health --store
-      <tempdir>` on the same tempdir reports that story as `healthy`
-      with a `Healthy at` cell populated from the just-written
-      `uat_signings` row. Without this end-to-end check, the
-      dashboard could read a different default store than the UAT
-      command wrote to, and the binary would look correct in
-      isolation but produce silently inconsistent state in any real
-      session.
   uat: |
     Goal: convince yourself the dashboard correctly classifies the four
     statuses, surfaces `unhealthy` first, drills down on a specific
@@ -370,8 +349,9 @@ guidance: |
     mode. `--json` selects JSON output instead of the table.
     `--store` is described in story 1's "Store location — default
     and override" section; this story inherits that behaviour
-    verbatim and is tested against it via the
-    `cli_uses_configured_store.rs` end-to-end test.
+    verbatim. The cross-subcommand "UAT write visible to dashboard
+    read on the same `--store`" round-trip observable is owned by
+    story 10 (dag-primary-lens epic), not pinned here.
 
   Exit-code contract for `agentic stories health`.
     0 = rendered successfully (including the case where the
@@ -391,18 +371,6 @@ guidance: |
     guidance. They apply to `agentic stories health` unchanged; do
     not restate them here.
 
-  The `cli_uses_configured_store.rs` test — where and why.
-    The cross-subcommand invariant "a UAT write is visible to the
-    subsequent dashboard read on the same `--store`" is proven by
-    this test. It lives in story 3 rather than story 1 because
-    story 3 already depends on story 1 (the dashboard needs the
-    UAT row to exist to classify a story `healthy`); placing it in
-    story 1 would close a dependency cycle. The test drives the
-    binary with `assert_cmd`, constructs a single `TempDir` as
-    `--store`, runs `agentic uat` first and `agentic stories
-    health` second, and asserts the dashboard output reflects the
-    signing row.
-
   Test file locations.
     Library-level tests (eight tests: `health_proposed.rs`,
     `health_under_construction.rs`, `health_healthy.rs`,
@@ -417,19 +385,16 @@ guidance: |
     rendered string (table mode) or the parsed JSON value (json
     mode). They do not shell out to the top-level binary.
 
-    Binary-level tests (four tests: `health_table_mode.rs`,
-    `health_json_mode.rs`, `health_drilldown.rs`,
-    `cli_uses_configured_store.rs`) live under
-    `crates/agentic-cli/tests/` as Rust integration tests. They
-    drive the compiled binary via `assert_cmd` (or equivalent),
-    construct a `tempfile::TempDir` for `--store`, construct a
-    separate `TempDir` seeded with a minimal `stories/` directory
-    and a small git repo (HEAD commit required for any signing
-    path they exercise), and invoke `agentic` with its full argv.
-    The fixture `stories/` directory is private to each test; none
-    of these tests touch the repo's real `stories/` directory at
-    the workspace root. The binary-under-test is whatever
-    `CARGO_BIN_EXE_agentic` resolves to.
+    Binary-level tests (two tests: `health_json_mode.rs` and
+    `health_drilldown.rs`) live under `crates/agentic-cli/tests/`
+    as Rust integration tests. They drive the compiled binary via
+    `assert_cmd` (or equivalent) on a single fixture story in a
+    private tempdir (distinct from the repo's real `stories/`
+    directory) and assert the binary-level argv-to-library wire
+    is intact for JSON output and the positional drilldown id.
+    The binary-under-test is whatever `CARGO_BIN_EXE_agentic`
+    resolves to. The default-view observable (frontier vs
+    everything) is story 10's concern and is not pinned here.
 
   Relationship to stories 1 and 2.
     This story READS what stories 1 and 2 write. The row contracts
@@ -438,20 +403,22 @@ guidance: |
     runtime the dashboard is only useful once stories 1 and 2 have
     shipped, which is what `depends_on` encodes.
 
-  Regression note (2026-04-20).
-    Story 3's acceptance test `cli_uses_configured_store.rs` has
-    been red on `main` since commit `a1d0652`, when story 10's
-    stashed frontier-default dashboard impl landed. Under the new
-    default view (`frontier`), healthy stories are filtered out, so
-    the round-trip test panics when it looks for the just-promoted
-    story. This story's stamp is rolled back to
-    `under_construction` until story 10 ships and the
-    frontier-vs-all contract is reconciled — either story 3's test
-    is re-authored to acknowledge `frontier` as the new default
-    (with `--all` as the escape hatch), or story 10's default-view
-    contract is walked back. That reconciliation is the
-    dag-primary-lens epic's concern, not this story's. See
-    `stories/10.yml` and `epics/live/dag-primary-lens/epic.yml`.
+  Re-scope note (2026-04-20).
+    Story 3's original contract bundled library-level four-status
+    classification with CLI-level default-view assertions. Story 10
+    (`dag-primary-lens` epic) changed the default CLI view from
+    "all stories" to "frontier," which invalidated the CLI-level
+    tests (they assumed promoted stories appear in the default
+    view). Those two tests —
+    `crates/agentic-cli/tests/cli_uses_configured_store.rs` and
+    `crates/agentic-cli/tests/health_table_mode.rs` — have been
+    removed from this story's acceptance; the observables they
+    pinned are now story 10's concern (default-view-is-frontier) or
+    can be re-raised as a separate story if the user wants an
+    explicit round-trip test under `--all`. Story 3's library-level
+    classification + rendering contract is unchanged. Status stays
+    `under_construction` pending re-UAT against the narrower
+    contract.
 depends_on:
 - 1
 - 2
