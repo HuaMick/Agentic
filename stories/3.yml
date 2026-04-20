@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -437,6 +437,21 @@ guidance: |
     tests against `MemStore` even before their impls ship. At
     runtime the dashboard is only useful once stories 1 and 2 have
     shipped, which is what `depends_on` encodes.
+
+  Regression note (2026-04-20).
+    Story 3's acceptance test `cli_uses_configured_store.rs` has
+    been red on `main` since commit `a1d0652`, when story 10's
+    stashed frontier-default dashboard impl landed. Under the new
+    default view (`frontier`), healthy stories are filtered out, so
+    the round-trip test panics when it looks for the just-promoted
+    story. This story's stamp is rolled back to
+    `under_construction` until story 10 ships and the
+    frontier-vs-all contract is reconciled — either story 3's test
+    is re-authored to acknowledge `frontier` as the new default
+    (with `--all` as the escape hatch), or story 10's default-view
+    contract is walked back. That reconciliation is the
+    dag-primary-lens epic's concern, not this story's. See
+    `stories/10.yml` and `epics/live/dag-primary-lens/epic.yml`.
 depends_on:
 - 1
 - 2
