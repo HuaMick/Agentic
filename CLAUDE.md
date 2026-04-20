@@ -55,17 +55,21 @@ the appropriate subagent — context discipline matters.
 - **Slow growth.** Don't add a crate, dependency, field, or flag without a
   failing test or a story that demands it. The legacy system died of
   feature accretion; we will not repeat that.
-- **Subscription auth.** Runtime code uses the local `claude` binary
-  (subscription auth) via subprocess. Never use raw Anthropic API clients.
-  See ADR-0003.
+- **Subscription auth.** `agentic-runtime` (the orchestrator crate) uses
+  the local `claude` binary (subscription auth) via subprocess to spawn
+  subagents. Never use raw Anthropic API clients. Product libraries
+  (`agentic-uat`, `agentic-test-builder`, `agentic-store`, etc.) do NOT
+  wrap `claude` themselves — claude is a user of the CLI, not a
+  component of the libraries. See ADR-0003.
 - **Document DB, schemaless-first.** Persistence goes through
   `agentic-store`'s `Store` trait. Schemaless by default; schema added
   per-table only when justified. See ADR-0002.
 - **No bootstrap generator.** `.claude/agents/*.md` files are hand-written
   pointers. YAML is authoritative. See ADR-0004.
-- **Red-green is a contract.** Test-builder authors failing scaffolds and
-  records red-state evidence; build-rust writes implementation source and
-  never edits tests. See ADR-0005.
+- **Red-green is a contract.** The test-builder agent authors failing
+  scaffolds (using its normal authoring tools); `agentic test-build
+  record` verifies the red state and writes atomic evidence. Build-rust
+  writes implementation source and never edits tests. See ADR-0005.
 - **Edit before write.** Stories, patterns, agent specs, and assets —
   search the existing corpus before authoring new. Each curator agent
   enforces this in its own process.yml.

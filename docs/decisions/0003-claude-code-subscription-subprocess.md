@@ -24,6 +24,22 @@ Drive Claude via subprocess. Wrap the `claude-code-rs` crate (or fork if needs d
 
 Never pass `--bare`. Never import or depend on any raw Anthropic REST client crate.
 
+## Scope
+
+This ADR sanctions a single `ClaudeCodeRuntime` impl of the `Runtime`
+trait inside `agentic-runtime` (the orchestrator crate). It does NOT
+sanction wrapping `claude` inside other product libraries
+(`agentic-uat`, `agentic-test-builder`, `agentic-ci-record`,
+`agentic-dashboard`, `agentic-store`, `agentic-story`, etc.). Those
+libraries treat claude as an external user — the same category as a
+human developer — who exercises the CLI. Embedding an LLM subprocess
+inside a non-orchestrator product library turns an
+unavailable/quota-exhausted claude into a system-wide failure mode,
+which is the architectural mistake the legacy Python system documented
+in its own post-mortems. The verify path must work without any runtime
+at all; that principle generalises from story 1 (below) to every
+product library.
+
 ## Alternatives considered
 
 **Raw Anthropic API via `reqwest`.** Rejected. Per-token billing kills the economics. Loses tool use, streaming, and the Claude Code tool ecosystem (Read/Edit/Bash/MCP/plugins) — we'd be reimplementing all of it.
