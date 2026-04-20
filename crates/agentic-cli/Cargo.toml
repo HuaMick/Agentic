@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 agentic-store = { path = "../agentic-store" }
+agentic-story = { path = "../agentic-story" }
 agentic-uat = { path = "../agentic-uat" }
 agentic-dashboard = { path = "../agentic-dashboard" }
 agentic-test-builder = { path = "../agentic-test-builder" }

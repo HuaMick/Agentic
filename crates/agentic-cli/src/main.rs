@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use agentic_dashboard::Dashboard;
 use agentic_store::SurrealStore;
+use agentic_story::Story;
 use agentic_test_builder::{TestBuilder, TestBuilderError};
 use agentic_uat::{StubExecutor, Uat, UatError, Verdict};
 use clap::{Parser, Subcommand};
@@ -38,8 +39,11 @@ enum Commands {
     /// Scaffold failing tests for a story and record red-state evidence
     #[command(name = "test-build")]
     TestBuild {
-        /// Story ID to scaffold
-        id: u32,
+        #[command(subcommand)]
+        subcommand: Option<TestBuildSubcommand>,
+
+        /// Story ID to operate on (when no subcommand is given, alias to `plan`)
+        id: Option<u32>,
     },
 }
 
@@ -65,6 +69,24 @@ enum StoriesSubcommand {
         /// Path to the store
         #[arg(long)]
         store: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TestBuildSubcommand {
+    /// Plan the scaffolds for a story (default mode, no subcommand)
+    Plan {
+        /// Story ID
+        id: u32,
+
+        /// Output as JSON (default is human-readable text)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record red-state evidence for user-authored scaffolds
+    Record {
+        /// Story ID
+        id: u32,
     },
 }
 
@@ -96,7 +118,13 @@ fn main() {
 
     match cli.command {
         Commands::Stories { subcommand } => match subcommand {
-            StoriesSubcommand::Health { selector, expand, all, json, store } => {
+            StoriesSubcommand::Health {
+                selector,
+                expand,
+                all,
+                json,
+                store,
+            } => {
                 // Validate mutually exclusive flags
                 let selector_provided = selector.is_some();
                 if all && (selector_provided || expand) {
@@ -126,7 +154,10 @@ fn main() {
                 }
 
                 let repo_root = match git2::Repository::discover(".") {
-                    Ok(r) => r.workdir().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
+                    Ok(r) => r
+                        .workdir()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from(".")),
                     Err(e) => {
                         eprintln!("failed to discover git repo: {e}");
                         std::process::exit(2);
@@ -293,63 +324,116 @@ fn main() {
                 }
             }
         }
-        Commands::TestBuild { id } => {
+        Commands::TestBuild { subcommand, id } => {
             let repo_root = match git2::Repository::discover(".") {
-                Ok(r) => r.workdir().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
+                Ok(r) => r
+                    .workdir()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from(".")),
                 Err(e) => {
                     eprintln!("failed to discover git repo: {e}");
                     std::process::exit(2);
                 }
             };
 
-            let builder = TestBuilder::new(&repo_root);
-            match builder.run(id) {
-                Ok(outcome) => {
-                    let created = outcome.created_paths();
-                    let added = outcome.added_dev_deps();
-                    println!("test-build {id}: {} created, {} dev-dep(s) added", created.len(), added.len());
-                    for path in created {
-                        println!("  CREATED {}", path.display());
-                    }
-                    for (crate_name, dep) in added {
-                        println!("  DEV-DEP {crate_name} += {dep}");
-                    }
-                    std::process::exit(0);
-                }
-                Err(TestBuilderError::DirtyTree) => {
-                    eprintln!("DirtyTree: working tree has uncommitted or untracked changes");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::NoAcceptanceTests) => {
-                    eprintln!("NoAcceptanceTests: story has zero acceptance tests");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::ThinJustification { index }) => {
-                    eprintln!("ThinJustification: acceptance.tests[{index}] has a thin justification");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::OutOfScopeEdit) => {
-                    eprintln!("OutOfScopeEdit: scaffold requested a non-dev-dependency mutation");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::ClaudeUnavailable) => {
-                    eprintln!("ClaudeUnavailable: claude subprocess not on PATH or auth failed");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::ClaudeTimeout { index }) => {
-                    eprintln!("ClaudeTimeout: acceptance.tests[{index}] exceeded the scaffold authoring budget");
-                    std::process::exit(2);
-                }
-                Err(TestBuilderError::ScaffoldParseError { path, stderr }) => {
+            // Default mode: if no subcommand, alias to `plan` with the id.
+            let (mode, story_id, json_mode) = match (&subcommand, &id) {
+                (Some(TestBuildSubcommand::Plan { id, json }), None) => ("plan", *id, *json),
+                (Some(TestBuildSubcommand::Record { id }), None) => ("record", *id, false),
+                (None, Some(story_id)) => ("plan", *story_id, false), // default to plan, text mode
+                _ => {
                     eprintln!(
-                        "ScaffoldParseError: claude-authored scaffold at {} did not parse as Rust: {}",
-                        path.display(),
-                        stderr
+                        "invalid test-build invocation: provide either a subcommand or an id"
                     );
                     std::process::exit(2);
                 }
-                Err(TestBuilderError::Other(msg)) => {
-                    eprintln!("test-build failed: {msg}");
+            };
+
+            match mode {
+                "plan" => {
+                    let story_path = repo_root.join(format!("stories/{story_id}.yml"));
+                    let story = match Story::load(&story_path) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("failed to load story: {e}");
+                            std::process::exit(2);
+                        }
+                    };
+
+                    let plan = TestBuilder::plan(&story);
+
+                    if json_mode {
+                        match serde_json::to_string_pretty(&plan) {
+                            Ok(json) => {
+                                println!("{json}");
+                                std::process::exit(0);
+                            }
+                            Err(e) => {
+                                eprintln!("failed to serialize plan as JSON: {e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    } else {
+                        // Pretty-print text mode
+                        for (i, entry) in plan.iter().enumerate() {
+                            println!("[{}] {}", i, entry.file);
+                            println!("    crate: {}", entry.target_crate);
+                            println!("    expected: {}", entry.expected_red_path);
+                            if !entry.fixture_preconditions.is_empty() {
+                                println!("    preconditions:");
+                                for precond in &entry.fixture_preconditions {
+                                    println!("      - {precond}");
+                                }
+                            }
+                            println!(
+                                "    justification: {}",
+                                entry.justification.lines().next().unwrap_or("")
+                            );
+                        }
+                        std::process::exit(0);
+                    }
+                }
+                "record" => {
+                    let builder = TestBuilder::new(&repo_root);
+                    match builder.record(story_id) {
+                        Ok(outcome) => {
+                            for path in outcome.recorded_paths() {
+                                println!("{}", path.display());
+                            }
+                            std::process::exit(0);
+                        }
+                        Err(TestBuilderError::DirtyTree) => {
+                            eprintln!("DirtyTree");
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::NoAcceptanceTests) => {
+                            eprintln!("NoAcceptanceTests");
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::ThinJustification { index }) => {
+                            eprintln!("ThinJustification: index {index}");
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::ScaffoldMissing { file }) => {
+                            eprintln!("ScaffoldMissing: {}", file.display());
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::ScaffoldParseError { file, parse_error }) => {
+                            eprintln!("ScaffoldParseError: {}: {}", file.display(), parse_error);
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::ScaffoldNotRed { file, probe }) => {
+                            eprintln!("ScaffoldNotRed: {} ({})", file.display(), probe);
+                            std::process::exit(2);
+                        }
+                        Err(TestBuilderError::Other(msg)) => {
+                            eprintln!("test-build record failed: {msg}");
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("unknown test-build mode");
                     std::process::exit(2);
                 }
             }
