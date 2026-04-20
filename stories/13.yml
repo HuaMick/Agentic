@@ -5,7 +5,7 @@ outcome: |
   its ancestry — a story whose transitive ancestors are not all
   `healthy` classifies as `unhealthy` — so nothing downstream is
   falsely trusted while its foundation is unproven.
-status: proposed
+status: healthy
 patterns: []
 acceptance:
   tests:
@@ -21,7 +21,6 @@ acceptance:
       `<id>` as `unhealthy`, NOT `healthy`. Without this, a story
       can claim healthy while standing on an unproven parent and the
       dashboard's read view silently approves the forgery.
-
   - file: crates/agentic-dashboard/tests/health_inherits_unhealthy_from_transitive_ancestor.rs
     justification: |
       Proves the transitive reach: given `<id>` depends_on `<A>`,
@@ -32,7 +31,6 @@ acceptance:
       this, the rule is a direct-only check and the same "healthy
       ancestor but broken grandparent" loophole story 11 closes at
       the UAT gate stays open at the read boundary.
-
   - file: crates/agentic-dashboard/tests/health_composes_with_file_staleness.rs
     justification: |
       Proves composition with story 9 AND pins the exact combined
@@ -52,7 +50,6 @@ acceptance:
       one of them (operator fixes the visible one only to see the
       row still red) or surfaces them in a permuted order that
       downstream JSON consumers cannot rely on.
-
   - file: crates/agentic-dashboard/tests/health_all_healthy_ancestors_do_not_affect_classification.rs
     justification: |
       Proves the non-interference guarantee: a story whose OWN
@@ -65,7 +62,6 @@ acceptance:
       dashboard is broken"), exactly the symmetric concern the
       `uat_permits_all_healthy_ancestors` test in story 11 guards
       on the write side.
-
   - file: crates/agentic-dashboard/tests/health_ancestor_reason_names_offending_id.rs
     justification: |
       Proves the reason-channel token contract by pinning the exact
@@ -86,7 +82,6 @@ acceptance:
       tooling) depend on an unenforced contract and the tokens
       drift the first time someone refactors the classifier's
       reason-string builder.
-
   - file: crates/agentic-dashboard/tests/health_reason_lists_all_direct_offenders.rs
     justification: |
       Proves the multi-offender rule: given a story `<id>` with
@@ -104,7 +99,6 @@ acceptance:
       single offender and the operator sees "blocked by one
       ancestor" when in reality several parents are broken — a
       false sense of how much work the unblock requires.
-
   - file: crates/agentic-dashboard/tests/health_drilldown_names_offending_ancestor.rs
     justification: |
       Proves drilldown parity with the JSON contract: `agentic
@@ -122,7 +116,6 @@ acceptance:
       ancestor (or "unhealthy" alone), and the human view silently
       diverges from the machine view the reason channel was built
       to share.
-
   - file: crates/agentic-dashboard/tests/health_permissive_absent_related_files_preserved.rs
     justification: |
       Proves the ancestor rule does NOT silently change the
@@ -134,7 +127,6 @@ acceptance:
       ancestor rule. Without this pinning, story 13's author or a
       future refactor could accidentally tighten story 9's default
       under cover of the inheritance change.
-
   uat: |
     Goal: convince yourself that a story inherits `unhealthy` from
     any not-healthy ancestor (direct or transitive), that the
@@ -547,7 +539,6 @@ guidance: |
       each direct parent's own row. A future story may add a
       "full offender chain" rendering if operators report that
       one-hop-per-drill is painful.
-
 depends_on:
 - 3
 - 6
