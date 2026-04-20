@@ -4,7 +4,7 @@ outcome: |
   A developer running `agentic test-build <id>` against a proposed story can
   see the per-scaffold authoring plan, write the scaffolds with their own
   tools, and have the CLI atomically verify and record red-state evidence.
-status: proposed
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
