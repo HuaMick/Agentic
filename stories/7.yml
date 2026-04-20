@@ -4,7 +4,7 @@ outcome: |
   A developer running `agentic test-build <id>` receives a committed
   red-state record that is the only way to prove a story's acceptance
   tests were authored to fail first.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -129,8 +129,8 @@ acceptance:
       story-writer escalation, not a silent green-from-nothing.
   - file: crates/agentic-test-builder/tests/adds_dev_deps_but_not_runtime_deps.rs
     justification: |
-      Proves the narrow Cargo.toml authority granted by
-      `agents/test/test-builder/contract.yml`: test-builder MAY
+      Proves the narrow Cargo.toml authority the scaffold
+      authoring surface is allowed to exercise: test-builder MAY
       append entries under `[dev-dependencies]` in the TARGET
       crate's `Cargo.toml` when a scaffold it is about to author
       would not compile without them (happy path — the entry
@@ -140,18 +140,20 @@ acceptance:
       `[package]`, or any other section of that Cargo.toml, nor
       ANY other Cargo.toml in the workspace (root or sibling
       crates), nor `Cargo.lock`. A fixture that requests a
-      runtime-deps edit — or any non-`[dev-dependencies]` mutation
-      — causes `TestBuilder::run` to return a typed out-of-scope
-      error variant (implementation choice; suggest
+      runtime-deps edit — or any non-`[dev-dependencies]`
+      mutation — causes `TestBuilder::run` to return a typed
+      out-of-scope error variant (implementation choice; suggest
       `TestBuilderError::OutOfScopeEdit`), write zero scaffolds,
       write zero evidence, and leave every Cargo.toml in the
-      workspace bytes-identical to its pre-run state. Without this
-      test the narrow Cargo.toml authority in contract.yml is
-      ungated — an implementer could silently widen
-      test-builder's reach into runtime deps or the workspace
-      root, turning the red-state writer into a build-graph
-      mutator, and the fail-closed-on-dirty-tree pattern cannot
-      catch it (these edits would be perfectly clean on commit).
+      workspace bytes-identical to its pre-run state. The
+      rationale: scaffold authoring mutates test surface — the
+      red-state evidence writer is supposed to move the test
+      surface from "absent" to "compiles and fails," never to
+      move the runtime build graph. Widening to `[dependencies]`
+      would turn the red-state writer into a build-graph mutator
+      whose edits look clean on commit, so the
+      fail-closed-on-dirty-tree pattern cannot catch it; this
+      test is the only gate that keeps the split honest.
   uat: |
     Goal: convince yourself that `agentic test-build` writes red-state
     evidence only on a clean tree, never overwrites existing tests,
@@ -331,8 +333,5 @@ depends_on:
 related_files:
 - crates/agentic-test-builder/src/**
 - crates/agentic-cli/src/**
-- agents/test/test-builder/contract.yml
-- agents/test/test-builder/inputs.yml
-- agents/test/test-builder/process.yml
 - docs/decisions/0005-red-green-is-a-contract.md
 - schemas/story.schema.json
