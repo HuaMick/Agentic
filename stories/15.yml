@@ -1,0 +1,509 @@
+id: 15
+title: test-build is a plan-and-record CLI whose user writes the scaffolds
+outcome: |
+  A developer running `agentic test-build <id>` against a proposed story can
+  see the per-scaffold authoring plan, write the scaffolds with their own
+  tools, and have the CLI atomically verify and record red-state evidence.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-test-builder/tests/plan_emits_one_entry_per_acceptance_test.rs
+    justification: |
+      Proves the plan shape: given a fixture story with two
+      `acceptance.tests[]` entries, `agentic test-build plan <id>
+      --json` writes to stdout a JSON array of exactly two plan
+      entries, each carrying the fixed top-level keys `file`,
+      `target_crate`, `justification`, `expected_red_path`
+      (`compile` or `runtime`), and `fixture_preconditions`
+      (array; empty if none). Extra keys are rejected by a strict
+      parser. Without this, downstream tooling (the user, a
+      future orchestrator, or a doc-blind reviewer) has nothing
+      stable to parse — the plan becomes prose-shaped and the
+      CLI's observable contract collapses into "whatever it
+      printed that day."
+  - file: crates/agentic-test-builder/tests/plan_is_read_only_and_writes_no_evidence.rs
+    justification: |
+      Proves planning has zero side effects: `agentic test-build
+      plan <id>` on any fixture story (clean tree or dirty) writes
+      no scaffolds, writes no evidence rows, creates no
+      directories under `evidence/runs/<id>/`, and leaves `git
+      status --porcelain` byte-identical to its pre-invocation
+      output. A plan invocation on a dirty tree exits 0 (not 2)
+      because it is not an attestation — per the
+      fail-closed-on-dirty-tree pattern's read-mode carve-out.
+      Without this, the planner would smuggle attestational
+      semantics into a read path and the two-phase plan/record
+      split would collapse into one gated command.
+  - file: crates/agentic-test-builder/tests/record_refuses_when_scaffold_missing.rs
+    justification: |
+      Proves record's precondition on scaffold presence: given a
+      fixture story whose plan names two scaffold paths and a
+      working tree where only one of the two files exists on
+      disk, `agentic test-build record <id>` returns
+      `TestBuilderError::ScaffoldMissing` naming the missing
+      path, exits 2 (could-not-verdict), writes zero evidence
+      rows, creates no directory under `evidence/runs/<id>/`,
+      and leaves the tree byte-identical to its pre-invocation
+      state. Without this, record would silently skip absent
+      scaffolds and write a partial evidence row that attests
+      "story is red" for a file that does not exist — the
+      claude-as-component failure mode in a new skin.
+  - file: crates/agentic-test-builder/tests/record_refuses_when_scaffold_parses_green.rs
+    justification: |
+      Proves record's red-probe gate: given a fixture story
+      whose scaffold on disk parses as valid Rust but passes
+      when probed (`cargo check` succeeds AND the isolated
+      `cargo test` exits 0), `agentic test-build record <id>`
+      returns `TestBuilderError::ScaffoldNotRed` naming the
+      offending file and the probe that came back green, exits
+      2, writes zero evidence rows, creates no directory under
+      `evidence/runs/<id>/`, and leaves the tree
+      byte-identical. Without this, a user-authored
+      `assert!(true)` or `#[test] fn _() {}` placeholder would
+      be accepted by record and stamped into the evidence as
+      "red" — the exact theatre ADR-0005 names.
+  - file: crates/agentic-test-builder/tests/record_refuses_on_unparseable_scaffold.rs
+    justification: |
+      Proves record's syntactic gate: given a fixture story
+      whose scaffold on disk does not parse as a Rust source
+      file (truncated token stream, mixed prose-and-code,
+      partially-written file left behind by an aborted user
+      edit), `agentic test-build record <id>` returns
+      `TestBuilderError::ScaffoldParseError` naming the path
+      and the parser's error message, exits 2, writes zero
+      evidence rows, and leaves the tree byte-identical.
+      Without this, an unparseable scaffold would surface
+      downstream as a workspace-wide `cargo check` failure
+      attributed to the wrong cause, and the evidence row
+      would either not write or write with a diagnostic from
+      the wrong source.
+  - file: crates/agentic-test-builder/tests/record_evidence_row_is_atomic.rs
+    justification: |
+      Proves the evidence-write atomicity on success: given a
+      fixture story whose scaffolds are all present, parse, and
+      probe red, `agentic test-build record <id>` on a clean tree
+      writes exactly one JSONL file at `evidence/runs/<id>/
+      <timestamp>-red.jsonl` with exactly the top-level keys
+      `run_id`, `story_id`, `commit`, `timestamp`, `verdicts`;
+      each verdict carries `file`, `verdict: red`, `red_path in
+      {compile, runtime}`, and `diagnostic` (first line of the
+      probe's error output). If any per-scaffold probe errors
+      out mid-run (e.g. the third of four scaffolds throws a
+      non-red-non-green probe failure), no partial JSONL row
+      is written and no directory is created under
+      `evidence/runs/<id>/` — the whole run succeeds or the
+      whole run leaves no trace. Without this, story 7's
+      evidence-atomicity contract degrades from "committable
+      atomic" to "best-effort record," which is the legacy
+      failure mode ADR-0005 was written to prevent.
+  - file: crates/agentic-test-builder/tests/record_refuses_on_dirty_tree.rs
+    justification: |
+      Proves the fail-closed-on-dirty-tree contract survives
+      realignment: given a fixture story whose scaffolds are all
+      present and would probe red, `agentic test-build record
+      <id>` on a dirty working tree (any untracked file, any
+      uncommitted change outside the scaffold paths the user
+      just authored) returns `TestBuilderError::DirtyTree`,
+      exits 2, writes zero evidence, creates no directory under
+      `evidence/runs/<id>/`, and leaves the tree byte-identical.
+      The scaffold files the user wrote for this story are
+      expected to be staged by `git add` before record runs;
+      this test covers the "dirt EVERYWHERE ELSE" case. Without
+      this, red-state evidence stops being pinnable to a commit
+      — the same forgery axis story 7 closed, now re-opened by
+      a library that did not re-assert the gate.
+  - file: crates/agentic-cli/tests/test_build_plan_and_record_roundtrip.rs
+    justification: |
+      Proves the contract reaches the operator through the
+      binary: running `agentic test-build plan <fixture-id>
+      --json` against a fixture `stories/` directory emits
+      valid JSON parseable by `serde_json` into the documented
+      plan shape; after the user writes scaffolds that match
+      the plan (simulated here by the test setup copying
+      canned-red scaffold bodies into the planned paths and
+      staging them via `git add`), running `agentic test-build
+      record <fixture-id>` exits 0, writes the evidence row
+      with the documented shape, and names each recorded file
+      in stdout. Without this, the library-level claims are
+      library-level claims only — the argv-to-subcommand wire
+      could drop `--json`, swap plan and record's semantics,
+      or write evidence under the wrong path and the operator
+      would never notice.
+  uat: |
+    Goal: convince yourself that `agentic test-build` is a
+    two-phase tool whose library plans and records but does not
+    author, that the USER (human or claude-as-agent) writes the
+    scaffolds with their normal tools, and that record refuses on
+    missing scaffolds, accidentally-green scaffolds, unparseable
+    scaffolds, or a dirty tree — but writes an atomic evidence
+    row when every scaffold is present, parses, and probes red.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. Install the CLI: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves.
+      3. On a scratch branch, author a small fixture story at
+         `stories/<fixture-id>.yml` with `status: proposed`, two
+         `acceptance.tests[]` entries whose justifications are
+         substantive prose naming observables in a new
+         `crates/<fixture-crate>/` (e.g. "returns 1 for valid
+         input"), and a `crates/<fixture-crate>/` shell whose
+         stub implementation does not yet satisfy either
+         observable. Commit the scratch branch.
+
+    Plan walkthrough:
+      4. Run `agentic test-build plan <fixture-id> --json`.
+      5. Observe:
+           - Process exits 0.
+           - stdout is a JSON array of exactly two entries,
+             each with keys `file`, `target_crate`,
+             `justification`, `expected_red_path`,
+             `fixture_preconditions`.
+           - `git status --porcelain` is empty and
+             byte-identical to step 1's output.
+           - No `evidence/runs/<fixture-id>/` directory exists.
+      6. Read the two `justification` fields in the plan
+         output. Confirm they are verbatim copies of the story's
+         `acceptance.tests[].justification` (the plan never
+         paraphrases — the user reads the source).
+
+    Authorship walkthrough (the user is the author):
+      7. For each plan entry, create the scaffold file at the
+         named path using your normal tools (Edit, an editor
+         open in another pane, cursor, your head). The
+         scaffold is a real Rust integration test whose `use`
+         statements reference the plan's `target_crate`, whose
+         body asserts the observable the justification names,
+         and whose failure is either a compile error (missing
+         symbol) or an assertion failure — per the plan's
+         `expected_red_path`. Save. Run `git add
+         crates/<fixture-crate>/tests/<name>.rs` for each.
+      8. Run `git status --porcelain`. Confirm the only staged
+         paths are the two scaffold files; no other paths are
+         untracked or modified.
+
+    Record walkthrough (happy path):
+      9. Run `agentic test-build record <fixture-id>`.
+     10. Observe:
+           - Process exits 0.
+           - stdout names each scaffold path, its `red_path`
+             classification, and the first line of its
+             probe's diagnostic.
+           - Exactly one new file appears at
+             `evidence/runs/<fixture-id>/
+             <timestamp>-red.jsonl`, and `git status
+             --porcelain` now lists it as untracked.
+     11. `cat` the evidence file. Confirm exactly the keys
+         `run_id`, `story_id`, `commit`, `timestamp`,
+         `verdicts`. Confirm each `verdicts[].diagnostic` is
+         the first line of a real rustc error or a real
+         assertion panic (NOT the justification text itself).
+
+    Refusal walkthroughs:
+     12. `git reset --hard <SHA-before-walkthrough>` and
+         `git clean -fd`. Re-author only ONE of the two
+         scaffolds. Stage it. Run `agentic test-build record
+         <fixture-id>`. Confirm exit 2, `ScaffoldMissing`
+         naming the un-authored path, no evidence written,
+         no `evidence/runs/<fixture-id>/` directory created.
+     13. `git reset --hard`. Re-author both scaffolds but make
+         one of them `#[test] fn smoke() { assert!(true); }`.
+         Stage both. Run `agentic test-build record
+         <fixture-id>`. Confirm exit 2, `ScaffoldNotRed`
+         naming the green scaffold, no evidence written.
+     14. `git reset --hard`. Re-author both scaffolds
+         correctly, stage them, then touch a random untracked
+         file outside the scaffold paths (e.g. `echo '' >
+         /tmp/scratch && cp /tmp/scratch README.md.tmp`). Run
+         `agentic test-build record <fixture-id>`. Confirm
+         exit 2, `DirtyTree`, no evidence written.
+
+    Cleanup:
+     15. `git reset --hard <SHA-before-UAT>` and `git clean
+         -fd` to restore the working tree and the fixture
+         story to their pre-walkthrough state.
+     16. Revert to `main` and delete the scratch branch.
+     17. If you want the installed binary gone: `cargo
+         uninstall agentic-cli`.
+guidance: |
+  This story replaces `stories/14.yml` (healthy at commit
+  `cb163e2`). The two stories cover the same CLI verb
+  (`agentic test-build`) and the same crate
+  (`agentic-test-builder`), so the journey-principle's
+  consolidation bias would normally rule. They split because
+  story 14's contract embeds AI inference INSIDE the library
+  (the library spawns `claude`, parses its stdout, wraps
+  results in `ClaudeUnavailable` / `ClaudeTimeout` /
+  `ScaffoldParseError`) and this story rejects that shape in
+  favour of a plan/record split whose library never spawns an
+  LLM. They cannot co-exist as healthy; one describes
+  claude-as-component, the other claude-as-user, and the
+  codebase can only implement one. When this story reaches
+  healthy, story 14 is retired (its YAML deleted, its tests
+  and cached scaffolds removed, its ID not reused per the
+  id-never-reused rule in the authoring guide).
+
+  Claude-as-user vs claude-as-component (the directive).
+    The user's directive for this replacement, in their words:
+    "Claude is a USER of the system, not a COMPONENT of it."
+    Claude — whether a native Claude Code agent, a future
+    SDK-backed harness, or a human pair-programmer — drives
+    the system's CLI tools the same way a human developer
+    would. The CLI tools emit structured plans, evidence, and
+    verdicts; they never wrap AI inference as an internal
+    step. Scaffold authorship is creative work a user does
+    with their own tools (Edit, Write, their head). The
+    library's job is planning, verification, and atomic
+    evidence recording — deterministic functions whose output
+    a doc-blind reader can audit against the story YAML
+    without a model in the loop.
+
+    This distinction is load-bearing. The legacy system died
+    of embedding orchestration inside libraries; story 14 as
+    shipped reproduces that shape one layer down by embedding
+    an LLM subprocess inside the red-state evidence writer.
+    A library that wraps claude is a library that carries
+    claude's quota, auth, model-version, timeout, and
+    hallucination failure modes — all axes ADR-0003 scoped
+    to `agentic-runtime` (which is allowed to depend on the
+    world, per the standalone-resilient-library pattern's
+    "Do NOT apply to crates whose entire purpose is
+    orchestration" carve-out). `agentic-test-builder` is on
+    the critical verify path and MUST stay
+    standalone-resilient. Therefore the LLM never appears in
+    its dependency floor, its test harness, its error enum,
+    or its exit-code table.
+
+    The ADR-0003 runtime/orchestrator carve-out is unchanged.
+    This story does not close that door; it reinforces which
+    side of it test-builder sits on.
+
+  What is UNCHANGED from story 7.
+    - The fail-closed-on-dirty-tree gate on record, the
+      exit-code mapping, and the typed
+      `TestBuilderError::DirtyTree`.
+    - The evidence row shape: `run_id`, `story_id`, `commit`,
+      `timestamp`, `verdicts`, with per-verdict `file`,
+      `verdict`, and for `red` only `red_path` and
+      `diagnostic`. Downstream agents parse this shape
+      unchanged; this story does NOT extend the schema.
+    - The zero-acceptance-tests refusal and the
+      thin-justification refusal. Both remain typed errors
+      that fire on either plan or record (plan needs valid
+      acceptance.tests[] to emit a plan entry; record reuses
+      the story-loader's validation).
+    - The narrow `[dev-dependencies]` authority in the target
+      crate's `Cargo.toml`. Widening remains forbidden.
+    - The preservation rule: a file that already exists
+      non-empty is never opened for writing. This story does
+      not relax it. The twist: the user — not the CLI — is
+      the author, so "preservation" manifests as "the CLI
+      never writes to a scaffold path; it only probes it."
+      The bytes-immutable invariant holds trivially.
+
+  What is NEW in this story.
+    1. `plan` mode. `agentic test-build plan <id> [--json]`
+       reads `stories/<id>.yml`, validates it through the
+       story-loader (story 6), and emits one plan entry per
+       `acceptance.tests[]` entry. JSON mode is the stable
+       machine-readable shape; the default human-readable
+       shape is pretty-printed text. The library function is
+       `TestBuilder::plan(&Story) -> Vec<PlanEntry>`; the
+       CLI shim calls it and serialises.
+    2. `record` mode. `agentic test-build record <id>`
+       expects every scaffold named in the plan to exist on
+       disk as parseable Rust staged in the working tree,
+       probes each for red state via `cargo check` then
+       `cargo test` (the same probe logic story 7 and the
+       old story 14 shared), and writes the evidence row
+       atomically on success. On any refusal (missing,
+       unparseable, green, dirty-tree-elsewhere) the
+       library rolls back: no evidence directory created,
+       no partial JSONL row written.
+    3. Default mode (no subcommand: `agentic test-build
+       <id>`). The CLI picks `plan` by default so a
+       curious operator gets a safe read. `record` is
+       explicit, to preserve the fail-closed-on-dirty-tree
+       pattern's "write paths are gated" posture. No other
+       new subcommands in this story.
+
+  PlanEntry shape (auditable).
+    A plan entry is a struct with exactly five public fields,
+    in this order, serialised as JSON with snake_case keys:
+      1. `file` — the scaffold path from
+         `acceptance.tests[].file`.
+      2. `target_crate` — derived from the path
+         (`crates/<name>/tests/...` implies `<name>`).
+      3. `justification` — the story's
+         `acceptance.tests[].justification` verbatim (not
+         paraphrased; the user reads the source).
+      4. `expected_red_path` — one of `compile` or `runtime`,
+         computed by the planner from a small heuristic over
+         the justification text and the target crate's
+         existing public API surface (if the justification
+         names a symbol the target crate does not declare,
+         expect `compile`; otherwise expect `runtime`). This
+         is a hint, NOT a pre-commitment — record re-probes
+         and the observed red_path is what lands in
+         evidence, even if it disagrees with the plan.
+      5. `fixture_preconditions` — a (possibly-empty) array
+         of human-readable preconditions extracted from the
+         story's `guidance:` field by a small rule set
+         (paragraphs containing "fixture" or "precondition"
+         near the top of guidance). Empty array if none
+         found. Included so the user does not have to re-read
+         the full guidance block; NOT a contract between
+         plan and record, and NOT validated at record time.
+
+    Extra keys in the JSON are not added by the library.
+    A strict parser (`serde_json` with
+    `deny_unknown_fields`) should round-trip cleanly.
+
+  Probe contract (record).
+    Per scaffold, in this order:
+      1. Confirm the file exists. Missing →
+         `ScaffoldMissing`.
+      2. Parse the file as Rust via `syn::parse_file`.
+         Unparseable → `ScaffoldParseError`.
+      3. Run `cargo check --package <target_crate>
+         --test <test-name>`. Non-zero with a rustc error
+         attributable to the scaffold's `use` or call site
+         → `red_path: compile`; capture first error line as
+         `diagnostic`.
+      4. If check succeeded: run `cargo test --package
+         <target_crate> --test <test-name> --
+         --nocapture`. Non-zero → `red_path: runtime`;
+         capture first panic line as `diagnostic`. Exit 0
+         → `ScaffoldNotRed`.
+    The probe is the same shape story 7's test-builder used
+    when it also authored scaffolds; this story keeps the
+    probe and drops the authoring.
+
+  Failure modes (all fail-closed with exit code 2 on
+  record; plan never exits 2 on the story itself — plan is
+  read-only).
+    - `DirtyTree`: the working tree has uncommitted or
+      untracked changes outside the scaffold paths listed
+      in the plan (which the user was expected to `git
+      add` before record). Fires before any probe.
+    - `ScaffoldMissing { file }`: a planned scaffold does
+      not exist on disk.
+    - `ScaffoldParseError { file, parse_error }`: a
+      scaffold exists but does not parse as Rust.
+    - `ScaffoldNotRed { file, probe }`: a scaffold parses
+      but the probe (compile or runtime) exited 0.
+    - `ThinJustification { index }`: inherited from story
+      7 via the shared story-loader; fires on either plan
+      or record.
+    - `NoAcceptanceTests`: inherited likewise.
+
+    Atomicity: record writes the evidence directory and
+    the JSONL file in one final step after every scaffold
+    has been probed red. A failure in the Nth probe leaves
+    no side effects on disk (no directory, no partial
+    row). This is a stronger guarantee than the old story
+    14's roll-back-on-subprocess-timeout guarantee, because
+    there is no subprocess to partially complete.
+
+  Why not consolidate with story 7.
+    The consolidate-over-fragment bias says "same CLI
+    surface → one story." Story 7 and this story do share
+    `agentic test-build`. The split reasoning is the same
+    the author of story 14 applied, only now it refines:
+      - Story 7 pins the evidence-atomicity contract (the
+        red-state record is committable, fail-closed,
+        preservation-safe, typed-errored) WHEN THE
+        SCAFFOLDS ARE PRESENT. It does not take a position
+        on who writes the scaffolds.
+      - This story pins the CLI's authoring boundary: the
+        library plans and records, the user writes. Its
+        UAT centres on a human (or claude-as-agent) using
+        Edit/Write on real files, which is a distinct
+        starting context from story 7's "panic-stub
+        scaffolds authored by the CLI" mental model.
+    Consolidating would push story 7 from healthy to
+    under_construction on a contract addition that
+    materially changes its UAT shape and its mental model
+    of who authors. Per the splitting-rule's tiebreakers
+    (distinct observables, distinct starting contexts) and
+    the journey-principle's diagnostic ("could this epic
+    have been avoided if the prior story was accurate
+    enough?" — no, story 7's authoring-agnostic shape is
+    correct and this story is the natural next layer), the
+    split holds.
+
+  Why not an ADR amendment.
+    ADR-0005 (red-green is a contract) survives unchanged —
+    scaffold authorship was always an agent concern, and
+    this story relocates it from the `test-builder` CLI
+    subcommand to the `test-builder` AGENT (YAML under
+    `agents/test/test-builder/`) who in turn uses their
+    own tools. ADR-0003 (subscription auth via subprocess)
+    survives unchanged — it scopes the subprocess to the
+    runtime/orchestrator, not to the CLI tools, which was
+    always the right shape.
+
+  Relationship to the dag-primary-lens epic (stories 10-13).
+    Stories 10, 11, 12, 13 still need real acceptance-test
+    scaffolds to cross the red-green line. This story
+    reshapes how they get them: instead of `agentic
+    test-build` spawning claude to author, the user (human
+    or a claude-as-agent spawned from the orchestrator)
+    reads the plan, writes the scaffolds, and invokes
+    record. The hard-prerequisite relationship the old
+    story 14 documented still holds; the dependency edge
+    moves from 14 to 15.
+
+  Standalone-resilience posture.
+    `agentic-test-builder` returns to a strictly
+    standalone-resilient shape. No `claude` helper, no
+    `std::process::Command` shim, no network, no LLM
+    dependency. Its dependency floor shrinks back to
+    `agentic-store`, `agentic-story` (for the loader),
+    `syn` (for the parseability probe), `serde`/
+    `serde_json` (for the plan JSON), `uuid`, `git2`. No
+    in-crate subprocess work beyond `cargo check` /
+    `cargo test` shell-outs, which were already there
+    (and which are probes over the target crate, not over
+    an AI).
+
+  What this story explicitly does NOT do.
+    - Does NOT extend the story schema.
+    - Does NOT add a scaffold cache (there is nothing to
+      cache — the user's tools do the authoring, and user
+      tools already handle their own state).
+    - Does NOT lint scaffold bodies for `#[ignore]`,
+      `assert!(true)`, or trailing panics beyond the
+      ScaffoldNotRed check. A scaffold that probes red
+      via a natural failure path is accepted. A future
+      story may add stricter body linting if corpus
+      experience argues for it.
+    - Does NOT add a `--model` flag, a `--no-claude`
+      escape hatch, an `AGENTIC_TEST_BUILD_CLAUDE_TIMEOUT`
+      env var, or any other knob predicated on there
+      being an LLM in the loop. There is no LLM in the
+      loop.
+
+  Relationship to the test-builder AGENT (YAML).
+    The `agents/test/test-builder/` YAML describes the
+    agent who authors scaffolds. This story reshapes the
+    CLI tool the agent uses: the agent now runs `plan`,
+    reads the plan entries, writes scaffolds with its
+    own tools (Write/Edit — the same tools any user has),
+    and runs `record`. The agent's authority boundaries
+    (does_not_touch crates/*/src/**, preserve existing
+    tests) stay exactly as they are. Agent spec edits
+    are the user's jurisdiction and are out of scope for
+    this story — story-writer's job is to describe the
+    CLI contract the agent will exercise, not to rewrite
+    the agent.
+depends_on:
+- 7
+related_files:
+- crates/agentic-test-builder/src/**
+- crates/agentic-cli/src/**
+- docs/decisions/0005-red-green-is-a-contract.md
