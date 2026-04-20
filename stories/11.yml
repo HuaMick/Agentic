@@ -5,7 +5,7 @@ outcome: |
   whose ancestors are not all `healthy` receives a typed refusal with
   no signing row written, so a Pass verdict cannot attest a story
   whose foundation is unproven.
-status: proposed
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -25,7 +25,6 @@ acceptance:
       ancestry is proven") is unshipped and a leaf can claim Pass
       while standing on an `under_construction` foundation — forging
       the same trust shape a dirty-tree signing would.
-
   - file: crates/agentic-uat/tests/uat_permits_all_healthy_ancestors.rs
     justification: |
       Proves the non-interference guarantee: given a story `<id>`
@@ -38,7 +37,6 @@ acceptance:
       as story 1's happy path. Without this, the ancestor-gate could
       accidentally refuse every Pass (a silent catastrophic tightening
       indistinguishable, to the operator, from "UAT is broken").
-
   - file: crates/agentic-uat/tests/uat_refuses_ancestor_with_stale_yaml_status.rs
     justification: |
       Proves the evidence-over-claim rule: given a story `<id>` whose
@@ -51,7 +49,6 @@ acceptance:
       healthy` on an ancestor could side-step the gate and undermine
       the "only `agentic uat` writes healthy" invariant exactly where
       it matters (on a story that depends on the hand-edited one).
-
   - file: crates/agentic-uat/tests/uat_refuses_transitive_unhealthy_ancestor.rs
     justification: |
       Proves the transitive reach: given `<id>` depends_on `<A>`,
@@ -63,7 +60,6 @@ acceptance:
       ancestors — a pattern the legacy system's "just check
       depends_on" shortcut would produce — and a leaf sitting two
       hops above a broken foundation would promote.
-
   - file: crates/agentic-uat/tests/uat_fail_verdict_ignores_ancestor_health.rs
     justification: |
       Proves the asymmetry: given a story whose ancestors are NOT all
@@ -74,7 +70,6 @@ acceptance:
       also broken — which would cascade a real negative signal into
       silence and make the dashboard's "fell from grace" detection
       unreachable for whole subtrees.
-
   - file: crates/agentic-uat/tests/uat_refuses_ancestor_cycle.rs
     justification: |
       Proves the invariant defence at the UAT boundary: given a
@@ -85,7 +80,6 @@ acceptance:
       Without this, a cycle reaching the UAT path would either loop
       forever computing "is every ancestor healthy" or panic — both
       strictly worse than a loud refusal.
-
   - file: crates/agentic-cli/tests/uat_ancestor_refusal_exits_2.rs
     justification: |
       Proves the typed refusal reaches the operator through the
@@ -99,7 +93,6 @@ acceptance:
       would turn "retry after promoting the ancestor" into "the UAT
       failed," which is exactly the CI distinction the exit-code
       contract exists to preserve.
-
   uat: |
     Goal: convince yourself that `agentic uat --verdict pass` refuses
     to sign a story whose ancestors are not all `healthy`-with-signing-
