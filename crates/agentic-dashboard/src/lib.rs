@@ -328,8 +328,68 @@ impl Dashboard {
         }
     }
 
+    /// Topologically sort a set of story ids using Kahn's algorithm.
+    /// Orders dependencies before dependents; ties broken by ascending id.
+    fn topological_sort(&self, stories: &[StoryHealth], ids: Vec<u32>) -> Vec<u32> {
+        if ids.is_empty() {
+            return vec![];
+        }
+
+        // Build dependency graph for the selected ids only
+        let mut in_degree: HashMap<u32, usize> = HashMap::new();
+        let mut graph: HashMap<u32, Vec<u32>> = HashMap::new();
+
+        for &id in &ids {
+            in_degree.insert(id, 0);
+            graph.insert(id, vec![]);
+        }
+
+        // Count in-degrees and build adjacency list within the subset
+        for &id in &ids {
+            if let Some(story) = stories.iter().find(|s| s.id == id) {
+                for &dep_id in &story.depends_on {
+                    if ids.contains(&dep_id) {
+                        // dep_id is a dependency of id, so add edge dep_id -> id
+                        graph.entry(dep_id).or_insert_with(Vec::new).push(id);
+                        *in_degree.get_mut(&id).unwrap() += 1;
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm: collect nodes with in_degree 0
+        let mut queue: Vec<u32> = in_degree
+            .iter()
+            .filter(|(_, &degree)| degree == 0)
+            .map(|(&id, _)| id)
+            .collect();
+        queue.sort(); // Sort for determinism
+
+        let mut result = vec![];
+        while !queue.is_empty() {
+            queue.sort(); // Keep sorted for stable tie-breaking
+            let node = queue.remove(0);
+            result.push(node);
+            if let Some(neighbors) = graph.get(&node) {
+                for &neighbor in neighbors {
+                    let new_degree = in_degree[&neighbor] - 1;
+                    in_degree.insert(neighbor, new_degree);
+                    if new_degree == 0 {
+                        queue.push(neighbor);
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
     /// Get transitive ancestors of a story.
-    fn get_ancestors(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+    fn get_ancestors(
+        &self,
+        stories: &[StoryHealth],
+        target_id: u32,
+    ) -> Result<Vec<u32>, DashboardError> {
         if !stories.iter().any(|s| s.id == target_id) {
             return Err(DashboardError::UnknownStory { id: target_id });
         }
@@ -352,28 +412,18 @@ impl Dashboard {
             }
         }
 
-        // Topologically sort ancestors (dependencies before dependents)
-        result.sort_by(|a, b| {
-            let a_story = stories.iter().find(|s| s.id == *a);
-            let b_story = stories.iter().find(|s| s.id == *b);
-
-            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
-                // If a depends on b, a comes after b
-                if a_st.depends_on.contains(b) {
-                    return Ordering::Greater;
-                }
-                if b_st.depends_on.contains(a) {
-                    return Ordering::Less;
-                }
-            }
-            a.cmp(b)
-        });
+        // Topologically sort ancestors using Kahn's algorithm
+        result = self.topological_sort(stories, result);
 
         Ok(result)
     }
 
     /// Get transitive descendants of a story.
-    fn get_descendants(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+    fn get_descendants(
+        &self,
+        stories: &[StoryHealth],
+        target_id: u32,
+    ) -> Result<Vec<u32>, DashboardError> {
         if !stories.iter().any(|s| s.id == target_id) {
             return Err(DashboardError::UnknownStory { id: target_id });
         }
@@ -404,28 +454,18 @@ impl Dashboard {
             }
         }
 
-        // Topologically sort descendants (dependencies before dependents)
-        result.sort_by(|a, b| {
-            let a_story = stories.iter().find(|s| s.id == *a);
-            let b_story = stories.iter().find(|s| s.id == *b);
-
-            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
-                // If a depends on b, a comes after b
-                if a_st.depends_on.contains(b) {
-                    return Ordering::Greater;
-                }
-                if b_st.depends_on.contains(a) {
-                    return Ordering::Less;
-                }
-            }
-            a.cmp(b)
-        });
+        // Topologically sort descendants using Kahn's algorithm
+        result = self.topological_sort(stories, result);
 
         Ok(result)
     }
 
     /// Get target plus both ancestors and descendants (subtree).
-    fn get_subtree(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+    fn get_subtree(
+        &self,
+        stories: &[StoryHealth],
+        target_id: u32,
+    ) -> Result<Vec<u32>, DashboardError> {
         if !stories.iter().any(|s| s.id == target_id) {
             return Err(DashboardError::UnknownStory { id: target_id });
         }
@@ -440,22 +480,8 @@ impl Dashboard {
             }
         }
 
-        // Final topological sort
-        result.sort_by(|a, b| {
-            let a_story = stories.iter().find(|s| s.id == *a);
-            let b_story = stories.iter().find(|s| s.id == *b);
-
-            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
-                // If a depends on b, a comes after b
-                if a_st.depends_on.contains(b) {
-                    return Ordering::Greater;
-                }
-                if b_st.depends_on.contains(a) {
-                    return Ordering::Less;
-                }
-            }
-            a.cmp(b)
-        });
+        // Final topological sort using Kahn's algorithm
+        result = self.topological_sort(stories, result);
 
         Ok(result)
     }
@@ -555,11 +581,9 @@ impl Dashboard {
         }
 
         // Sort by lvl ascending (most-negative first), then by id ascending
-        stories.sort_by(|a, b| {
-            match a.lvl.cmp(&b.lvl) {
-                Ordering::Equal => a.id.cmp(&b.id),
-                other => other,
-            }
+        stories.sort_by(|a, b| match a.lvl.cmp(&b.lvl) {
+            Ordering::Equal => a.id.cmp(&b.id),
+            other => other,
         });
 
         Ok(stories)
@@ -572,7 +596,9 @@ impl Dashboard {
         let mut rec_stack = HashSet::new();
 
         for &id in depends_map.keys() {
-            if !visited.contains(&id) && self.has_cycle_dfs(id, depends_map, &mut visited, &mut rec_stack)? {
+            if !visited.contains(&id)
+                && self.has_cycle_dfs(id, depends_map, &mut visited, &mut rec_stack)?
+            {
                 return Err(DashboardError::Cycle {
                     edge: format!("cycle involving story {id}"),
                 });
@@ -649,8 +675,10 @@ impl Dashboard {
             return 0;
         }
 
-        // Find longest path among immediate downstreams
-        let max_descendant_lvl = downstreams_map
+        // Find longest path among immediate downstreams.
+        // Compute the minimum (most-negative) lvl among descendants,
+        // which represents the longest path to any leaf.
+        let min_descendant_lvl = downstreams_map
             .get(&id)
             .map(|downstreams| {
                 downstreams
@@ -658,18 +686,26 @@ impl Dashboard {
                     .map(|&desc_id| {
                         self.compute_lvl_recursive(desc_id, depends_map, downstreams_map, cache)
                     })
-                    .max()
+                    .min()
                     .unwrap_or(0)
             })
             .unwrap_or(0);
 
-        let lvl = -1 - max_descendant_lvl;
+        // lvl = -1 - min_descendant_lvl
+        // e.g., if min_descendant_lvl is -3 (deepest child), lvl is -1 - (-3) = 2... wait that's still wrong
+        // Actually we want: if min_descendant_lvl is -3, we should get -4
+        // So the formula is: lvl = min_descendant_lvl - 1
+        let lvl = min_descendant_lvl - 1;
         cache.insert(id, lvl);
         lvl
     }
 
     /// Count transitive descendants of a story.
-    fn count_transitive_descendants(&self, downstreams_map: &HashMap<u32, Vec<u32>>, id: u32) -> u32 {
+    fn count_transitive_descendants(
+        &self,
+        downstreams_map: &HashMap<u32, Vec<u32>>,
+        id: u32,
+    ) -> u32 {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
         queue.push_back(id);
@@ -1297,28 +1333,48 @@ impl Dashboard {
 
         // Ancestors section
         output.push_str("\nAncestors:\n");
-        let ancestors = self.get_ancestors(all_stories, target.id).unwrap_or_default();
-        let ancestors: Vec<_> = ancestors.into_iter().filter(|&id| id != target.id).collect();
+        let ancestors = self
+            .get_ancestors(all_stories, target.id)
+            .unwrap_or_default();
+        let ancestors: Vec<_> = ancestors
+            .into_iter()
+            .filter(|&id| id != target.id)
+            .collect();
         if ancestors.is_empty() {
             output.push_str("  (none)\n");
         } else {
             for ancestor_id in ancestors {
                 if let Some(ancestor) = all_stories.iter().find(|s| s.id == ancestor_id) {
-                    output.push_str(&format!("  {} - {} ({})\n", ancestor.id, ancestor.title, ancestor.health.as_str()));
+                    output.push_str(&format!(
+                        "  {} - {} ({})\n",
+                        ancestor.id,
+                        ancestor.title,
+                        ancestor.health.as_str()
+                    ));
                 }
             }
         }
 
         // Descendants section
         output.push_str("\nDescendants:\n");
-        let descendants = self.get_descendants(all_stories, target.id).unwrap_or_default();
-        let descendants: Vec<_> = descendants.into_iter().filter(|&id| id != target.id).collect();
+        let descendants = self
+            .get_descendants(all_stories, target.id)
+            .unwrap_or_default();
+        let descendants: Vec<_> = descendants
+            .into_iter()
+            .filter(|&id| id != target.id)
+            .collect();
         if descendants.is_empty() {
             output.push_str("  (none)\n");
         } else {
             for descendant_id in descendants {
                 if let Some(descendant) = all_stories.iter().find(|s| s.id == descendant_id) {
-                    output.push_str(&format!("  {} - {} ({})\n", descendant.id, descendant.title, descendant.health.as_str()));
+                    output.push_str(&format!(
+                        "  {} - {} ({})\n",
+                        descendant.id,
+                        descendant.title,
+                        descendant.health.as_str()
+                    ));
                 }
             }
         }
