@@ -23,6 +23,7 @@
 //! JSON (with full SHAs and RFC3339 timestamps).
 
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -47,8 +48,10 @@ pub enum DashboardError {
     StoreError(String),
     /// Stories directory does not exist.
     StoriesNotFound { path: PathBuf },
-    /// Unknown story id in drilldown.
+    /// Unknown story id in selector or drilldown.
     UnknownStory { id: u32 },
+    /// Cycle detected in depends_on graph.
+    Cycle { edge: String },
 }
 
 impl std::fmt::Display for DashboardError {
@@ -60,6 +63,9 @@ impl std::fmt::Display for DashboardError {
             }
             DashboardError::UnknownStory { id } => {
                 write!(f, "unknown story id: {id}")
+            }
+            DashboardError::Cycle { edge } => {
+                write!(f, "cycle detected in depends_on graph: {edge}")
             }
         }
     }
@@ -80,6 +86,10 @@ struct StoryHealth {
     test_run_at: Option<String>,
     parse_error: Option<String>,
     stale_related_files: Vec<String>,
+    depends_on: Vec<u32>,
+    lvl: i32,
+    immediate_downstreams: Vec<u32>,
+    blocks_total: u32,
 }
 
 /// The five health statuses.
@@ -113,6 +123,41 @@ impl Health {
             Health::Error => "error",
         }
     }
+}
+
+/// The view type for rendering.
+#[derive(Debug, Clone, Copy)]
+enum ViewType {
+    Frontier,
+    Expand,
+    All,
+    Ancestors,
+    Descendants,
+    Subtree,
+    Drilldown,
+}
+
+impl ViewType {
+    fn as_str(self) -> &'static str {
+        match self {
+            ViewType::Frontier => "frontier",
+            ViewType::Expand => "expand",
+            ViewType::All => "all",
+            ViewType::Ancestors => "ancestors",
+            ViewType::Descendants => "descendants",
+            ViewType::Subtree => "subtree",
+            ViewType::Drilldown => "drilldown",
+        }
+    }
+}
+
+/// Selector type for positional arguments.
+#[derive(Debug, Clone)]
+enum Selector {
+    Drilldown(u32),
+    Ancestors(u32),
+    Descendants(u32),
+    Subtree(u32),
 }
 
 impl Dashboard {
@@ -160,17 +205,259 @@ impl Dashboard {
         }
     }
 
-    /// Render the dashboard as a formatted table.
+    /// Render the dashboard as a formatted table (all stories, backward compatible with story 3).
     pub fn render_table(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
         Ok(self.format_table(&stories))
     }
 
-    /// Render the dashboard as JSON.
+    /// Render the dashboard as JSON (all stories, backward compatible with story 3).
     pub fn render_json(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
-        let json = self.format_json(&stories);
+        let json = self.format_json(&stories, ViewType::All);
         Ok(json)
+    }
+
+    /// Render the dashboard as a formatted table with frontier filter (story 10).
+    pub fn render_frontier_table(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let frontier = self.filter_frontier(&stories);
+        Ok(self.format_dag_table(&frontier))
+    }
+
+    /// Render the dashboard as JSON with frontier filter (story 10).
+    pub fn render_frontier_json(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let frontier = self.filter_frontier(&stories);
+        let json = self.format_json(&frontier, ViewType::Frontier);
+        Ok(json)
+    }
+
+    /// Render the dashboard with --all flag (flat list, equivalent to render_table).
+    pub fn render_all_table(&self) -> Result<String, DashboardError> {
+        self.render_table()
+    }
+
+    /// Render the dashboard with --all flag (flat list, equivalent to render_json).
+    pub fn render_all_json(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let json = self.format_json(&stories, ViewType::All);
+        Ok(json)
+    }
+
+    /// Render the dashboard with --expand flag (full not-healthy subtree).
+    pub fn render_expand_table(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let expanded = self.filter_expand(&stories);
+        Ok(self.format_dag_table(&expanded))
+    }
+
+    /// Render the dashboard with --expand flag (full not-healthy subtree).
+    pub fn render_expand_json(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let expanded = self.filter_expand(&stories);
+        let json = self.format_json(&expanded, ViewType::Expand);
+        Ok(json)
+    }
+
+    /// List stories matching a selector (ancestors, descendants, or subtree).
+    pub fn list_selector(&self, selector: &str) -> Result<String, DashboardError> {
+        let parsed = self.parse_selector(selector)?;
+        let stories = self.load_and_compute_health()?;
+
+        let result_ids = match parsed {
+            Selector::Ancestors(id) => self.get_ancestors(&stories, id)?,
+            Selector::Descendants(id) => self.get_descendants(&stories, id)?,
+            Selector::Subtree(id) => self.get_subtree(&stories, id)?,
+            Selector::Drilldown(_) => {
+                // Should not reach here from list_selector; handled separately
+                return Err(DashboardError::UnknownStory { id: 0 });
+            }
+        };
+
+        let view_type = match parsed {
+            Selector::Ancestors(_) => ViewType::Ancestors,
+            Selector::Descendants(_) => ViewType::Descendants,
+            Selector::Subtree(_) => ViewType::Subtree,
+            Selector::Drilldown(_) => ViewType::Drilldown,
+        };
+
+        let filtered: Vec<StoryHealth> = stories
+            .into_iter()
+            .filter(|s| result_ids.contains(&s.id))
+            .collect();
+
+        let json = self.format_json(&filtered, view_type);
+        Ok(json)
+    }
+
+    /// Parse a selector string into Selector enum.
+    fn parse_selector(&self, selector: &str) -> Result<Selector, DashboardError> {
+        if selector.contains('+') {
+            if selector.starts_with('+') && selector.ends_with('+') {
+                // +<id>+
+                if let Some(id_str) = selector.strip_prefix('+').and_then(|s| s.strip_suffix('+')) {
+                    let id: u32 = id_str
+                        .parse()
+                        .map_err(|_| DashboardError::UnknownStory { id: 0 })?;
+                    Ok(Selector::Subtree(id))
+                } else {
+                    Err(DashboardError::UnknownStory { id: 0 })
+                }
+            } else if let Some(id_str) = selector.strip_prefix('+') {
+                // +<id>
+                let id: u32 = id_str
+                    .parse()
+                    .map_err(|_| DashboardError::UnknownStory { id: 0 })?;
+                Ok(Selector::Ancestors(id))
+            } else if let Some(id_str) = selector.strip_suffix('+') {
+                // <id>+
+                let id: u32 = id_str
+                    .parse()
+                    .map_err(|_| DashboardError::UnknownStory { id: 0 })?;
+                Ok(Selector::Descendants(id))
+            } else {
+                Err(DashboardError::UnknownStory { id: 0 })
+            }
+        } else {
+            // Bareword drilldown
+            let id: u32 = selector
+                .parse()
+                .map_err(|_| DashboardError::UnknownStory { id: 0 })?;
+            Ok(Selector::Drilldown(id))
+        }
+    }
+
+    /// Get transitive ancestors of a story.
+    fn get_ancestors(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+        if !stories.iter().any(|s| s.id == target_id) {
+            return Err(DashboardError::UnknownStory { id: target_id });
+        }
+
+        let mut result = vec![target_id];
+        let mut queue = VecDeque::new();
+        queue.push_back(target_id);
+        let mut visited = HashSet::new();
+        visited.insert(target_id);
+
+        while let Some(current_id) = queue.pop_front() {
+            if let Some(current) = stories.iter().find(|s| s.id == current_id) {
+                for &ancestor_id in &current.depends_on {
+                    if !visited.contains(&ancestor_id) {
+                        visited.insert(ancestor_id);
+                        queue.push_back(ancestor_id);
+                        result.push(ancestor_id);
+                    }
+                }
+            }
+        }
+
+        // Topologically sort ancestors (dependencies before dependents)
+        result.sort_by(|a, b| {
+            let a_story = stories.iter().find(|s| s.id == *a);
+            let b_story = stories.iter().find(|s| s.id == *b);
+
+            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
+                // If a depends on b, a comes after b
+                if a_st.depends_on.contains(b) {
+                    return Ordering::Greater;
+                }
+                if b_st.depends_on.contains(a) {
+                    return Ordering::Less;
+                }
+            }
+            a.cmp(b)
+        });
+
+        Ok(result)
+    }
+
+    /// Get transitive descendants of a story.
+    fn get_descendants(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+        if !stories.iter().any(|s| s.id == target_id) {
+            return Err(DashboardError::UnknownStory { id: target_id });
+        }
+
+        let mut result = vec![target_id];
+        let mut queue = VecDeque::new();
+        queue.push_back(target_id);
+        let mut visited = HashSet::new();
+        visited.insert(target_id);
+
+        // Build reverse dependency map
+        let mut dependents: HashMap<u32, Vec<u32>> = HashMap::new();
+        for story in stories {
+            for &dep_id in &story.depends_on {
+                dependents.entry(dep_id).or_default().push(story.id);
+            }
+        }
+
+        while let Some(current_id) = queue.pop_front() {
+            if let Some(descendant_ids) = dependents.get(&current_id) {
+                for &desc_id in descendant_ids {
+                    if !visited.contains(&desc_id) {
+                        visited.insert(desc_id);
+                        queue.push_back(desc_id);
+                        result.push(desc_id);
+                    }
+                }
+            }
+        }
+
+        // Topologically sort descendants (dependencies before dependents)
+        result.sort_by(|a, b| {
+            let a_story = stories.iter().find(|s| s.id == *a);
+            let b_story = stories.iter().find(|s| s.id == *b);
+
+            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
+                // If a depends on b, a comes after b
+                if a_st.depends_on.contains(b) {
+                    return Ordering::Greater;
+                }
+                if b_st.depends_on.contains(a) {
+                    return Ordering::Less;
+                }
+            }
+            a.cmp(b)
+        });
+
+        Ok(result)
+    }
+
+    /// Get target plus both ancestors and descendants (subtree).
+    fn get_subtree(&self, stories: &[StoryHealth], target_id: u32) -> Result<Vec<u32>, DashboardError> {
+        if !stories.iter().any(|s| s.id == target_id) {
+            return Err(DashboardError::UnknownStory { id: target_id });
+        }
+
+        let ancestors = self.get_ancestors(stories, target_id)?;
+        let descendants = self.get_descendants(stories, target_id)?;
+
+        let mut result = ancestors;
+        for id in descendants {
+            if !result.contains(&id) {
+                result.push(id);
+            }
+        }
+
+        // Final topological sort
+        result.sort_by(|a, b| {
+            let a_story = stories.iter().find(|s| s.id == *a);
+            let b_story = stories.iter().find(|s| s.id == *b);
+
+            if let (Some(a_st), Some(b_st)) = (a_story, b_story) {
+                // If a depends on b, a comes after b
+                if a_st.depends_on.contains(b) {
+                    return Ordering::Greater;
+                }
+                if b_st.depends_on.contains(a) {
+                    return Ordering::Less;
+                }
+            }
+            a.cmp(b)
+        });
+
+        Ok(result)
     }
 
     /// Return the drill-down view for a single story by id.
@@ -181,7 +468,41 @@ impl Dashboard {
             .find(|s| s.id == story_id)
             .ok_or(DashboardError::UnknownStory { id: story_id })?;
 
-        Ok(self.format_drilldown(story))
+        Ok(self.format_drilldown(story, &stories))
+    }
+
+    /// Filter to frontier view: not-healthy stories with no not-healthy ancestors.
+    fn filter_frontier(&self, stories: &[StoryHealth]) -> Vec<StoryHealth> {
+        stories
+            .iter()
+            .filter(|story| {
+                // Not healthy
+                if story.health == Health::Healthy {
+                    return false;
+                }
+
+                // All ancestors must be healthy
+                for &ancestor_id in &story.depends_on {
+                    if let Some(ancestor) = stories.iter().find(|s| s.id == ancestor_id) {
+                        if ancestor.health != Health::Healthy {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Filter to expand view: all not-healthy stories (no frontier restriction).
+    fn filter_expand(&self, stories: &[StoryHealth]) -> Vec<StoryHealth> {
+        stories
+            .iter()
+            .filter(|story| story.health != Health::Healthy)
+            .cloned()
+            .collect()
     }
 
     /// Load all story YAML files, compute health for each, and return sorted
@@ -195,6 +516,7 @@ impl Dashboard {
         }
 
         let mut stories = Vec::new();
+        let mut depends_map: HashMap<u32, Vec<u32>> = HashMap::new();
 
         // Read all .yml files from the stories directory.
         let entries = std::fs::read_dir(&self.stories_dir)
@@ -205,21 +527,167 @@ impl Dashboard {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("yml") {
                 let health = self.compute_health_for_file(&path);
+                depends_map.insert(health.id, health.depends_on.clone());
                 stories.push(health);
             }
         }
 
-        // Sort by health priority (error first) then by id within each group.
+        // Check for cycles in depends_on
+        self.detect_cycles(&depends_map)?;
+
+        // Compute lvl and immediate downstreams for each story
+        let mut downstreams_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (id, deps) in &depends_map {
+            for &dep_id in deps {
+                downstreams_map.entry(dep_id).or_default().push(*id);
+            }
+        }
+
+        let lvl_map = self.compute_lvl(&depends_map, &downstreams_map);
+
+        for story in &mut stories {
+            story.lvl = *lvl_map.get(&story.id).unwrap_or(&0);
+            story.immediate_downstreams = downstreams_map.get(&story.id).unwrap_or(&vec![]).clone();
+            story.immediate_downstreams.sort();
+
+            // Compute blocks_total (transitive descendant count)
+            story.blocks_total = self.count_transitive_descendants(&downstreams_map, story.id);
+        }
+
+        // Sort by lvl ascending (most-negative first), then by id ascending
         stories.sort_by(|a, b| {
-            let a_priority = health_sort_priority(a.health);
-            let b_priority = health_sort_priority(b.health);
-            match a_priority.cmp(&b_priority) {
+            match a.lvl.cmp(&b.lvl) {
                 Ordering::Equal => a.id.cmp(&b.id),
                 other => other,
             }
         });
 
         Ok(stories)
+    }
+
+    /// Detect cycles in the depends_on graph.
+    fn detect_cycles(&self, depends_map: &HashMap<u32, Vec<u32>>) -> Result<(), DashboardError> {
+        // Simple DFS-based cycle detection
+        let mut visited = HashSet::new();
+        let mut rec_stack = HashSet::new();
+
+        for &id in depends_map.keys() {
+            if !visited.contains(&id) && self.has_cycle_dfs(id, depends_map, &mut visited, &mut rec_stack)? {
+                return Err(DashboardError::Cycle {
+                    edge: format!("cycle involving story {id}"),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// DFS helper for cycle detection.
+    fn has_cycle_dfs(
+        &self,
+        node: u32,
+        depends_map: &HashMap<u32, Vec<u32>>,
+        visited: &mut HashSet<u32>,
+        rec_stack: &mut HashSet<u32>,
+    ) -> Result<bool, DashboardError> {
+        visited.insert(node);
+        rec_stack.insert(node);
+
+        if let Some(deps) = depends_map.get(&node) {
+            for &dep in deps {
+                if !visited.contains(&dep) {
+                    if self.has_cycle_dfs(dep, depends_map, visited, rec_stack)? {
+                        return Ok(true);
+                    }
+                } else if rec_stack.contains(&dep) {
+                    return Ok(true);
+                }
+            }
+        }
+
+        rec_stack.remove(&node);
+        Ok(false)
+    }
+
+    /// Compute lvl for all stories: longest path from node to any leaf (negated).
+    fn compute_lvl(
+        &self,
+        depends_map: &HashMap<u32, Vec<u32>>,
+        downstreams_map: &HashMap<u32, Vec<u32>>,
+    ) -> HashMap<u32, i32> {
+        let mut lvl_cache = HashMap::new();
+
+        // Get all story ids
+        let mut all_ids: HashSet<u32> = depends_map.keys().copied().collect();
+        for downstreams in downstreams_map.values() {
+            all_ids.extend(downstreams);
+        }
+
+        // Compute lvl for each id
+        for &id in &all_ids {
+            self.compute_lvl_recursive(id, depends_map, downstreams_map, &mut lvl_cache);
+        }
+
+        lvl_cache
+    }
+
+    /// Recursive helper for lvl computation.
+    fn compute_lvl_recursive(
+        &self,
+        id: u32,
+        depends_map: &HashMap<u32, Vec<u32>>,
+        downstreams_map: &HashMap<u32, Vec<u32>>,
+        cache: &mut HashMap<u32, i32>,
+    ) -> i32 {
+        if let Some(&cached) = cache.get(&id) {
+            return cached;
+        }
+
+        // If no downstreams, it's a leaf
+        if !downstreams_map.contains_key(&id) {
+            cache.insert(id, 0);
+            return 0;
+        }
+
+        // Find longest path among immediate downstreams
+        let max_descendant_lvl = downstreams_map
+            .get(&id)
+            .map(|downstreams| {
+                downstreams
+                    .iter()
+                    .map(|&desc_id| {
+                        self.compute_lvl_recursive(desc_id, depends_map, downstreams_map, cache)
+                    })
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+
+        let lvl = -1 - max_descendant_lvl;
+        cache.insert(id, lvl);
+        lvl
+    }
+
+    /// Count transitive descendants of a story.
+    fn count_transitive_descendants(&self, downstreams_map: &HashMap<u32, Vec<u32>>, id: u32) -> u32 {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(id);
+        visited.insert(id);
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(downstreams) = downstreams_map.get(&current) {
+                for &desc_id in downstreams {
+                    if !visited.contains(&desc_id) {
+                        visited.insert(desc_id);
+                        queue.push_back(desc_id);
+                    }
+                }
+            }
+        }
+
+        // Don't count the id itself
+        (visited.len() - 1) as u32
     }
 
     /// Compute the health status for a single story file.
@@ -237,6 +705,7 @@ impl Dashboard {
                 let title = story.title.clone();
                 let status = story.status;
                 let related_files = story.related_files.clone();
+                let depends_on = story.depends_on.clone();
 
                 // Load evidence from the store.
                 let test_run = self.get_test_run(id);
@@ -264,6 +733,10 @@ impl Dashboard {
                     test_run_at,
                     parse_error: None,
                     stale_related_files,
+                    depends_on,
+                    lvl: 0,
+                    immediate_downstreams: vec![],
+                    blocks_total: 0,
                 }
             }
             Err(e) => {
@@ -292,6 +765,10 @@ impl Dashboard {
                     test_run_at: None,
                     parse_error: Some(e.to_string()),
                     stale_related_files: vec![],
+                    depends_on: vec![],
+                    lvl: 0,
+                    immediate_downstreams: vec![],
+                    blocks_total: 0,
                 }
             }
         }
@@ -649,7 +1126,7 @@ impl Dashboard {
     fn format_table(&self, stories: &[StoryHealth]) -> String {
         let mut output = String::new();
 
-        // Header
+        // Header (story 3 backward-compatible format)
         output.push_str("ID | Title | Health | Failing tests | Healthy at\n");
         output.push_str("---|-------|--------|---------------|----------\n");
 
@@ -687,8 +1164,57 @@ impl Dashboard {
         output
     }
 
+    /// Format stories as a table with DAG columns (story 10 frontier/expand view).
+    fn format_dag_table(&self, stories: &[StoryHealth]) -> String {
+        let mut output = String::new();
+
+        // Header (story 10 DAG-aware format)
+        output.push_str("ID | Title | Health | lvl | ↑ | ↓\n");
+        output.push_str("---|-------|--------|-----|---|--\n");
+
+        // Rows
+        for story in stories {
+            let id = format!("{}", story.id);
+            let title = truncate_title(&story.title);
+            let health = story.health.as_str();
+            let lvl = format!("{}", story.lvl);
+
+            // Upstream (depends_on)
+            let upstream = if story.depends_on.is_empty() {
+                String::new()
+            } else {
+                story
+                    .depends_on
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+
+            // Downstream (immediate + blocks_total)
+            let downstream = if story.immediate_downstreams.is_empty() {
+                String::new()
+            } else {
+                let ids = story
+                    .immediate_downstreams
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} (blocks {})", ids, story.blocks_total)
+            };
+
+            output.push_str(&format!(
+                "{} | {} | {} | {} | {} | {}\n",
+                id, title, health, lvl, upstream, downstream
+            ));
+        }
+
+        output
+    }
+
     /// Format stories as JSON.
-    fn format_json(&self, stories: &[StoryHealth]) -> String {
+    fn format_json(&self, stories: &[StoryHealth], view: ViewType) -> String {
         let mut story_objects = Vec::new();
 
         for story in stories {
@@ -696,6 +1222,10 @@ impl Dashboard {
                 "id": story.id,
                 "title": story.title,
                 "health": story.health.as_str(),
+                "lvl": story.lvl,
+                "upstream": story.depends_on,
+                "downstream": story.immediate_downstreams,
+                "blocks_total": story.blocks_total,
                 "failing_tests": story.failing_tests,
                 "uat_commit": story.uat_commit,
                 "uat_signed_at": story.uat_signed_at,
@@ -736,32 +1266,61 @@ impl Dashboard {
         let result = json!({
             "stories": story_objects,
             "summary": summary,
+            "view": view.as_str(),
         });
 
         result.to_string()
     }
 
     /// Format the drill-down view for a single story.
-    fn format_drilldown(&self, story: &StoryHealth) -> String {
+    fn format_drilldown(&self, target: &StoryHealth, all_stories: &[StoryHealth]) -> String {
         let mut output = String::new();
 
-        output.push_str(&format!("Story ID: {}\n", story.id));
-        output.push_str(&format!("Title: {}\n", story.title));
-        output.push_str(&format!("Health: {}\n", story.health.as_str()));
+        output.push_str(&format!("Story ID: {}\n", target.id));
+        output.push_str(&format!("Title: {}\n", target.title));
+        output.push_str(&format!("Health: {}\n", target.health.as_str()));
 
-        if !story.failing_tests.is_empty() {
+        if !target.failing_tests.is_empty() {
             output.push_str("Failing tests:\n");
-            for test in &story.failing_tests {
+            for test in &target.failing_tests {
                 output.push_str(&format!("  - {}\n", test));
             }
         }
 
-        if let Some(ref uat_commit) = story.uat_commit {
+        if let Some(ref uat_commit) = target.uat_commit {
             output.push_str(&format!("Latest UAT commit: {}\n", uat_commit));
         }
 
-        if let Some(ref uat_signed_at) = story.uat_signed_at {
+        if let Some(ref uat_signed_at) = target.uat_signed_at {
             output.push_str(&format!("Latest UAT signed at: {}\n", uat_signed_at));
+        }
+
+        // Ancestors section
+        output.push_str("\nAncestors:\n");
+        let ancestors = self.get_ancestors(all_stories, target.id).unwrap_or_default();
+        let ancestors: Vec<_> = ancestors.into_iter().filter(|&id| id != target.id).collect();
+        if ancestors.is_empty() {
+            output.push_str("  (none)\n");
+        } else {
+            for ancestor_id in ancestors {
+                if let Some(ancestor) = all_stories.iter().find(|s| s.id == ancestor_id) {
+                    output.push_str(&format!("  {} - {} ({})\n", ancestor.id, ancestor.title, ancestor.health.as_str()));
+                }
+            }
+        }
+
+        // Descendants section
+        output.push_str("\nDescendants:\n");
+        let descendants = self.get_descendants(all_stories, target.id).unwrap_or_default();
+        let descendants: Vec<_> = descendants.into_iter().filter(|&id| id != target.id).collect();
+        if descendants.is_empty() {
+            output.push_str("  (none)\n");
+        } else {
+            for descendant_id in descendants {
+                if let Some(descendant) = all_stories.iter().find(|s| s.id == descendant_id) {
+                    output.push_str(&format!("  {} - {} ({})\n", descendant.id, descendant.title, descendant.health.as_str()));
+                }
+            }
         }
 
         output

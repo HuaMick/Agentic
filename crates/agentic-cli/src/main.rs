@@ -47,8 +47,16 @@ enum Commands {
 enum StoriesSubcommand {
     /// Display story health
     Health {
-        /// Optional story ID for drilldown mode
-        id: Option<u32>,
+        /// Optional selector: <id> (drilldown), +<id> (ancestors), <id>+ (descendants), +<id>+ (subtree)
+        selector: Option<String>,
+
+        /// Show full not-healthy subtree (mutually exclusive with selector and --all)
+        #[arg(long)]
+        expand: bool,
+
+        /// Show all stories including healthy (mutually exclusive with selector and --expand)
+        #[arg(long)]
+        all: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -88,7 +96,18 @@ fn main() {
 
     match cli.command {
         Commands::Stories { subcommand } => match subcommand {
-            StoriesSubcommand::Health { id, json, store } => {
+            StoriesSubcommand::Health { selector, expand, all, json, store } => {
+                // Validate mutually exclusive flags
+                let selector_provided = selector.is_some();
+                if all && (selector_provided || expand) {
+                    eprintln!("--all is mutually exclusive with positional selector and --expand");
+                    std::process::exit(2);
+                }
+                if expand && selector_provided {
+                    eprintln!("--expand is mutually exclusive with positional selector");
+                    std::process::exit(2);
+                }
+
                 let store_path = resolve_store_path(store);
                 eprintln!("store: {}", store_path.display());
 
@@ -116,28 +135,86 @@ fn main() {
 
                 let dashboard = Dashboard::with_repo(Arc::new(store), stories_dir, repo_root);
 
-                let output = if let Some(story_id) = id {
-                    match dashboard.drilldown(story_id) {
-                        Ok(output) => output,
-                        Err(e) => {
-                            eprintln!("{e}");
-                            std::process::exit(1);
+                let output = if let Some(sel) = selector {
+                    // Check if it's a drilldown (bareword) or a selector (+id, id+, +id+)
+                    if sel.contains('+') {
+                        // It's a selector
+                        match dashboard.list_selector(&sel) {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        // It's a drilldown
+                        match sel.parse::<u32>() {
+                            Ok(story_id) => match dashboard.drilldown(story_id) {
+                                Ok(output) => output,
+                                Err(e) => {
+                                    eprintln!("{e}");
+                                    std::process::exit(1);
+                                }
+                            },
+                            Err(_) => {
+                                eprintln!("invalid selector: {}", sel);
+                                std::process::exit(2);
+                            }
                         }
                     }
-                } else if json {
-                    match dashboard.render_json() {
-                        Ok(output) => output,
-                        Err(e) => {
-                            eprintln!("{e}");
-                            std::process::exit(2);
+                } else if expand {
+                    if json {
+                        match dashboard.render_expand_json() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    } else {
+                        match dashboard.render_expand_table() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    }
+                } else if all {
+                    if json {
+                        match dashboard.render_all_json() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    } else {
+                        match dashboard.render_all_table() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
                         }
                     }
                 } else {
-                    match dashboard.render_table() {
-                        Ok(output) => output,
-                        Err(e) => {
-                            eprintln!("{e}");
-                            std::process::exit(2);
+                    // Default: frontier view
+                    if json {
+                        match dashboard.render_frontier_json() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    } else {
+                        match dashboard.render_frontier_table() {
+                            Ok(output) => output,
+                            Err(e) => {
+                                eprintln!("{e}");
+                                std::process::exit(2);
+                            }
                         }
                     }
                 };
