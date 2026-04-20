@@ -42,8 +42,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agentic_store::{Store, StoreError};
-use agentic_story::{Story, StoryError};
+use agentic_story::{Status, Story, StoryError};
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// The table name for UAT signing records.
@@ -123,6 +124,31 @@ impl UatExecutor for StubExecutor {
     }
 }
 
+/// Reason why an ancestor is considered unhealthy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AncestorUnhealthyReason {
+    /// The ancestor's on-disk YAML status is not `healthy`.
+    StatusNotHealthy,
+    /// The ancestor claims `healthy` on disk but has no signing row in the store.
+    NoSigningRow,
+}
+
+impl std::fmt::Display for AncestorUnhealthyReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AncestorUnhealthyReason::StatusNotHealthy => {
+                write!(f, "ancestor status is not healthy on disk")
+            }
+            AncestorUnhealthyReason::NoSigningRow => {
+                write!(
+                    f,
+                    "ancestor claims healthy but has no signing row in the store"
+                )
+            }
+        }
+    }
+}
+
 /// Errors the UAT library can surface.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -139,6 +165,16 @@ pub enum UatError {
     Io(String),
     /// Store backend error.
     Store(StoreError),
+    /// A transitive ancestor of the story is not healthy (status != healthy
+    /// on disk, or status = healthy without a corresponding signing row).
+    /// The error names the offending ancestor id and the reason.
+    AncestorNotHealthy {
+        ancestor_id: u32,
+        reason: AncestorUnhealthyReason,
+    },
+    /// The depends_on graph contains a cycle, detected at the UAT boundary.
+    /// The error names the cycle edge.
+    Cycle { edge: (u32, u32) },
 }
 
 impl std::fmt::Display for UatError {
@@ -153,6 +189,19 @@ impl std::fmt::Display for UatError {
             }
             UatError::Io(msg) => write!(f, "io error while running uat: {msg}"),
             UatError::Store(err) => write!(f, "store error while running uat: {err}"),
+            UatError::AncestorNotHealthy {
+                ancestor_id,
+                reason,
+            } => write!(
+                f,
+                "could not produce a verdict: ancestor {ancestor_id} is not healthy ({reason})"
+            ),
+            UatError::Cycle { edge: (from, to) } => {
+                write!(
+                    f,
+                    "could not produce a verdict: cycle in depends_on graph ({from} -> {to})"
+                )
+            }
         }
     }
 }
@@ -230,6 +279,16 @@ impl<E: UatExecutor> Uat<E> {
         // Step 3: Execute the UAT.
         let outcome = self.executor.execute(&story);
         let verdict = outcome.verdict;
+
+        // Step 3.5 (Pass only): Check ancestor health before signing.
+        if verdict == Verdict::Pass {
+            check_ancestors_healthy(
+                &self.stories_dir,
+                story_id,
+                &story.depends_on,
+                self.store.as_ref(),
+            )?;
+        }
 
         // Step 4: Sign the verdict.
         let commit = get_head_sha(&self.stories_dir)?;
@@ -373,5 +432,131 @@ fn promote_story_to_healthy(story_path: &Path) -> Result<(), UatError> {
     fs::write(story_path, updated)
         .map_err(|e| UatError::Io(format!("could not write story file: {e}")))?;
 
+    Ok(())
+}
+
+/// Check that all transitive ancestors of a story are healthy.
+///
+/// For a Pass verdict, all ancestors must be healthy (status = healthy on disk)
+/// AND have a corresponding valid signing row in the store. The check is
+/// transitive: we walk the depends_on graph recursively.
+///
+/// Returns `UatError::AncestorNotHealthy` if any ancestor fails the health check,
+/// or `UatError::Cycle` if a cycle is detected in the graph.
+fn check_ancestors_healthy(
+    stories_dir: &Path,
+    _story_id: u32,
+    direct_ancestors: &[u32],
+    store: &dyn Store,
+) -> Result<(), UatError> {
+    // Load all stories to build the dependency graph.
+    let all_stories = Story::load_dir(stories_dir).map_err(|e| match e {
+        StoryError::DependsOnCycle { participants } => {
+            // If the cycle is detected at load time, surface it as-is.
+            // Pick an edge from the cycle for reporting.
+            if participants.len() > 1 {
+                UatError::Cycle {
+                    edge: (participants[0], participants[1]),
+                }
+            } else if participants.len() == 1 {
+                UatError::Cycle {
+                    edge: (participants[0], participants[0]),
+                }
+            } else {
+                UatError::Io("cycle with no participants".to_string())
+            }
+        }
+        _ => UatError::Io(format!("failed to load stories: {e}")),
+    })?;
+
+    // Build a map from story id to Story for quick lookup.
+    let stories_by_id: HashMap<u32, Story> = all_stories.into_iter().map(|s| (s.id, s)).collect();
+
+    // Walk ancestors transitively, checking health and detecting cycles.
+    let mut visited: HashSet<u32> = HashSet::new();
+    let mut path: Vec<u32> = Vec::new();
+
+    // Check each direct ancestor.
+    for &ancestor_id in direct_ancestors {
+        check_ancestor_dfs(ancestor_id, &stories_by_id, store, &mut visited, &mut path)?;
+    }
+
+    Ok(())
+}
+
+/// DFS helper for ancestor health checking.
+///
+/// Maintains a `visited` set and a `path` stack for cycle detection.
+/// If we encounter a node already in `path`, it's a cycle.
+/// If we encounter a node already visited (but not in path), we've already
+/// checked it and can skip.
+fn check_ancestor_dfs(
+    story_id: u32,
+    stories_by_id: &HashMap<u32, Story>,
+    store: &dyn Store,
+    visited: &mut HashSet<u32>,
+    path: &mut Vec<u32>,
+) -> Result<(), UatError> {
+    // If already visited, we've checked this ancestor transitively.
+    if visited.contains(&story_id) {
+        return Ok(());
+    }
+
+    // Check for cycle: if story_id is in the current path, we have a back edge.
+    if path.contains(&story_id) {
+        // Find the edge: the story that added story_id to depends_on.
+        let from = *path.last().unwrap_or(&story_id);
+        return Err(UatError::Cycle {
+            edge: (from, story_id),
+        });
+    }
+
+    // Mark as visited and add to path.
+    visited.insert(story_id);
+    path.push(story_id);
+
+    // Get the story.
+    let story = match stories_by_id.get(&story_id) {
+        Some(s) => s,
+        None => {
+            // Story not found — shouldn't happen if load_dir succeeded.
+            path.pop();
+            return Ok(());
+        }
+    };
+
+    // First: check if THIS ancestor is healthy on disk.
+    if story.status != Status::Healthy {
+        path.pop();
+        visited.remove(&story_id);
+        return Err(UatError::AncestorNotHealthy {
+            ancestor_id: story_id,
+            reason: AncestorUnhealthyReason::StatusNotHealthy,
+        });
+    }
+
+    // Second: check if THIS ancestor has a valid signing row.
+    let signing_rows = store
+        .query(UAT_SIGNINGS_TABLE, &|doc| {
+            doc.get("story_id").and_then(|v| v.as_u64()) == Some(story_id as u64)
+                && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
+        })
+        .map_err(UatError::Store)?;
+
+    if signing_rows.is_empty() {
+        path.pop();
+        visited.remove(&story_id);
+        return Err(UatError::AncestorNotHealthy {
+            ancestor_id: story_id,
+            reason: AncestorUnhealthyReason::NoSigningRow,
+        });
+    }
+
+    // Third: recursively check each of this ancestor's ancestors.
+    for &next_ancestor_id in &story.depends_on {
+        check_ancestor_dfs(next_ancestor_id, stories_by_id, store, visited, path)?;
+    }
+
+    path.pop();
     Ok(())
 }

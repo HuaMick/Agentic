@@ -318,6 +318,17 @@ fn main() {
                     eprintln!("unknown story id: {id}");
                     std::process::exit(2);
                 }
+                Err(UatError::AncestorNotHealthy {
+                    ancestor_id,
+                    reason,
+                }) => {
+                    eprintln!("ancestor {ancestor_id} is not healthy: {reason}");
+                    std::process::exit(2);
+                }
+                Err(UatError::Cycle { edge: (from, to) }) => {
+                    eprintln!("cycle in depends_on graph: {from} -> {to}");
+                    std::process::exit(2);
+                }
                 Err(e) => {
                     eprintln!("uat failed: {e}");
                     std::process::exit(2);
