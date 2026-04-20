@@ -42,3 +42,20 @@ serde_json.workspace = true
 # the real repo. Matches the fixture idiom used by `agentic-uat` and
 # `agentic-story`'s own tests.
 tempfile.workspace = true
+
+# Story 14 scaffolds: the `scaffold_body_is_parseable_rust` scaffold
+# round-trips the scaffold bytes claude authors through
+# `syn::parse_file` as the parseability invariant named in the
+# justification. The refusal sub-scenario asserts
+# `TestBuilderError::ScaffoldParseError` fires precisely when
+# `syn::parse_file` rejects the input, so `syn` is the test's
+# reference parser. Dev-scope only.
+syn = { version = "2", features = ["full", "parsing"] }
+
+# Story 14 scaffolds: the `scaffold_body_is_cached_by_content_hash`
+# scaffold asserts the cache-file naming invariant (content-addressed
+# SHA-256 of the cached body) and cross-checks by recomputing the
+# digest from the on-disk bytes — so the test pins the cache's
+# content-addressed contract independent of the implementation's
+# internal hashing call. Dev-scope only.
+sha2 = "0.10"

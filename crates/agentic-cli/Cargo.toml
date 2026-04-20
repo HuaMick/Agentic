@@ -56,3 +56,10 @@ git2 = { version = "0.19", default-features = false }
 # the scaffolds distinguish "wired to the right store" from "wired to
 # some default store that happened to accept the write."
 agentic-store = { path = "../agentic-store" }
+
+# Story 14: the `test_build_invokes_claude_and_writes_real_scaffold`
+# scaffold parses the CLI-written scaffold bytes through
+# `syn::parse_file` to confirm the argv-to-subprocess wire produced a
+# parseable Rust source — the operator-visible payoff of story 14.
+# Dev-scope only.
+syn = { version = "2", features = ["full", "parsing"] }

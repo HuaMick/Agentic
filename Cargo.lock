@@ -24,6 +24,7 @@ dependencies = [
  "dirs",
  "git2",
  "serde_json",
+ "syn",
  "tempfile",
 ]
 
@@ -67,6 +68,8 @@ dependencies = [
  "chrono",
  "git2",
  "serde_json",
+ "sha2",
+ "syn",
  "tempfile",
  "toml",
  "toml_edit",
