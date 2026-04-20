@@ -5,7 +5,7 @@ outcome: |
   value whose construction has already enforced the schema and the
   dependency-graph acyclicity, so downstream code never has to defend
   against malformed input.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -28,7 +28,7 @@ acceptance:
       payload names the missing field in text a human can act
       on without opening a schema file. Without this, schema
       drift during authoring surfaces as cryptic serde errors
-      that the story-writer agent and downstream tooling
+      that an author (or tooling reading the loader's output)
       cannot parse into a corrective action.
   - file: crates/agentic-story/tests/load_cycle_in_depends_on_is_rejected.rs
     justification: |
@@ -172,7 +172,7 @@ guidance: |
     run in the directory path, because a single file cannot
     meaningfully validate its edges against stories it has
     never seen. The dashboard uses the directory path; a
-    future story-writer CLI lint may use either.
+    future lint over `stories/` may use either.
 
   Keep the `Story` struct aligned with the schema.
     Fields are already enumerated in `crates/agentic-story/README.md`

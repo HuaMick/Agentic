@@ -4,7 +4,7 @@ outcome: |
   A developer editing a file unrelated to a healthy story sees that
   story remain healthy on the dashboard, because staleness is scoped to
   each story's declared file dependencies rather than to HEAD equality.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -299,12 +299,12 @@ guidance: |
     not mechanism changes; (b) the schema and classifier must
     exist before population can be done usefully; (c) tangling
     population into the mechanism's UAT would require seven
-    unrelated commits inside the single walkthrough. The
-    follow-up is a one-shot `story-writer` curation pass, not
-    a story. Once this story is `healthy`, a single directed
-    story-writer run can add `related_files` to every current
-    story. The UAT for THIS story only needs one fixture story
-    with a populated field, not seven.
+    unrelated commits inside the single walkthrough.
+    Back-population of `related_files` across stories 1–7 is
+    a follow-up corpus edit, not a story. Once this story is
+    `healthy`, the population can be done in a single pass.
+    The UAT for THIS story only needs one fixture story with
+    a populated field, not seven.
 
   Deferred neighbours — explicitly NOT in this story.
     The legacy system had two adjacent mechanics this story
@@ -347,9 +347,8 @@ guidance: |
     becomes stale (its guidance still says "a future story
     may relax this to 'HEAD touches no related files'"). The
     correct fix is a small guidance edit on story 3 after
-    THIS story passes UAT — done by a subsequent story-writer
-    pass, which will auto-revert story 3 to
-    `under_construction` per the system design. That is
+    THIS story passes UAT; that edit will auto-revert story 3
+    to `under_construction` per the system design. That is
     correct behaviour: a classifier change invalidates the
     proof of the story that pinned the old classifier.
     Attempting to pre-edit story 3 at this story's authoring

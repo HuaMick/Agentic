@@ -4,7 +4,7 @@ outcome: |
   A developer writing any consumer crate can persist and retrieve
   structured documents through a single `Store` abstraction whose
   behaviour is identical regardless of which backend is wired in.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -124,7 +124,7 @@ guidance: |
     impls behind the trait in the same crate. If we later want a
     minimal `agentic-store` for consumers that want the trait
     without the in-memory body, we split then — not speculatively
-    now. Update `crates/agentic-store/README.md` when story 4 ships.
+    now.
 
   Behaviours that are in scope.
     The five tests collectively pin: upsert-by-key replaces,

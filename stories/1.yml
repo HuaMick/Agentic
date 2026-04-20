@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic uat <id> --verdict <pass|fail>` against a
   story and receives a commit-signed verdict that is the only path by
   which a story's status on disk becomes `healthy`.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -259,7 +259,7 @@ guidance: |
     bad id, IO failure, store failure, bad argv) the YAML is not
     touched. `healthy` is reachable ONLY through this code path;
     the schema enforces this by leaving `healthy` out of the values
-    the story-writer is allowed to hand-write.
+    any author (human or tool) is allowed to hand-write.
 
   Exit-code contract for the CLI subcommand.
     0  = Pass verdict issued (story promoted to healthy).
@@ -314,9 +314,9 @@ guidance: |
     `SurrealStore` code path is real (same one the installed binary
     takes) but isolated per-test.
 
-  Parser choice — flag for build-rust (CLI-wide).
-    Preference is `clap` (`derive` feature) because the team already
-    knows it and exit-code handling is explicit; `argh` is
+  Parser choice (CLI-wide).
+    Preference is `clap` (`derive` feature) because it's widely
+    understood and exit-code handling is explicit; `argh` is
     acceptable if the resulting binary is meaningfully smaller or
     compiles faster. A hand-rolled parser is accepted only if its
     own tests live inside this story's acceptance suite (we are not
