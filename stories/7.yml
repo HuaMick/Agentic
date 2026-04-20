@@ -6,7 +6,7 @@ outcome: |
   red-state record that is the only way to prove a story's acceptance
   tests were authored to fail first.
 
-status: proposed
+status: under_construction
 
 patterns:
   - standalone-resilient-library

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use agentic_dashboard::Dashboard;
 use agentic_store::SurrealStore;
+use agentic_test_builder::{TestBuilder, TestBuilderError};
 use agentic_uat::{StubExecutor, Uat, UatError, Verdict};
 use clap::{Parser, Subcommand};
 
@@ -33,6 +34,12 @@ enum Commands {
         /// Path to the store
         #[arg(long)]
         store: Option<PathBuf>,
+    },
+    /// Scaffold failing tests for a story and record red-state evidence
+    #[command(name = "test-build")]
+    TestBuild {
+        /// Story ID to scaffold
+        id: u32,
     },
 }
 
@@ -205,6 +212,51 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!("uat failed: {e}");
+                    std::process::exit(2);
+                }
+            }
+        }
+        Commands::TestBuild { id } => {
+            let repo_root = match git2::Repository::discover(".") {
+                Ok(r) => r.workdir().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
+                Err(e) => {
+                    eprintln!("failed to discover git repo: {e}");
+                    std::process::exit(2);
+                }
+            };
+
+            let builder = TestBuilder::new(&repo_root);
+            match builder.run(id) {
+                Ok(outcome) => {
+                    let created = outcome.created_paths();
+                    let added = outcome.added_dev_deps();
+                    println!("test-build {id}: {} created, {} dev-dep(s) added", created.len(), added.len());
+                    for path in created {
+                        println!("  CREATED {}", path.display());
+                    }
+                    for (crate_name, dep) in added {
+                        println!("  DEV-DEP {crate_name} += {dep}");
+                    }
+                    std::process::exit(0);
+                }
+                Err(TestBuilderError::DirtyTree) => {
+                    eprintln!("DirtyTree: working tree has uncommitted or untracked changes");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::NoAcceptanceTests) => {
+                    eprintln!("NoAcceptanceTests: story has zero acceptance tests");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::ThinJustification { index }) => {
+                    eprintln!("ThinJustification: acceptance.tests[{index}] has a thin justification");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::OutOfScopeEdit) => {
+                    eprintln!("OutOfScopeEdit: scaffold requested a non-dev-dependency mutation");
+                    std::process::exit(2);
+                }
+                Err(TestBuilderError::Other(msg)) => {
+                    eprintln!("test-build failed: {msg}");
                     std::process::exit(2);
                 }
             }

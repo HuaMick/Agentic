@@ -15,6 +15,13 @@ publish.workspace = true
 # prematurely implemented.
 
 [dependencies]
+agentic-story = { path = "../agentic-story" }
+git2 = { version = "0.19", default-features = false }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+toml = "0.8"
+toml_edit = "0.22"
 
 [dev-dependencies]
 # Story 7 scaffolds: the dirty-tree scaffold initialises a fresh git repo

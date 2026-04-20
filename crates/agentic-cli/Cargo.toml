@@ -13,6 +13,7 @@ path = "src/main.rs"
 agentic-store = { path = "../agentic-store" }
 agentic-uat = { path = "../agentic-uat" }
 agentic-dashboard = { path = "../agentic-dashboard" }
+agentic-test-builder = { path = "../agentic-test-builder" }
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
 git2 = { version = "0.19", default-features = false }
