@@ -31,6 +31,21 @@ use tempfile::TempDir;
 
 const STORY_ID: u32 = 7002;
 
+// Deterministic Rust body the stubbed `claude` emits on stdout. The
+// scaffold `use`s the fixture crate's declared name (snake-case) and
+// references `not_yet_declared` — the undeclared symbol the
+// justification names. cargo check must fail with an unresolved-import
+// rustc error attributable to that symbol, yielding compile-red.
+const STUBBED_CLAUDE_STDOUT: &str = r#"//! Story 7002 scaffold authored by stubbed `claude` shim.
+use compile_red_fixture::not_yet_declared;
+
+#[test]
+fn scaffold_calls_not_yet_declared() {
+    let v = not_yet_declared();
+    assert_eq!(v, 1, "not_yet_declared must return 1");
+}
+"#;
+
 const FIXTURE_STORY_YAML: &str = r#"id: 7002
 title: "Compile-red fixture story: scaffold imports a symbol that does not exist"
 
@@ -76,6 +91,12 @@ fn scaffolds_compile_red_variant_writes_scaffold_that_fails_cargo_check_with_unr
     // scaffold that `use`s that symbol will fail cargo check with an
     // unresolved-import error — that is the compile-red path.
     materialise_compile_red_fixture(repo_root);
+
+    // Stub `claude` onto a tempdir-rooted PATH so the library's
+    // subprocess wire is exercised without needing real claude auth.
+    let path_override = install_claude_shim(repo_root, STUBBED_CLAUDE_STDOUT);
+    std::env::set_var("PATH", &path_override);
+    std::env::set_var("AGENTIC_CACHE", repo_root.join(".agentic-cache"));
 
     let commit = init_repo_and_commit_seed(repo_root);
 
@@ -138,6 +159,30 @@ edition = "2021"
         "// intentionally empty — the symbol the scaffold references is undeclared\n",
     )
     .expect("write fixture lib.rs");
+}
+
+/// Install a `claude` shim onto a tempdir and return a PATH string
+/// that prepends that tempdir — so spawning `claude` from a child
+/// process finds the shim, which writes `stdout_body` verbatim on
+/// stdout regardless of argv/stdin.
+fn install_claude_shim(repo_root: &Path, stdout_body: &str) -> String {
+    let shim_dir = repo_root.join(".bin");
+    fs::create_dir_all(&shim_dir).expect("shim dir");
+    let shim_path = shim_dir.join("claude");
+    let script = format!(
+        "#!/bin/sh\ncat <<'__AGENTIC_EOF__'\n{body}__AGENTIC_EOF__\n",
+        body = stdout_body
+    );
+    fs::write(&shim_path, script).expect("write shim");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&shim_path).expect("shim metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&shim_path, perms).expect("chmod shim");
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{}", shim_dir.display(), old_path)
 }
 
 fn collect_jsonl_rows(dir: &Path) -> Vec<serde_json::Value> {

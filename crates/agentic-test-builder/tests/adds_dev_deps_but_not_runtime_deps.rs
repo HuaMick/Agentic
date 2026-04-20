@@ -42,6 +42,26 @@ use tempfile::TempDir;
 const ALLOWED_STORY_ID: u32 = 7009;
 const FORBIDDEN_STORY_ID: u32 = 70091;
 
+// Deterministic Rust body the stubbed `claude` emits for the ALLOWED
+// scenario. The scaffold `use`s `proptest` — a dev-dep the target
+// crate has NOT declared — so cargo check fails with an
+// `unresolved import proptest` error, which the library's
+// auto-dev-dep path detects and appends to
+// crates/devdep-fixture/Cargo.toml's [dev-dependencies]. The
+// FORBIDDEN scenario never reaches the subprocess (the library
+// short-circuits on the `runtime-dep`/`must reject` justification
+// text), so no stub body is needed for it.
+const STUBBED_CLAUDE_STDOUT: &str = r#"//! Story 7009 scaffold authored by stubbed `claude` shim.
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn scaffold_uses_proptest(_x in 0u32..1) {
+        assert!(true);
+    }
+}
+"#;
+
 const ALLOWED_STORY_YAML: &str = r#"id: 7009
 title: "Dev-deps fixture: scaffold needs a dev-dep not yet declared"
 
@@ -161,6 +181,14 @@ fn adds_dev_deps_but_not_runtime_deps_appends_to_dev_dependencies_only_and_rejec
     )
     .expect("write forbidden fixture");
 
+    // Stub `claude` onto a tempdir-rooted PATH so the library's
+    // subprocess wire is exercised without needing real claude auth.
+    // Only the ALLOWED scenario reaches the subprocess; the FORBIDDEN
+    // scenario short-circuits on the out-of-scope justification text.
+    let path_override = install_claude_shim(repo_root, STUBBED_CLAUDE_STDOUT);
+    std::env::set_var("PATH", &path_override);
+    std::env::set_var("AGENTIC_CACHE", repo_root.join(".agentic-cache"));
+
     init_repo_and_commit_seed(repo_root);
 
     // --- Allowed scenario: dev-dep IS appended; nothing else mutates.
@@ -257,6 +285,30 @@ fn adds_dev_deps_but_not_runtime_deps_appends_to_dev_dependencies_only_and_rejec
         bytes_after_forbidden, bytes_before_forbidden,
         "forbidden scenario must leave every Cargo.toml bytes-identical"
     );
+}
+
+/// Install a `claude` shim onto a tempdir and return a PATH string
+/// that prepends that tempdir — so spawning `claude` from a child
+/// process finds the shim, which writes `stdout_body` verbatim on
+/// stdout regardless of argv/stdin.
+fn install_claude_shim(repo_root: &Path, stdout_body: &str) -> String {
+    let shim_dir = repo_root.join(".bin");
+    fs::create_dir_all(&shim_dir).expect("shim dir");
+    let shim_path = shim_dir.join("claude");
+    let script = format!(
+        "#!/bin/sh\ncat <<'__AGENTIC_EOF__'\n{body}__AGENTIC_EOF__\n",
+        body = stdout_body
+    );
+    fs::write(&shim_path, script).expect("write shim");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&shim_path).expect("shim metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&shim_path, perms).expect("chmod shim");
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{}", shim_dir.display(), old_path)
 }
 
 fn snapshot_cargo_tomls(repo_root: &Path) -> HashMap<PathBuf, Vec<u8>> {
