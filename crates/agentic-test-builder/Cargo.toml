@@ -61,3 +61,10 @@ syn = { version = "2", features = ["full", "parsing"] }
 # content-addressed contract independent of the implementation's
 # internal hashing call. Dev-scope only.
 sha2 = "0.10"
+
+# Story 15 scaffold `plan_emits_one_entry_per_acceptance_test.rs`: the
+# test round-trips the JSON a `PlanEntry` serialises to through a
+# `#[serde(deny_unknown_fields)]` struct to pin the five-key schema.
+# `serde` with `derive` is the standard Rust ecosystem choice for this.
+# Dev-scope only.
+serde = { version = "1", features = ["derive"] }
