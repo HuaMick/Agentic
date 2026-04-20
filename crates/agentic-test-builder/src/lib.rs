@@ -195,19 +195,34 @@ impl TestBuilderOutcome {
 }
 
 /// Check if the git working tree is clean (no uncommitted or untracked files).
+///
+/// Matches `git status --porcelain` semantics: ignored files do not make the
+/// tree dirty, and submodules honour their `.gitmodules` `ignore = dirty`
+/// setting (we pass `exclude_submodules(true)` so the outer repo's cleanliness
+/// is not conflated with a submodule's internal working-tree state — per
+/// the project's `legacy/AgenticEngineering` submodule configuration).
 fn is_tree_clean(repo_root: &Path) -> bool {
     let repo = match git2::Repository::open(repo_root) {
         Ok(r) => r,
         Err(_) => return false,
     };
 
-    let statuses = match repo.statuses(None) {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+
+    let statuses = match repo.statuses(Some(&mut opts)) {
         Ok(s) => s,
         Err(_) => return false,
     };
 
-    // If there are any statuses at all, the tree is dirty.
-    statuses.is_empty()
+    for entry in statuses.iter() {
+        if !entry.status().contains(git2::Status::IGNORED) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Check if a justification is "thin" (empty, single token, or TODO-like).
