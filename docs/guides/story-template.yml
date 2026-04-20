@@ -9,7 +9,11 @@
 #   - acceptance.tests: one or more {file, justification} entries. Each test gets its own justification.
 #   - acceptance.uat: prose journey for a UAT agent. Include cleanup.
 #   - guidance: only what the agent would NOT derive on its own. No length cap.
-#   - status: humans write proposed/under_construction/deprecated/archived; agentic-verify writes tested/healthy.
+#   - status: one of proposed | under_construction | healthy | unhealthy.
+#     Humans and the story-writer write proposed/under_construction;
+#     build-rust may flip proposed -> under_construction on pickup;
+#     `agentic uat` is the only writer of `healthy` (Pass verdict);
+#     `unhealthy` is computed by the dashboard and never written to disk.
 
 id: 0
 title: ""

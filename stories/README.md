@@ -56,13 +56,18 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 4 | `Store` trait + `MemStore` impl | healthy |
 | 5 | `SurrealStore` backed by `surrealkv` | healthy |
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
-| 7 | test-builder meta-story — red-state evidence is a committable atomic | healthy |
+| 7 | test-builder meta-story — red-state evidence is a committable atomic | healthy* |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
 | 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | under_construction |
 | 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | proposed |
 | 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | proposed |
 | 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | proposed |
-| 14 | test-builder authors real acceptance tests via the local claude subprocess | proposed |
+| 14 | test-builder authors real acceptance tests via the local claude subprocess | under_construction |
+
+\* Story 7 shipped `healthy` at commit `e5f4997` but its implementation
+was mutated by story 14's in-flight work; 5 of its 9 tests currently
+fail. The YAML still reads `status: healthy` pending a re-UAT pass that
+will correct it.
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather

@@ -6,9 +6,12 @@ How a Claude Code session drives the agents defined in `agents/<category>/<name>
 
 Every agent has three authoritative YAML files under `agents/<category>/<name>/`:
 
-- `manifest.yml` — identity, outputs, allowed tools.
-- `process.yml` — the behavioural specification. This is the one that matters.
-- `inputs.yml` — what context the agent needs at session start.
+- `contract.yml` — identity, scope, outcome, and authority boundaries (what
+  the agent may and may not touch).
+- `inputs.yml` — what context the agent needs at session start
+  (`required_reading`).
+- `process.yml` — the behavioural specification. This is the one that
+  matters at runtime.
 
 And a single short markdown pointer under `.claude/agents/<name>.md`:
 

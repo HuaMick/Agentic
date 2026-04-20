@@ -2,7 +2,7 @@
 
 A Rust-based agent orchestration system built around story-driven development.
 
-**Status:** Phase 2 — vertical slice operational end-to-end. Cargo workspace active (rustc 1.95.0 via rustup in WSL); six crates compile green. Seven stories `healthy` (1, 2, 3, 4, 5, 6, 9); one `proposed` (7). The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and `agentic uat <id>` + `agentic stories health` both drive the four-status model against a shared SurrealStore.
+**Status:** Phase 2 — vertical slice operational end-to-end. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Seven stories `healthy` (1, 2, 3, 4, 5, 6, 9); three `under_construction` (7, 10, 14); three `proposed` (11, 12, 13). The `dag-primary-lens` epic (stories 10-13) is live under `epics/live/`. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and `agentic uat <id>` + `agentic stories health` both drive the four-status model against a shared SurrealStore.
 
 ## What this is
 
@@ -19,7 +19,7 @@ A rebuild of [AgenticEngineering](https://github.com/HuaMick/AgenticEngineering)
 ## Repository layout
 
 ```
-crates/            Rust workspace (6 active crates + _deferred/ placeholders)
+crates/            Rust workspace (7 active crates + _deferred/ placeholders)
 agents/            Authored YAML agent definitions (the product)
 agents/assets/     Reusable agent assets (6 active; schema in schemas/asset.schema.json)
 .claude/agents/    Hand-written pointer .md files that delegate to agents/
@@ -42,6 +42,7 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 - `agentic-ci-record` — per-story `test_runs` upserter (story 2 shipped).
 - `agentic-dashboard` — four-status story-health view with table + JSON + drilldown modes (stories 3 + 9 shipped).
 - `agentic-cli` — `agentic` binary entrypoint: `agentic uat <id> --verdict <pass|fail>` and `agentic stories health [<id>] [--json]` both wired and shipped via stories 1 + 3.
+- `agentic-test-builder` — red-state scaffold authoring + JSONL evidence writer behind the `agentic test-build` subcommand (story 7 shipped; story 14 upgrading panic-stubs to claude-authored acceptance-test bodies).
 
 ## Active agents
 
@@ -54,7 +55,15 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 ## Current state
 
 **Healthy:** stories 1, 2, 3, 4, 5, 6, 9.
-**Proposed (scaffolds pending):** story 7 (test-builder meta-story).
+**Under construction:** stories 7, 10, 14. Story 7 shipped `healthy` at commit `e5f4997` but its implementation was mutated by story 14's in-flight work — 5 of its 9 tests currently fail and the YAML's `status: healthy` is stale pending re-UAT. Story 10 has library implementation but panic-stub tests awaiting story 14. Story 14 has partial implementation (4/8 tests pass).
+**Proposed:** stories 11, 12, 13.
+
+The **`dag-primary-lens`** epic (`epics/live/dag-primary-lens/`) groups
+stories 10, 11, 12, and 13 around a single direction: shift the mental
+model from "flat list of stories" to "DAG with frontier-of-work,
+blast-radius drilldown, UAT ancestor-gating, and subtree-scoped CI."
+Depends on healthy stories 1, 2, 3, 6, 9 plus story 14 as a hard
+prerequisite.
 
 Story 8 (CLI wiring) was consolidated into stories 1 and 3 on 2026-04-19;
 see `stories/README.md` for the split rationale.
