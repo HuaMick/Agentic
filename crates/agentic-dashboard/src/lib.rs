@@ -86,6 +86,7 @@ struct StoryHealth {
     test_run_at: Option<String>,
     parse_error: Option<String>,
     stale_related_files: Vec<String>,
+    not_healthy_reason: Vec<String>,
     depends_on: Vec<u32>,
     lvl: i32,
     immediate_downstreams: Vec<u32>,
@@ -110,6 +111,7 @@ type HealthClassification = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Vec<String>,
     Vec<String>,
 );
 
@@ -571,6 +573,9 @@ impl Dashboard {
 
         let lvl_map = self.compute_lvl(&depends_map, &downstreams_map);
 
+        // Compute ancestor offenders for each story (story 13)
+        let ancestor_offenders_map = self.compute_ancestor_offenders(&stories, &depends_map);
+
         for story in &mut stories {
             story.lvl = *lvl_map.get(&story.id).unwrap_or(&0);
             story.immediate_downstreams = downstreams_map.get(&story.id).unwrap_or(&vec![]).clone();
@@ -578,6 +583,45 @@ impl Dashboard {
 
             // Compute blocks_total (transitive descendant count)
             story.blocks_total = self.count_transitive_descendants(&downstreams_map, story.id);
+
+            // Story 13: apply ancestor inheritance rule
+            // If a story's own classification is healthy but has a transitive offender,
+            // flip it to unhealthy
+            if story.health == Health::Healthy && ancestor_offenders_map.contains_key(&story.id) {
+                // This story has an ancestor that's not healthy, so it becomes unhealthy
+                story.health = Health::Unhealthy;
+            }
+
+            // Compute not_healthy_reason based on ancestor offenders
+            if story.health == Health::Unhealthy {
+                let mut reasons = Vec::new();
+
+                // Add own_tests if test_runs.verdict == fail (check failing_tests length)
+                // We need to distinguish between "actual failing tests" and "error strings"
+                let has_own_tests_fail = !story.failing_tests.is_empty()
+                    && story
+                        .failing_tests
+                        .iter()
+                        .any(|t| !t.starts_with("schema") && t != "status-evidence mismatch");
+
+                if has_own_tests_fail {
+                    reasons.push("own_tests".to_string());
+                }
+
+                // Add own_files if stale_related_files is non-empty
+                if !story.stale_related_files.is_empty() {
+                    reasons.push("own_files".to_string());
+                }
+
+                // Add ancestor offenders (already in ascending order from compute_ancestor_offenders)
+                if let Some(offenders) = ancestor_offenders_map.get(&story.id) {
+                    for &offender_id in offenders {
+                        reasons.push(format!("ancestor:{offender_id}"));
+                    }
+                }
+
+                story.not_healthy_reason = reasons;
+            }
         }
 
         // Sort by lvl ascending (most-negative first), then by id ascending
@@ -726,6 +770,82 @@ impl Dashboard {
         (visited.len() - 1) as u32
     }
 
+    /// Compute which direct ancestors are offending (not-healthy) for each story.
+    /// Returns a map from story id to list of offending ancestor ids (sorted ascending).
+    fn compute_ancestor_offenders(
+        &self,
+        stories: &[StoryHealth],
+        depends_map: &HashMap<u32, Vec<u32>>,
+    ) -> HashMap<u32, Vec<u32>> {
+        let mut result: HashMap<u32, Vec<u32>> = HashMap::new();
+
+        // For each story, find its direct offending ancestors
+        for story in stories {
+            let mut offenders = Vec::new();
+
+            // Check each direct ancestor
+            for &ancestor_id in &story.depends_on {
+                // Find the ancestor's classification
+                if let Some(ancestor) = stories.iter().find(|s| s.id == ancestor_id) {
+                    // An ancestor is offending if it's not healthy
+                    if ancestor.health != Health::Healthy {
+                        offenders.push(ancestor_id);
+                    }
+                }
+            }
+
+            // Check transitive ancestors
+            let has_transitive_offender =
+                self.has_transitive_offender(story.id, stories, depends_map);
+
+            if !offenders.is_empty() || has_transitive_offender {
+                // Sort by ascending id for determinism
+                offenders.sort();
+                result.insert(story.id, offenders);
+            }
+        }
+
+        result
+    }
+
+    /// Check if there's any transitive (non-direct) ancestor that's not healthy.
+    /// This is needed to classify the story as unhealthy even if direct ancestors are healthy.
+    fn has_transitive_offender(
+        &self,
+        story_id: u32,
+        stories: &[StoryHealth],
+        depends_map: &HashMap<u32, Vec<u32>>,
+    ) -> bool {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(story_id);
+        visited.insert(story_id);
+
+        while let Some(current_id) = queue.pop_front() {
+            if let Some(deps) = depends_map.get(&current_id) {
+                for &ancestor_id in deps {
+                    if !visited.contains(&ancestor_id) {
+                        visited.insert(ancestor_id);
+
+                        // Check if this ancestor is offending
+                        if let Some(ancestor) = stories.iter().find(|s| s.id == ancestor_id) {
+                            if ancestor.health != Health::Healthy {
+                                // Skip direct ancestors (they're already in depends_map)
+                                // Actually, we need to check ALL transitive ancestors
+                                return true;
+                            }
+                        }
+
+                        // Continue walking up
+                        queue.push_back(ancestor_id);
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Compute the health status for a single story file.
     fn compute_health_for_file(&self, path: &std::path::Path) -> StoryHealth {
         // Extract the id from the filename (e.g. "123.yml" -> 123).
@@ -756,6 +876,7 @@ impl Dashboard {
                     test_run_commit,
                     test_run_at,
                     stale_related_files,
+                    not_healthy_reason,
                 ) = self.classify_health(status, &test_run, &uat_signings, &related_files);
 
                 StoryHealth {
@@ -769,6 +890,7 @@ impl Dashboard {
                     test_run_at,
                     parse_error: None,
                     stale_related_files,
+                    not_healthy_reason,
                     depends_on,
                     lvl: 0,
                     immediate_downstreams: vec![],
@@ -801,6 +923,7 @@ impl Dashboard {
                     test_run_at: None,
                     parse_error: Some(e.to_string()),
                     stale_related_files: vec![],
+                    not_healthy_reason: vec![],
                     depends_on: vec![],
                     lvl: 0,
                     immediate_downstreams: vec![],
@@ -947,7 +1070,16 @@ impl Dashboard {
 
         // Rule 1: proposed ⇔ YAML says proposed (YAML wins).
         if yaml_status == Status::Proposed {
-            return (Health::Proposed, vec![], None, None, None, None, vec![]);
+            return (
+                Health::Proposed,
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                vec![],
+                vec![],
+            );
         }
 
         // Rule 2: under_construction ⇔ YAML says under_construction AND no
@@ -975,6 +1107,7 @@ impl Dashboard {
                 None,
                 None,
                 None,
+                vec![],
                 vec![],
             );
         }
@@ -1053,6 +1186,7 @@ impl Dashboard {
                         test_run_commit,
                         test_run_at,
                         vec![],
+                        vec![],
                     );
                 }
             }
@@ -1077,31 +1211,31 @@ impl Dashboard {
             let mut is_unhealthy = test_run_fail;
             let mut stale_files = vec![];
 
-            // If we have a repo_root and non-empty related_files, check for
-            // intersection. Otherwise fall back to legacy strict-equality rule.
-            if !is_unhealthy {
-                if !related_files.is_empty() && self.repo_root.is_some() {
-                    if let Some(uat_sha) = uat_commit.as_deref() {
-                        match self.compute_git_diff(uat_sha, &self.head_sha) {
-                            Ok(changed_files) => {
-                                stale_files = self.check_related_files_intersection(
-                                    related_files,
-                                    &changed_files,
-                                );
+            // Always check for file staleness (needed for not_healthy_reason even if tests fail)
+            if !related_files.is_empty() && self.repo_root.is_some() {
+                if let Some(uat_sha) = uat_commit.as_deref() {
+                    match self.compute_git_diff(uat_sha, &self.head_sha) {
+                        Ok(changed_files) => {
+                            stale_files = self
+                                .check_related_files_intersection(related_files, &changed_files);
+                            // Only set is_unhealthy from file staleness if tests didn't already fail
+                            if !is_unhealthy {
                                 is_unhealthy = !stale_files.is_empty();
                             }
-                            Err(_) => {
-                                // If diff fails, be permissive
+                        }
+                        Err(_) => {
+                            // If diff fails, be permissive
+                            if !is_unhealthy {
                                 is_unhealthy = false;
                             }
                         }
                     }
-                } else {
-                    // Legacy: no repo_root or empty related_files means strict
-                    // equality check (UAT commit must equal HEAD).
-                    let uat_commit_not_head = uat_commit.as_deref() != Some(self.head_sha.as_str());
-                    is_unhealthy = uat_commit_not_head;
                 }
+            } else if !is_unhealthy {
+                // Legacy: no repo_root or empty related_files means strict
+                // equality check (UAT commit must equal HEAD).
+                let uat_commit_not_head = uat_commit.as_deref() != Some(self.head_sha.as_str());
+                is_unhealthy = uat_commit_not_head;
             }
 
             if is_unhealthy {
@@ -1141,6 +1275,7 @@ impl Dashboard {
                     test_run_commit,
                     test_run_at,
                     stale_files,
+                    vec![],
                 );
             }
         }
@@ -1154,6 +1289,7 @@ impl Dashboard {
             None,
             None,
             None,
+            vec![],
             vec![],
         )
     }
@@ -1274,6 +1410,11 @@ impl Dashboard {
                 obj["stale_related_files"] = json!(story.stale_related_files.clone());
             }
 
+            // Include not_healthy_reason only if non-empty (story 13)
+            if !story.not_healthy_reason.is_empty() {
+                obj["not_healthy_reason"] = json!(story.not_healthy_reason.clone());
+            }
+
             story_objects.push(obj);
         }
 
@@ -1329,6 +1470,35 @@ impl Dashboard {
 
         if let Some(ref uat_signed_at) = target.uat_signed_at {
             output.push_str(&format!("Latest UAT signed at: {}\n", uat_signed_at));
+        }
+
+        // Offending ancestors section (story 13)
+        let offending_ancestor_ids: Vec<u32> = target
+            .not_healthy_reason
+            .iter()
+            .filter_map(|reason| {
+                if let Some(id_str) = reason.strip_prefix("ancestor:") {
+                    id_str.parse::<u32>().ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !offending_ancestor_ids.is_empty() {
+            let offenders_str = offending_ancestor_ids
+                .iter()
+                .map(|&id| {
+                    let ancestor = all_stories.iter().find(|s| s.id == id);
+                    if let Some(anc) = ancestor {
+                        format!("{} ({})", id, anc.health.as_str())
+                    } else {
+                        format!("{}", id)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            output.push_str(&format!("Offending ancestors: {}\n", offenders_str));
         }
 
         // Ancestors section
