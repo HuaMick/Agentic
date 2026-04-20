@@ -1,0 +1,760 @@
+id: 10
+title: Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown
+outcome: |
+  A developer runs `agentic stories health` and sees only the frontier
+  of not-healthy work — stories nothing upstream is blocking — each row
+  showing its DAG depth and how many downstream stories it blocks, so
+  the dashboard points at what can be started right now instead of
+  listing the whole corpus.
+status: proposed
+patterns:
+- standalone-resilient-library
+acceptance:
+  tests:
+  - file: crates/agentic-dashboard/tests/health_frontier_default_hides_descendants_of_not_healthy.rs
+    justification: |
+      Proves the frontier-filter invariant: given a fixture `stories/`
+      directory where `A` (`proposed`) is depended on by `B`
+      (`under_construction`), the default view renders `A` but does
+      NOT render `B` — because `B` has a not-healthy ancestor (`A`),
+      which means starting work on `B` is blocked until `A` is done.
+      Without this, the default view degenerates to "every
+      not-healthy story" and the operator is back to a flat list of
+      work they cannot start.
+
+  - file: crates/agentic-dashboard/tests/health_frontier_default_hides_healthy_stories.rs
+    justification: |
+      Proves the healthy-hidden rule: given a fixture corpus with
+      both `healthy` and not-healthy stories, the default view emits
+      zero rows for any `healthy` story (neither in the table nor in
+      the `--json` `stories[]` array). Without this the dashboard
+      grows healthy noise and the attention-focused shape the
+      frontier was built for is diluted to "a list with most of the
+      stories the operator does not need to look at today."
+
+  - file: crates/agentic-dashboard/tests/health_frontier_default_shows_proposed.rs
+    justification: |
+      Proves the status-range rule: a story whose status is
+      `proposed` and whose ancestry is entirely `healthy` (or empty)
+      appears in the default view. Without this, new work that has
+      not yet been started is invisible until it enters
+      `under_construction` — the classic "my roadmap is not in my
+      dashboard" gap the frontier view is supposed to close.
+
+  - file: crates/agentic-dashboard/tests/health_lvl_uses_longest_path_to_dag_leaf.rs
+    justification: |
+      Proves the `lvl` computation: given a fixture where story `X`
+      has two descendant paths to the DAG leaves — one of length 1
+      and one of length 3 — `X.lvl == -3`, not `-1`. The LONGEST
+      path to a leaf wins. Without this, two stories with different
+      "how much work unblocks" signals get the same `lvl` number and
+      the primary sort (`lvl` ascending) lies about which frontier
+      story unblocks the most downstream work.
+
+  - file: crates/agentic-dashboard/tests/health_blast_radius_column.rs
+    justification: |
+      Proves the `↓` column contract: for a frontier story `S` whose
+      immediate downstreams are `[A, B]` where `B` itself has two
+      further downstreams `[C, D]`, `S`'s row lists immediate
+      downstream ids `A, B` and carries `blocks_total == 4` (the
+      transitive descendant set `{A, B, C, D}`). A leaf frontier
+      story renders with `blocks_total == 0`. Without this, the
+      operator cannot distinguish a frontier story that unblocks one
+      leaf from one that unblocks a whole subtree — which is the
+      primary signal "fix this first" depends on.
+
+  - file: crates/agentic-dashboard/tests/health_expand_shows_full_not_healthy_subtree.rs
+    justification: |
+      Proves `--expand` semantics: running the dashboard with
+      `--expand` against the frontier fixture from
+      `health_frontier_default_hides_descendants_of_not_healthy` emits
+      rows for EVERY not-healthy story (frontier + descendants of
+      frontier stories that are themselves not healthy), NOT only
+      the frontier. Healthy stories remain hidden. Without this, an
+      operator diagnosing "why is my frontier root deep" has no
+      view between "frontier only" and "everything."
+
+  - file: crates/agentic-dashboard/tests/health_expand_rejects_with_selector.rs
+    justification: |
+      Proves argv validation: `--expand` combined with any positional
+      selector (`<id>`, `+<id>`, `<id>+`, `+<id>+`) is rejected at
+      argv-parse time with a typed error and exit code 2 — the two
+      mechanisms select row sets in different ways and combining them
+      has no coherent meaning. Without this, the CLI accepts argv it
+      cannot faithfully honour and the operator gets a silently
+      surprising row set.
+
+  - file: crates/agentic-dashboard/tests/health_all_mode_renders_flat_list.rs
+    justification: |
+      Proves the escape hatch: running the dashboard with `--all`
+      renders one row per story (healthy included, frontier and
+      non-frontier alike), matching the row set story 3's healthy
+      dashboard used to render by default. Without this, the flat-
+      list view that tooling and muscle memory depend on has no
+      path — the default shift would be a capability removal, not a
+      lens shift.
+
+  - file: crates/agentic-dashboard/tests/health_all_rejects_with_selector.rs
+    justification: |
+      Proves the mutual-exclusion rule: `--all` combined with any
+      positional selector (`<id>`, `+<id>`, `<id>+`, `+<id>+`) OR
+      with `--expand` is rejected at argv-parse time with a typed
+      error and exit code 2. Selectors already define the row set;
+      `--expand` already defines a different row set; layering
+      `--all` over either makes the command's intent unreadable.
+      Without this the CLI accepts argv it cannot faithfully honour.
+
+  - file: crates/agentic-dashboard/tests/health_drilldown_subtree_view.rs
+    justification: |
+      Proves the subtree drilldown: `Dashboard::drilldown(<id>)`
+      returns a view containing the target story's row PLUS a
+      topologically sorted list of its transitive ancestors (stories
+      it depends_on — direct and transitive) AND its transitive
+      descendants (stories that depend_on it — direct and
+      transitive). Each entry carries id, title, and classified
+      health. Without this, drilldown is still the story-3 single-
+      row view and the "lineage view" half of the epic objective is
+      unshipped.
+
+  - file: crates/agentic-dashboard/tests/health_selector_plus_id_lists_ancestors.rs
+    justification: |
+      Proves the `+<id>` selector at the library boundary:
+      `Dashboard::list_selector("+<id>")` returns the target story
+      plus every transitive ancestor (stories it depends_on
+      recursively) in topological order (dependencies before dependents),
+      exclusive of any descendant. Without this, operators have no
+      surgical "show me this story's upstream" slice and the dbt-style
+      lineage grammar the epic commits to is unshipped at the library
+      boundary where the CLI wires plug in.
+
+  - file: crates/agentic-dashboard/tests/health_selector_id_plus_lists_descendants.rs
+    justification: |
+      Proves the `<id>+` selector at the library boundary:
+      `Dashboard::list_selector("<id>+")` returns the target story plus
+      every transitive descendant (stories that depend_on it
+      recursively), in topological order (dependencies before
+      dependents), exclusive of any ancestor. Without this, the
+      selector grammar is asymmetric — operators could look upstream
+      but not downstream, and story 12's CI-subtree use case has no
+      shared primitive to reuse.
+
+  - file: crates/agentic-dashboard/tests/health_selector_plus_id_plus_lists_full_subtree.rs
+    justification: |
+      Proves the `+<id>+` selector at the library boundary:
+      `Dashboard::list_selector("+<id>+")` returns the target story
+      plus every transitive ancestor AND every transitive descendant,
+      deduplicated, in a single topological order. Without this, the
+      third leg of the dbt grammar is unshipped and the drilldown view
+      (which uses the same traversal internally) has no tested
+      primitive to share.
+
+  - file: crates/agentic-dashboard/tests/health_selector_cycle_rejected.rs
+    justification: |
+      Proves the invariant defence: given a fixture `stories/`
+      directory containing a hand-constructed cycle (A depends_on B,
+      B depends_on A — which story 6's loader is supposed to reject at
+      parse time), the dashboard surfaces the loader's typed
+      CycleError without panicking, without rendering partial
+      frontier data that would be meaningless, and without crashing
+      the dashboard process as a whole. Without this, a future
+      regression in the loader's cycle check would produce either a
+      panic trace or a silently-wrong frontier — both worse than a
+      loud failure.
+
+  - file: crates/agentic-dashboard/tests/health_selector_unknown_id.rs
+    justification: |
+      Proves clean failure on bad input at the library boundary:
+      `Dashboard::list_selector("+99999")` (where 99999 has no
+      corresponding `stories/99999.yml`) returns a typed
+      `DashboardError::UnknownStory` naming the missing id, does not
+      panic, and does not return a partial result set. Without this,
+      CLI wrappers (and story 12's CI selector caller) get either a
+      crash or an empty list indistinguishable from "no ancestors" —
+      either one is a worse operator experience than a named error.
+
+  - file: crates/agentic-cli/tests/health_frontier_default_via_binary.rs
+    justification: |
+      Proves the frontier default reaches the operator through the
+      binary: running `agentic stories health` against a fixture
+      `stories/` directory with a mixed-status DAG and an empty
+      tempdir store exits 0 and writes only the frontier rows to
+      stdout, in the documented sort order (`lvl` ascending, story
+      id ascending as tiebreaker). Without this, the library-level
+      claim is a library-level claim only — the argv-to-library
+      wire could quietly pass `all: true` (or its future equivalent)
+      and the operator would never notice.
+
+  - file: crates/agentic-cli/tests/health_all_flag_renders_flat_list.rs
+    justification: |
+      Proves the `--all` flag is plumbed through the binary: running
+      `agentic stories health --all` against the same fixture emits
+      rows for every story (healthy, frontier, and in-between alike),
+      matching the row set the story-3 dashboard used to emit by
+      default. Without this the escape hatch exists in the library
+      but not at the hand operators and scripts type on.
+
+  - file: crates/agentic-cli/tests/health_selectors_via_binary.rs
+    justification: |
+      Proves the selector argv reaches the library through the binary:
+      `agentic stories health +<id>`, `agentic stories health <id>+`,
+      and `agentic stories health +<id>+` each emit the row set the
+      matching library-level selector test pins down, and each exits 0.
+      `agentic stories health +99999` (unknown id) exits non-zero with
+      a named error. Without this, the dbt-style grammar is a Rust
+      API only and the CLI surface the epic commits to is unshipped.
+
+  uat: |
+    Goal: convince yourself that the dashboard's default view is the
+    frontier of not-healthy work (with `healthy` stories hidden and
+    descendants-of-not-healthy hidden), that each frontier row
+    carries `lvl` (longest downward path) and a blast-radius column
+    (immediate downstream ids + transitive blocks count), that
+    `--expand` shows the full not-healthy subtree, that `--all`
+    restores the flat list, that `--all` + selector and `--all` +
+    `--expand` and `--expand` + selector are all rejected, that
+    drilldown into any story shows its DAG subtree, and that the
+    `+<id>` / `<id>+` / `+<id>+` selector grammar works through the
+    binary.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status` and
+         confirm the working tree is clean.
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the just-
+         installed binary.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. On a scratch branch (so no real YAML is disturbed), arrange
+         a small corpus whose DAG and statuses you control — e.g.
+         seven stories where A (`healthy`) is depended on by B
+         (`proposed`), B is depended on by C (`under_construction`),
+         D (`healthy`) is depended on by E (`proposed`) with no
+         descendants, F (`healthy`) stands alone, and G (`proposed`)
+         depends on F. Record, by eye, which stories you expect the
+         frontier to include: not-healthy AND no not-healthy
+         ancestor — here that is B, E, G. C is not-healthy but its
+         ancestor B is also not-healthy, so C is hidden in the
+         default view.
+
+    Frontier-default walkthrough:
+      5. Run `agentic stories health --store "$AGENTIC_STORE"`.
+         Observe:
+           - Process exits 0.
+           - The table's rows are exactly the frontier set from
+             step 4 (B, E, G in the example). No healthy story
+             appears. No descendant-of-not-healthy (C) appears.
+           - The column header row includes at minimum:
+             `ID | Title | Health | lvl | ↑ | ↓`. Exact column
+             labels are pinned by the library-level tests; confirm
+             by eye that a depth column, an upstream column, and a
+             downstream column exist.
+           - Row order: primary sort `lvl` ascending (most-negative
+             first — the biggest-blast frontier stories are at the
+             top). Secondary sort: story id ascending. Confirm this
+             by eye against your step-4 DAG.
+
+    Expand walkthrough:
+      6. Run `agentic stories health --expand --store
+         "$AGENTIC_STORE"`. Observe:
+           - Every not-healthy story appears (the frontier AND
+             their not-healthy descendants — here B, C, E, G).
+           - Healthy stories (A, D, F) still do NOT appear.
+           - The columns are the same as the frontier view.
+           - The top-level `view` field in `--json` output is
+             `"expand"` (run with `--json` to confirm).
+
+    Flat-list escape hatch walkthrough:
+      7. Run `agentic stories health --all --store "$AGENTIC_STORE"`.
+         Observe:
+           - Every story id from step 4 appears as a row (A through
+             G, healthy and not-healthy alike).
+           - The row set matches what story 3's dashboard used to
+             emit by default.
+
+    Mutual-exclusion checks:
+      8. Run `agentic stories health --all B --store
+         "$AGENTIC_STORE"` (positional selector plus `--all`).
+         Observe: process exits 2; stderr names the conflict.
+      9. Run `agentic stories health --all --expand --store
+         "$AGENTIC_STORE"`. Observe: process exits 2; stderr names
+         the conflict.
+     10. Run `agentic stories health --expand +B --store
+         "$AGENTIC_STORE"`. Observe: process exits 2; stderr names
+         the conflict.
+
+    Blast-radius walkthrough:
+     11. For one of the frontier rows (e.g. B), read its row's `↓`
+         cell and `blocks_total` value by eye. In the step-4 example
+         B's immediate downstream is C and C has no further
+         downstreams, so B's row should show `↓: C` with
+         `blocks_total: 1` (or the rendering the library-level test
+         pins down — exact syntax may vary; confirm "immediate ids
+         + a transitive count" are both present).
+
+    Drilldown / lineage walkthrough:
+     12. Run `agentic stories health B --store "$AGENTIC_STORE"`.
+         Observe:
+           - Output is an expanded view, not the table.
+           - An "Ancestors" section lists A with its classified
+             health.
+           - A "Descendants" section lists C with its classified
+             health.
+           - `<id>` positional with a non-existent id exits
+             non-zero with a named error (same as story 3's
+             drilldown behaviour).
+
+    Selector grammar walkthrough:
+     13. Run in turn:
+           - `agentic stories health +B --store "$AGENTIC_STORE"`
+             and confirm output contains B plus A (the ancestor),
+             topologically ordered, and NO descendants.
+           - `agentic stories health B+ --store "$AGENTIC_STORE"`
+             and confirm output contains B plus C (the descendant),
+             topologically ordered, and NO ancestors.
+           - `agentic stories health +B+ --store "$AGENTIC_STORE"`
+             and confirm output contains A, B, C, deduplicated, in
+             a single topological order.
+           - `agentic stories health +99999 --store
+             "$AGENTIC_STORE"` (an id that does not exist). Process
+             exits non-zero; stderr names the missing id; no panic.
+
+    Cleanup:
+     14. `git checkout -- stories/` (or `git reset --hard
+         <pre-scratch-sha>` on the scratch branch) to revert the
+         fixture corpus.
+     15. `rm -rf "$AGENTIC_STORE"` to clear the ephemeral store.
+     16. If you want the installed binary gone from your toolchain:
+         `cargo uninstall agentic-cli`.
+guidance: |
+  This story owns the read-side shift from "flat list" to "DAG-primary
+  lens": the frontier-of-not-healthy default view, the `lvl`
+  (longest-path depth) and blast-radius (`↓` + transitive count)
+  columns, the `--expand` view over the whole not-healthy subtree,
+  the subtree drilldown, and the dbt-style selector grammar. It does
+  NOT touch the four-status classifier (story 3 owns that — this
+  story READS the classification per story and composes over it),
+  does NOT touch staleness scoping (story 9 owns file-based
+  staleness), does NOT touch ancestor inheritance of `unhealthy`
+  (story 13 owns that — see "Relationship to story 13" below), does
+  NOT touch the UAT gate's signing semantics (story 11 owns the
+  ancestor-health refusal), and does NOT run any tests (story 12
+  owns CI subtree execution). Every DAG-primary concern that is
+  READ-ONLY and VIEW-SHAPED lives here; write-side concerns and
+  classifier-rule concerns live in their own stories.
+
+  Why this is one story and not four (frontier, expand, drilldown,
+  selectors).
+    All four observables share one precondition (a parsed story
+    corpus with a valid DAG) and one observable surface (the
+    dashboard's rendered output, in table and `--json` modes). The
+    blast-radius computation uses the same descendant traversal
+    `+<id>+` and drilldown use. `--expand` is the specific
+    projection that relaxes the frontier filter from
+    "frontier-only" to "every not-healthy story"; they share all
+    their machinery except the filter. The frontier default is the
+    specific projection where healthy stories and descendants-of-
+    not-healthy are filtered out. Splitting by feature would
+    produce four stories whose tests share a fixture generator,
+    whose guidance would read as four slices of the same rebuild
+    brief, and whose UATs would repeat the same setup verbatim —
+    the fragmentation anti-pattern the journey principle warns
+    against. The selector grammar plus the descendant/ancestor
+    traversal primitive is the shared infrastructure; frontier,
+    expand, drilldown, and flat-list are all views onto it.
+
+  Why this is a separate story from 3 (the flat dashboard).
+    Story 3 is `healthy` today on a flat-list contract. This story
+    replaces the default view's shape. That is a classifier-shape
+    change, not a classifier-rule change — the rules story 3 pinned
+    (the four-status classification per story) are untouched here.
+    Folding this story into story 3 would retroactively widen
+    story 3's scope across a dozen new tests and a different lens;
+    the UAT walkthrough above has a distinct starting context
+    (building a fixture with non-trivial DAG shape and mixed
+    statuses) from story 3's four-status walkthrough. Per the
+    splitting-rule's tiebreakers (distinct starting contexts,
+    separate rebuild briefs), this is a separate story. Story 3's
+    YAML will need a small guidance update AFTER this story ships
+    healthy — performed by a subsequent story-writer pass, which
+    will auto-revert story 3 to `under_construction`. That is
+    correct behaviour; attempting to pre-edit story 3 at authoring
+    time would re-open it prematurely.
+
+  Why this is a separate story from 9 (related_files staleness).
+    Story 9 scopes per-story staleness to `related_files` globs.
+    That signal is a classifier INPUT: it determines whether a
+    story's own classification is `healthy` or `unhealthy`. This
+    story is a classifier COMPOSER: it groups and filters
+    already-classified stories into a view shape. Story 9 (an
+    input) and this story (a view) compose cleanly — a story story
+    9 classifies `unhealthy` because a related file changed appears
+    in this story's frontier if nothing upstream is also
+    not-healthy.
+
+  Why this is a separate story from 13 (transitive not-healthy
+  inheritance).
+    Story 13 changes the CLASSIFIER: a story inherits `unhealthy`
+    from any not-healthy ancestor. That is a rule change to story
+    3's per-story classification. This story changes the VIEW:
+    which rows appear. They are distinguishable observables.
+    Story 13's rule (ancestor inheritance) and this story's
+    frontier filter compose — when story 13 ships, a story whose
+    ancestors are not-healthy classifies as `unhealthy` itself, but
+    the frontier filter still hides it from the default view
+    (because it has a not-healthy ancestor). The two mechanisms
+    are orthogonal; neither subsumes the other.
+
+  Frontier definition.
+    A story `S` is on the FRONTIER if both:
+      (a) `S`'s classified health is NOT `healthy` (i.e. it is
+          `proposed`, `under_construction`, `unhealthy`, or
+          `error`).
+      (b) Every transitive ancestor of `S` (every story `S`
+          depends_on, direct and transitive) classifies as
+          `healthy`.
+    Equivalently: the frontier is the set of not-healthy stories
+    with no not-healthy upstream. These are the stories an operator
+    can START WORK ON RIGHT NOW without first fixing something
+    upstream. The frontier is recomputed per render — no cache —
+    since classification depends on store contents that change
+    between calls.
+
+    The computation is a single pass over the parsed corpus:
+    classify every story (reusing the same classifier the `--all`
+    flat-list view uses), then include story `S` iff `S` is not
+    healthy AND every ancestor in `S.depends_on` (transitively)
+    classifies healthy. Ancestor traversal is bounded by the corpus
+    size; re-deriving per render is acceptable.
+
+  `lvl` computation.
+    For each story `S`, `lvl(S)` is 0 if `S` is a DAG leaf (no
+    other story's `depends_on` contains `S.id`). Otherwise,
+    `lvl(S) = -1 - max(lvl(D) for D in immediate_downstreams(S))`.
+    Equivalently: the LONGEST path from `S` down to any DAG leaf,
+    measured in edges, negated. Longest, not shortest — the
+    operator wants to know "how many layers of downstream work
+    does fixing this unblock," and the longest path is the
+    pessimistic (and useful) answer.
+
+    The sign convention (zero at leaves, negative deeper) is a
+    deliberate choice so the default sort (`lvl` ascending) surfaces
+    the deepest-blast stories first without the operator having to
+    remember which direction is "bigger." Tests pin this.
+
+    Implementation: a reverse DFS from each DAG leaf, memoized by
+    story id; O(V + E) across the whole corpus.
+
+  Blast-radius computation.
+    For each story in the rendered view:
+      - `↑` cell: the comma-separated list of IDS in `S.depends_on`
+        (the immediate upstream). No transitive expansion — this is
+        a navigation aid, not a lineage listing. For a selector-free
+        frontier row this will typically be healthy ancestors (since
+        if any ancestor were not-healthy, `S` would not be on the
+        frontier) — they appear anyway as context.
+      - `↓` cell: the comma-separated list of IDS in
+        `immediate_downstreams(S)` (stories whose `depends_on`
+        contains `S.id` directly), followed by a rendering of
+        `blocks_total` = the size of the transitive descendant set
+        of `S`, EXCLUDING `S` itself. When `S` is a leaf, the cell
+        renders with `blocks_total == 0`; tests pin the exact
+        rendering. What matters is that "leaf" is visually
+        distinguishable from "has downstreams."
+
+    The precision of `blocks_total` is exact — operators comparing
+    two frontier stories want the real number, and computing it is
+    O(V + E) so there is no cost reason to round.
+
+  Sort order for frontier and `--expand` views.
+    Primary: `lvl` ascending (most-negative first — biggest-blast
+    stories at the top). Secondary: story id ascending. Stable,
+    deterministic, byte-identical output across runs against the
+    same corpus. The primary key is `lvl`, not `blocks_total`,
+    because `lvl` measures "how deep is this in the graph"
+    (architecturally central work) and `blocks_total` measures
+    "how wide is the impact" (can be dominated by fan-out at a
+    single layer) — depth is the better primary signal.
+
+  `--expand` semantics.
+    `--expand` relaxes the frontier filter's condition (b): it
+    shows EVERY not-healthy story, not only those with healthy
+    ancestry. Condition (a) — `healthy` stories still hidden —
+    stays. Same columns (`id | title | health | lvl | ↑ | ↓`),
+    same sort order. Useful for diagnosing "I have a frontier root
+    at lvl=-3, what's in that subtree?" without switching to
+    `--all` (which adds every healthy story as noise).
+
+    `--expand` is mutually exclusive with `--all` and with every
+    positional selector. Argv-parse-time rejection, exit code 2.
+    Rationale: each mechanism selects a different row set and
+    combining them has no coherent meaning; the CLI refuses rather
+    than silently picking one and ignoring the other.
+
+  `--all` semantics.
+    `--all` restores story 3's original row set — one row per
+    story regardless of DAG position, classification, or frontier
+    membership. Same columns as the frontier view; `lvl` and
+    blast-radius are computed for every row. The flag is mutually
+    exclusive with positional selectors and with `--expand`; rejected
+    at argv-parse time (exit code 2) when combined. `--all` + `--json`
+    is permitted.
+
+  Subtree drilldown.
+    `agentic stories health <id>` renders an expanded single-story
+    view that includes three sections:
+
+      - Target: one row for `<id>` itself (id, title, classified
+        health, failing tests, stale related-file list, UAT commit —
+        the same fields story 3's drilldown renders).
+      - Ancestors: every story in `<id>`'s transitive ancestry,
+        topologically ordered (dependencies before dependents).
+        Each entry shows id, title, and classified health.
+      - Descendants: every story whose `depends_on` contains `<id>`
+        directly or transitively, topologically ordered. Same shape
+        as ancestors. When empty, render the section header with
+        "(none)" so an operator can distinguish "no descendants" from
+        "the section got dropped accidentally."
+
+    This view is the CLI analogue of a dbt model-lineage view and
+    uses the same traversal the `+<id>+` selector pins down.
+
+  Selector grammar (the dbt grammar, verbatim).
+    The dashboard accepts three selector shapes as its positional
+    argument:
+
+      +<id>    = the target story plus every transitive ancestor
+                 (stories it depends_on, recursively), topologically
+                 ordered, exclusive of any descendant.
+      <id>+    = the target plus every transitive descendant (stories
+                 that depend_on it, recursively), topologically
+                 ordered, exclusive of any ancestor.
+      +<id>+   = the target plus both ancestors and descendants,
+                 deduplicated, in a single topological order.
+      <id>     = drilldown view (the three-section rendering above).
+                 Not a list selector — this is story 3's existing
+                 contract, preserved unchanged. Retained here so the
+                 bareword case stays the subtree drilldown, not a
+                 one-row list.
+
+    All selectors are positional. No `--selector` flag. Whitespace
+    inside the argument is rejected. An unknown id in any selector
+    returns `DashboardError::UnknownStory` naming the id. A cycle in
+    the loaded corpus (which story 6's loader should reject at parse
+    time, but which the dashboard is allowed to encounter if story 6
+    regresses) surfaces as `DashboardError::Cycle` with the offending
+    edge named. The dashboard does NOT attempt to render partial
+    frontier data when a cycle is detected — fail loudly, per the
+    "allowed to fail loudly" list story 3's guidance enumerates.
+
+    Exit codes follow the same contract story 3 inherited from
+    story 1: 0 on successful render, non-zero with stderr message
+    on UnknownStory / Cycle / store unreachable / stories directory
+    missing / mutually-exclusive flag combination.
+
+  `--json` contract extension.
+    The top-level shape inherits story 3's schema and extends it:
+
+      ```json
+      {
+        "stories": [
+          {
+            "id": 10,
+            "title": "...",
+            "health": "proposed",
+            "lvl": -2,
+            "upstream": [3, 6],
+            "downstream": [13],
+            "blocks_total": 4,
+            "failing_tests": [],
+            "uat_commit": null,
+            "uat_signed_at": null,
+            ...
+          }
+        ],
+        "summary": { ... },
+        "view": "frontier" | "expand" | "all" | "ancestors" |
+                "descendants" | "subtree" | "drilldown"
+      }
+      ```
+
+    Per-story additions (all four present on every row in every
+    view — simpler for consumers than per-view variance):
+      - `lvl`: integer, <= 0. Zero for DAG leaves; negative for
+        stories with downstreams; computed via longest path to leaf.
+      - `upstream`: array of ids. `S.depends_on`, verbatim.
+      - `downstream`: array of ids. Immediate downstreams
+        (stories whose `depends_on` contains `S.id` directly).
+        Sorted ascending for determinism.
+      - `blocks_total`: integer >= 0. Transitive descendant count,
+        excluding `S` itself.
+    The `view` key is new and documents which projection the JSON
+    represents, so downstream tooling (future web UI, future CI
+    status checks) does not have to scrape argv to know what it
+    got.
+
+  Topological ordering.
+    Stable: ties are broken by ascending story id. This means two
+    renders against the same corpus produce byte-identical output.
+    Deterministic rendering matters for test assertions and for
+    diffing dashboard output across commits.
+
+  Failure modes the dashboard tolerates.
+    Same as story 3: one malformed story YAML does not crash the
+    render; the bad story renders as an `error` row with a short
+    reason in `Failing tests`. An `error` ancestor is treated as
+    not-healthy for frontier purposes — descendants of an `error`
+    story are hidden from the frontier view, just as descendants
+    of an `unhealthy` story are. The `error` story itself appears
+    on the frontier if its own ancestors are healthy.
+
+  Failure modes the dashboard does NOT tolerate.
+    A cycle in `depends_on` (loader regression), an unknown id in a
+    selector, an unreachable store, a missing `stories/` directory,
+    `--all` + selector, `--all` + `--expand`, `--expand` + selector.
+    Exit non-zero with a clear message.
+
+  CLI shape — argv for `agentic stories health` (authoritative,
+  amends story 3).
+    agentic stories health [<selector>] [--all] [--expand]
+                            [--json] [--store <path>]
+
+    `<selector>` is positional and optional. Accepted forms:
+      <id>          — drilldown (three-section view, story 3 behaviour
+                      preserved).
+      +<id>         — ancestors list.
+      <id>+         — descendants list.
+      +<id>+        — subtree list.
+    Absence of `<selector>`, `--all`, and `--expand` = frontier
+    default (this story's new shape).
+    `--expand` + no selector = full not-healthy subtree view.
+    `--all` + no selector = flat list (story 3's old default, now the
+    escape hatch).
+    `--all` + any selector = rejected (argv error, exit 2).
+    `--all` + `--expand` = rejected (argv error, exit 2).
+    `--expand` + any selector = rejected (argv error, exit 2).
+    `--json` selects JSON output instead of the table and is
+    compatible with every non-rejected combination.
+
+  Relationship to the patterns.
+    `standalone-resilient-library` DOES apply here the same way it
+    applies to story 3's dashboard — actually, via the same library
+    (`agentic-dashboard`), which continues to be standalone-
+    resilient. No forbidden dependency is added by this story. The
+    standalone-resilience test from story 3 continues to cover the
+    crate; no new standalone test is added because the dependency
+    floor is unchanged.
+
+    `fail-closed-on-dirty-tree` does NOT apply — the dashboard is a
+    reader. Selector evaluation, frontier filtering, `lvl` and
+    blast-radius computation do not write evidence; the pattern's
+    scope explicitly excludes read-only commands.
+
+  Selector grammar — inlined here, extraction deferred.
+    Story 12 also references the `+<id>` / `<id>+` / `+<id>+`
+    grammar. That is the 2+ threshold for extracting to a pattern
+    (`dag-selector-grammar.yml`). We deliberately DO NOT extract now:
+    both stories are `proposed`, and the pattern-authoring rule
+    "premature extraction — patterns created from 0 or 1 stories
+    drift and go stale" applies — a pattern extracted from two
+    unshipped drafts has the same drift risk as one extracted from
+    zero. A follow-up curator pass extracts the pattern from the two
+    healthy stories once both ship. Story 12's guidance should
+    reference this story's "Selector grammar" section by link rather
+    than re-stating the grammar.
+
+  Deferred neighbours — explicitly NOT in this story.
+    - Transitive not-healthy classification. "A story is
+      `unhealthy` if any ancestor is not `healthy`" is a
+      classifier-rule change, not a view-shape change. Story 13
+      owns it (authored alongside this story; see
+      `epics/live/dag-primary-lens/epic.yml`). This story's
+      frontier filter composes over whatever classification story
+      13 produces — when story 13 ships, a descendant of an
+      `unhealthy` ancestor classifies as `unhealthy` itself, but
+      the frontier rule still hides it because its ancestor is
+      also not-healthy.
+    - Graph visualisation (ASCII tree render, SVG export).
+      Deliberately out of scope. The drilldown view above lists
+      ancestors and descendants flat in topological order; visual
+      graph rendering is a future ergonomics story once the lens
+      itself is proven.
+    - Glyph / colour rendering for `lvl` and blast-radius columns.
+      How the columns render (colour, glyph, ASCII arrows vs
+      unicode) is an implementation choice and not part of the
+      contract. Tests assert on values and positions, not
+      decoration.
+
+  CLI-wide decisions inherited from story 1.
+    Parser choice, allowed-dependency list for `agentic-cli`, store-
+    path default/override, SurrealStore-not-MemStore — all inherited
+    unchanged from story 1. Do not restate.
+
+  Test file locations.
+    Library-level tests (fourteen tests:
+    `health_frontier_default_hides_descendants_of_not_healthy.rs`,
+    `health_frontier_default_hides_healthy_stories.rs`,
+    `health_frontier_default_shows_proposed.rs`,
+    `health_lvl_uses_longest_path_to_dag_leaf.rs`,
+    `health_blast_radius_column.rs`,
+    `health_expand_shows_full_not_healthy_subtree.rs`,
+    `health_expand_rejects_with_selector.rs`,
+    `health_all_mode_renders_flat_list.rs`,
+    `health_all_rejects_with_selector.rs`,
+    `health_drilldown_subtree_view.rs`,
+    `health_selector_plus_id_lists_ancestors.rs`,
+    `health_selector_id_plus_lists_descendants.rs`,
+    `health_selector_plus_id_plus_lists_full_subtree.rs`,
+    `health_selector_cycle_rejected.rs`,
+    `health_selector_unknown_id.rs`) live under
+    `crates/agentic-dashboard/tests/` as Rust integration tests.
+    They use `MemStore` and a fixture `stories/` directory with
+    hand-built DAG shape (roughly seven stories with declared
+    `depends_on` edges and mixed `status` values is sufficient to
+    exercise frontier, expand, longest-path `lvl`, and
+    blast-radius).
+
+    Binary-level tests (three tests:
+    `health_frontier_default_via_binary.rs`,
+    `health_all_flag_renders_flat_list.rs`,
+    `health_selectors_via_binary.rs`) live under
+    `crates/agentic-cli/tests/` as Rust integration tests, driven
+    via `assert_cmd`. They construct a `tempfile::TempDir` for
+    `--store` and a separate `TempDir` seeded with a minimal
+    `stories/` directory and a small git repo, and invoke `agentic`
+    with its full argv. None touch the repo's real `stories/`
+    directory.
+
+  Relationship to story 3.
+    This story extends story 3's read surface. When this story ships
+    `healthy`, story 3's YAML content becomes stale (its current
+    `acceptance.uat` walks through the flat list as the default;
+    that is no longer true). The fix is a small guidance-and-UAT
+    edit on story 3 by a subsequent story-writer pass after THIS
+    story passes UAT — auto-reverting story 3 to
+    `under_construction` per the system design, which is correct
+    behaviour. Pre-editing story 3 at this story's authoring time
+    would re-open story 3 prematurely.
+
+  Relationship to story 6.
+    This story relies on story 6's DAG check at load time for its
+    cycle-rejection contract. A regression in story 6 would surface
+    here as the `health_selector_cycle_rejected` test failing loudly
+    — which is the intended coupling.
+
+  Relationship to story 13.
+    Independent but compositional. Story 13 adds ancestor-inherited
+    `unhealthy` to the classifier (a rule change). This story's
+    frontier filter, `lvl` column, and blast-radius column all
+    compose over whatever classification the story-3 + story-9 +
+    story-13 stack produces. No contract conflict. Shipping order
+    within the epic is: this story ships the view, story 13 then
+    tightens the classification the view reads — the view
+    immediately reflects the richer classification without
+    re-authoring.
+depends_on:
+- 3
+- 6
+related_files:
+- crates/agentic-dashboard/src/**
+- crates/agentic-cli/src/**
+- crates/agentic-story/src/**

@@ -58,6 +58,10 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
 | 7 | test-builder meta-story — red-state evidence is a committable atomic | proposed |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
+| 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | proposed |
+| 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | proposed |
+| 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | proposed |
+| 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | proposed |
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather
@@ -65,5 +69,22 @@ than along user journeys — and that story 8's outcome explicitly joined
 two distinct observables (signing a verdict AND reading the dashboard).
 See each story's `acceptance.tests` for the library-level vs. binary-level
 test split.
+
+Stories 10, 11, 12, and 13 form the `dag-primary-lens` epic
+(`epics/live/dag-primary-lens/epic.yml`). They share a unifying
+objective — shift the system's mental model from "flat list" to
+"DAG with frontier-of-work, blast-radius, and ancestor-aware
+classification" — but have distinct observables (dashboard view
+shape, UAT refusal, CI test selection, classifier rule) and
+distinct commands (`agentic stories health`, `agentic uat`,
+`agentic stories test`, and the classifier change surfaced
+through the dashboard), so the epic captures the direction while
+four stories capture the executable contracts. Stories 10 and 13
+both touch the dashboard's read path but at different layers
+(story 10 = view shape; story 13 = classifier rule); stories 11
+and 13 both enforce an "ancestors must be healthy" rule but at
+opposite sides of the store (story 11 = write / UAT gate;
+story 13 = read / classifier). Each story's guidance documents
+the split rationale against the splitting-rule.
 
 Check each `<id>.yml` for the authoritative status, outcome, and acceptance.

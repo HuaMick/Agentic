@@ -1,0 +1,451 @@
+id: 12
+title: Scope `agentic stories test <selector>` runs to a DAG subtree
+outcome: |
+  A CI runner (or a developer) runs `agentic stories test +<id>+` and
+  executes the acceptance-test suites only for the stories in the
+  selected DAG subtree, so a commit touching one leaf of the corpus
+  does not burn the whole test surface to prove itself.
+status: proposed
+patterns:
+- standalone-resilient-library
+acceptance:
+  tests:
+  - file: crates/agentic-ci-record/tests/stories_test_plus_id_runs_only_ancestors.rs
+    justification: |
+      Proves the `+<id>` selector at the library boundary:
+      `CiRunner::run("+<id>")` invokes the test executor exactly once
+      per acceptance-test file declared by the target story and each
+      of its transitive ancestors, and exactly zero times for any
+      story outside that ancestor set. Without this, operators cannot
+      prove "the code path leading up to my leaf still works" in
+      isolation — which is the upstream-only lane CI needs for
+      targeted diagnostics.
+
+  - file: crates/agentic-ci-record/tests/stories_test_id_plus_runs_only_descendants.rs
+    justification: |
+      Proves the `<id>+` selector at the library boundary:
+      `CiRunner::run("<id>+")` invokes the test executor exactly once
+      per acceptance-test file declared by the target story and each
+      of its transitive descendants, and zero times for any story
+      outside that descendant set. Without this, an operator changing
+      an upstream contract cannot prove "nothing I broke is
+      downstream" without running the world.
+
+  - file: crates/agentic-ci-record/tests/stories_test_plus_id_plus_runs_full_subtree.rs
+    justification: |
+      Proves the `+<id>+` selector at the library boundary:
+      `CiRunner::run("+<id>+")` invokes the test executor exactly once
+      per acceptance-test file declared by the target plus every
+      transitive ancestor AND every transitive descendant,
+      deduplicated (no test file is invoked twice even if it is named
+      by overlapping selector reach), and zero times for anything
+      outside the union. Without this, the CI lane that mirrors the
+      dashboard's subtree drilldown is missing — operators debugging a
+      regression in a mid-DAG story have no single command that
+      covers both sides of the impact radius.
+
+  - file: crates/agentic-ci-record/tests/stories_test_bare_id_runs_single_story.rs
+    justification: |
+      Proves the bare-id case at the library boundary: `CiRunner::run("<id>")`
+      (no `+` on either side) runs ONLY the acceptance tests declared by
+      that exact story, same as running the story's acceptance suite by
+      hand. Without this, the selector grammar is inconsistent with
+      story 10's positional-argument contract (where bare `<id>` is a
+      specific operation) and operators would have to guess whether
+      `agentic stories test 10` runs one story or pulls in the subtree.
+
+  - file: crates/agentic-ci-record/tests/stories_test_records_one_row_per_story_executed.rs
+    justification: |
+      Proves the bookkeeping invariant: after `CiRunner::run("+<id>+")`
+      completes, the `test_runs` table contains exactly one upserted
+      row per story whose tests the runner invoked (matching story 2's
+      row contract: one row per story, `verdict`, `commit`,
+      `failing_tests`, `ran_at`). Stories OUTSIDE the selector's reach
+      have no rows written on their behalf — their existing rows (if
+      any) are untouched. Without this, the runner could run the right
+      tests but write the wrong rows, silently misreporting the
+      dashboard's read view.
+
+  - file: crates/agentic-ci-record/tests/stories_test_preserves_rows_for_unselected_stories.rs
+    justification: |
+      Proves the isolation contract: given a prior `test_runs` row for
+      a story `<other-id>` OUTSIDE the selected subtree, after
+      `CiRunner::run("+<id>")` completes, `<other-id>`'s row is
+      byte-identical to its pre-run state. Without this, a narrow
+      selector could silently invalidate unrelated stories' health (by
+      overwriting their rows with empty or nonsensical values) — the
+      exact opposite of what a scoped run promises.
+
+  - file: crates/agentic-ci-record/tests/stories_test_unknown_id.rs
+    justification: |
+      Proves clean failure on bad input at the library boundary:
+      `CiRunner::run("+99999")` (where 99999 has no corresponding
+      `stories/99999.yml`) returns `CiRunError::UnknownStory` naming
+      the missing id, invokes the test executor zero times, and writes
+      zero rows to `test_runs`. Without this, a typo or stale id
+      produces either a panic or a silent zero-story run
+      indistinguishable from "the subtree happened to be empty."
+
+  - file: crates/agentic-ci-record/tests/stories_test_cycle_rejected.rs
+    justification: |
+      Proves the invariant defence at the CI boundary: given a
+      `stories/` directory where the loader somehow admits a cycle
+      (story 6 regression), `CiRunner::run` returns typed
+      `CiRunError::Cycle` naming the offending edge, invokes the test
+      executor zero times, and writes zero rows. Without this, a
+      cycle would produce infinite traversal, infinite test runs, or a
+      panic — each strictly worse than a typed refusal.
+
+  - file: crates/agentic-cli/tests/stories_test_selectors_via_binary.rs
+    justification: |
+      Proves the selector argv reaches the runner through the binary:
+      `agentic stories test +<id>`, `agentic stories test <id>+`, and
+      `agentic stories test +<id>+` each cause the test executor
+      (stubbed in the binary test harness) to be invoked exactly for
+      the subtree the matching library-level test pins down, and each
+      exits 0 when the stub reports Pass across the subtree. Without
+      this, the library-level claim is a library-level claim only —
+      the binary's argv-to-runner wire could drop the selector on
+      the floor.
+
+  - file: crates/agentic-cli/tests/stories_test_unknown_id_exits_2.rs
+    justification: |
+      Proves typed refusal reaches the operator through the binary:
+      `agentic stories test +99999` exits with code 2 (could-not-run
+      — the argv was parseable but the target did not exist), writes
+      zero rows, and emits stderr naming the missing id. Without
+      this, a CLI wrapper that mistranslated the error to exit 1
+      would tell CI "the suite failed" when no suite ran at all,
+      corrupting the distinction between "real fail" and "could not
+      run."
+
+  uat: |
+    Goal: convince yourself that `agentic stories test <selector>`
+    runs the acceptance tests for exactly the selected subtree, writes
+    one `test_runs` row per story in that subtree, leaves rows for
+    stories outside the subtree untouched, and surfaces typed
+    refusals at exit code 2 on bad input.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status` and
+         confirm the working tree is clean.
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the just-
+         installed binary.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. Identify a non-leaf story `<mid-id>` whose DAG has both
+         ancestors and descendants in the current corpus. Using story
+         10's selectors on a fresh terminal, confirm: `agentic stories
+         health +<mid-id>` lists the ancestors, `agentic stories
+         health <mid-id>+` lists the descendants. Note the two
+         ancestor ids and the two descendant ids (exact counts vary
+         with the corpus shape at UAT time).
+      5. Pre-seed one `test_runs` row for a story `<other-id>` that is
+         NOT in `+<mid-id>+`'s reach — run `agentic stories test
+         <other-id>` at HEAD so `<other-id>` has a known-good row.
+
+    Ancestor-only walkthrough:
+      6. Run `agentic stories test +<mid-id> --store "$AGENTIC_STORE"`.
+         Observe:
+           - Process exits 0 if all tests in the ancestor set pass;
+             non-zero (1) if any fail. Either is a valid run — this
+             UAT is about WHICH tests ran, not which passed.
+           - stdout lists one line per story whose tests ran, or the
+             runner emits a summary line per story. The set of story
+             ids matches `agentic stories health +<mid-id>` from
+             step 4.
+           - Query `test_runs` via `agentic stories health --json
+             --store "$AGENTIC_STORE"`. One row exists for each
+             story in the ancestor set; commit matches HEAD;
+             `<other-id>`'s row from step 5 is UNCHANGED (compare
+             `ran_at` to the step-5 timestamp — still equal).
+
+    Descendant-only walkthrough:
+      7. Run `agentic stories test <mid-id>+ --store "$AGENTIC_STORE"`.
+         Observe:
+           - The test executor ran for `<mid-id>` and every
+             descendant, exactly once each.
+           - `test_runs` has one row per story in the descendant
+             set; `<other-id>`'s row from step 5 is still unchanged.
+
+    Subtree (both directions) walkthrough:
+      8. Run `agentic stories test +<mid-id>+ --store "$AGENTIC_STORE"`.
+         Observe:
+           - The test executor ran for the UNION of ancestors,
+             target, and descendants, deduplicated (no story's tests
+             were run twice).
+           - `test_runs` rows cover the union.
+           - `<other-id>`'s row is still unchanged.
+
+    Bare-id walkthrough:
+      9. Run `agentic stories test <mid-id> --store "$AGENTIC_STORE"`.
+         Observe:
+           - The test executor ran only for `<mid-id>` itself (not
+             ancestors, not descendants).
+           - Exactly one new `test_runs` row for `<mid-id>`;
+             every other story's row (including `<other-id>`,
+             ancestors, and descendants) is unchanged from whatever
+             state the previous steps left them in.
+
+    Unknown-id refusal:
+     10. Run `agentic stories test +99999 --store "$AGENTIC_STORE"`.
+         Observe:
+           - Process exits 2.
+           - stderr names `99999` as the missing id.
+           - No new `test_runs` rows.
+           - `<other-id>`'s row still unchanged.
+
+    Cleanup:
+     11. `rm -rf "$AGENTIC_STORE"` to clear the ephemeral store.
+     12. If you modified any code to deliberately break a test for
+         the "some fail" branch of step 6, revert it.
+     13. If you want the installed binary gone: `cargo uninstall
+         agentic-cli`.
+guidance: |
+  This story adds ONE new CLI verb (`agentic stories test <selector>`)
+  and one new library-level entry point (`CiRunner::run`). It COMPOSES
+  over story 2's recorder — every test execution it triggers writes
+  through the same upsert contract story 2 pinned (one `test_runs`
+  row per story, upsert by story_id, full SHA, `failing_tests` as
+  basenames). It DOES NOT modify that contract. It DOES NOT touch
+  `uat_signings` (no signing happens here). It DOES NOT modify
+  `agentic ci record` (which remains the low-level single-story
+  writer story 2 owns).
+
+  Verb placement rationale.
+    `agentic stories test` parallels `agentic stories health` from
+    story 10: both operate on the story corpus, both accept the same
+    `+<id>` / `<id>+` / `+<id>+` / `<id>` selector grammar, both are
+    invoked "in the context of the stories." Putting them under a
+    shared `stories` noun keeps the CLI shape discoverable — an
+    operator who knows `stories health` can guess `stories test`
+    without consulting docs. Story 2's `agentic ci record` remains
+    the low-level single-story writer under a different noun (`ci`,
+    for CI-infrastructure plumbing); that is intentional — `record`
+    is a one-row upsert primitive used by test runners, while `test`
+    is a subtree-execution verb used by humans and CI. A later
+    curator pass MAY unify the nouns; this story does not.
+
+  Why this is a separate story from 2.
+    Story 2's `agentic ci record <id>` is the primitive: record one
+    test result for one story from its runner output. This story
+    adds a DIFFERENT verb — `agentic stories test <selector>` —
+    whose job is to CHOOSE the right set of stories to test from
+    the DAG and then delegate to the primitive for each. The
+    outcome (subtree-scoped execution) is distinct from story 2's
+    outcome (correct row-per-story bookkeeping). The UAT has a
+    distinct starting context (a multi-story fixture with
+    observable DAG shape; step 4 leans on story 10's selectors to
+    enumerate the subtree) and a distinct observable (which stories
+    ran, not whether the row shape is right). Per the splitting-
+    rule: distinct observable, distinct command, distinct rebuild
+    brief.
+
+  Why this is a separate story from 10.
+    Story 10's dashboard is READ-ONLY. This story is
+    WRITE-THROUGH (the runner writes `test_runs` rows on behalf of
+    each executed story). They share a traversal primitive (the
+    DAG selector grammar) but they share no execution path.
+    Splitting here also respects the standalone-resilient-library
+    pattern: `agentic-ci-record` and `agentic-dashboard` each need
+    to stay independently driveable; forcing one story to own both
+    would entangle the two crates behind one changeset.
+
+  Selector grammar — delegated to story 10.
+    The `+<id>` / `<id>+` / `+<id>+` / `<id>` semantics are defined
+    in story 10's "Selector grammar" guidance section. THIS story
+    does not restate them. Implementers should call the shared
+    graph-traversal primitive `agentic-story` will expose for that
+    purpose (story 10 will extract the traversal into
+    `agentic-story` if it hasn't already; both stories depend on the
+    same trait). A divergence between the two stories' selector
+    behaviour is a bug in the shared primitive, not a legitimate
+    design split.
+
+    One thing THIS story pins that story 10 does not (because it is
+    irrelevant to reading): deduplication when the subtree overlaps.
+    For `+<id>+`, if a story appears on both the ancestor and
+    descendant sides (which can happen if the DAG has multiple
+    paths meeting at the target), its acceptance tests are invoked
+    EXACTLY ONCE, not twice. The runner maintains a visited set and
+    skips on second encounter. Pinned by
+    `stories_test_plus_id_plus_runs_full_subtree.rs`.
+
+  Crate layout — where `CiRunner` lives.
+    In `agentic-ci-record`. Rationale: the runner's OUTPUT is the
+    same `test_runs` row shape story 2 owns; placing the selector-
+    driven orchestration next to the writer keeps the crate's
+    contract cohesive. The existing `Recorder::record` primitive
+    story 2 shipped is the downstream call; `CiRunner::run` is its
+    batch driver with a selector on the front.
+
+    An alternative placement — a new `agentic-ci` crate that
+    depends on `agentic-ci-record` — was considered and rejected:
+    the new crate would have exactly one entry point, would depend
+    on the same crates `agentic-ci-record` already depends on, and
+    would add a crate boundary the story-first-not-boundary-first
+    rule warns against. A future story that grows the CI surface
+    meaningfully can extract then.
+
+  Allowed dependencies for `agentic-ci-record` (extends story 2).
+    Story 2 pinned: `agentic-store`, `agentic-events`, `git2`.
+    This story adds: `agentic-story` (needed for corpus load and
+    the DAG traversal primitive). Forbidden (same boundary story 2
+    enforced): `agentic-orchestrator`, `agentic-runtime`,
+    `agentic-sandbox`, `agentic-cli`. The standalone-resilience
+    test from story 2 must be EXTENDED to include the new
+    dependency in its allowed list — that extension is part of
+    this story's implementation scope. A new dedicated standalone-
+    resilience test is NOT added; one test per crate is
+    sufficient (the pattern's `how_we_do_it` guidance says "each
+    such crate ships an integration test," singular).
+
+    The runner invokes the test executor via a trait
+    (`trait TestExecutor { fn run_tests(&self, test_files: &[PathBuf])
+    -> ExecutorOutcome; }`). The real impl shells out to `cargo
+    test` with a `--test <name>` filter per file; the library-level
+    tests use a `StubExecutor` seeded with pre-recorded outcomes.
+    This mirrors the `UatExecutor` trait story 1 established and
+    lets the library be tested without invoking real cargo.
+
+  Executor contract.
+    The trait returns, per invocation, an ExecutorOutcome shape
+    aligned with the Recorder's input contract from story 2:
+      - `verdict`: `Pass` | `Fail`.
+      - `failing_tests`: `Vec<String>` (basenames, empty on Pass).
+      - `transcript`: optional string (not persisted; may be
+        surfaced to stdout for operator visibility).
+    Any executor error (compile failure, runner panic, IO error)
+    surfaces as `CiRunError::ExecutorFailed { story_id, source }`
+    and halts the run — further stories in the subtree are NOT
+    executed. The already-completed stories' rows in `test_runs`
+    are left as they were (the upsert contract means each row
+    reflects its own run, independently). Operators retry after
+    fixing the underlying cause.
+
+  Exit-code contract for `agentic stories test`.
+    0 = every story in the subtree ran and every one of them
+        reported Pass (all rows now `verdict=pass`).
+    1 = every story ran but at least one reported Fail (at least
+        one row now `verdict=fail`). This is the "real failure"
+        code: CI should treat the run as red.
+    2 = could not run. Triggers: unknown selector id, cycle in
+        loaded corpus, executor trait returned an error before
+        completing the subtree, store unreachable, `stories/`
+        directory missing, unparseable selector (e.g. `+10+20`,
+        whitespace). Matches the fail-closed-on-dirty-tree exit
+        mapping for consistency across the CLI, even though this
+        command does not use that pattern.
+
+  Why the fail-closed-on-dirty-tree pattern is NOT applied.
+    The runner produces `test_runs` rows that carry the HEAD
+    commit, which sounds attestational. But those rows are UPSERTS:
+    each run replaces any prior row for the same story. They are a
+    running summary, not an attestation of a tree state over time.
+    The pattern's `when_to_use` clause targets rows "whose trust
+    depends on being pinned to a commit hash" in an append-only
+    sense (`uat_signings`, red-state JSONL). `test_runs` is a
+    read-through summary view of "what does the tree do now"; the
+    same command run on a dirty tree records "this is what the
+    tree did with those uncommitted changes" and the operator's
+    subsequent run on a clean tree replaces it. No forgery risk,
+    no append-only evidence at stake. Story 2 correctly does NOT
+    apply the pattern to its primitive; this story, which wraps
+    that primitive, inherits the same decision for the same
+    reason.
+
+  Store-location semantics.
+    `--store` flag and `AGENTIC_STORE` environment variable work
+    identically to story 1's contract. Do not restate. The runner
+    opens one store connection for the whole subtree (not one per
+    story) and passes it to each `Recorder::record` call.
+
+  CLI shape — argv (authoritative).
+    agentic stories test <selector> [--store <path>]
+
+    `<selector>` is required. Accepted forms:
+      <id>, +<id>, <id>+, +<id>+
+    Selector parsing lives in `agentic-story` (the same primitive
+    story 10 pins); the CLI translates the positional argument
+    into a call to that primitive without interpreting the
+    semantics locally. Unparseable selectors (e.g. `++10`, `10 +`,
+    `+10 20`) return a typed `CiRunError::BadSelector` and exit 2.
+
+    `agentic ci record <id>` (story 2's existing verb) continues
+    to work unchanged. It is the low-level single-story writer;
+    `agentic stories test <selector>` is the high-level DAG-aware
+    driver that delegates to it. A later curator pass MAY unify
+    the nouns (`ci record` under `stories`); this story does not
+    do so.
+
+  Relationship to story 10.
+    Selector syntax is defined in story 10's guidance. See
+    "Selector grammar — delegated to story 10" above. A future
+    curator pass extracts the grammar into a pattern
+    (`dag-selector-grammar.yml`) once both this story and story 10
+    are `healthy` — the 2+ threshold for pattern extraction, with
+    the drift risk mitigated by the pattern having two healthy
+    users on disk. Authoring that pattern now is premature (the
+    grammar hasn't yet survived UAT in either story).
+
+  Relationship to story 11.
+    Independent. The ancestor-health gate in story 11 applies only
+    to the UAT Pass path. Running tests on a story whose ancestors
+    are not healthy is legitimate (it's how an operator diagnoses
+    what's broken). This story does NOT consult `uat_signings` and
+    does NOT refuse to run based on any ancestor's classification.
+    Execution and attestation are orthogonal concerns.
+
+  Test file locations.
+    Library-level tests (eight tests:
+    `stories_test_plus_id_runs_only_ancestors.rs`,
+    `stories_test_id_plus_runs_only_descendants.rs`,
+    `stories_test_plus_id_plus_runs_full_subtree.rs`,
+    `stories_test_bare_id_runs_single_story.rs`,
+    `stories_test_records_one_row_per_story_executed.rs`,
+    `stories_test_preserves_rows_for_unselected_stories.rs`,
+    `stories_test_unknown_id.rs`,
+    `stories_test_cycle_rejected.rs`) live under
+    `crates/agentic-ci-record/tests/` as Rust integration tests.
+    They use a `StubExecutor` that returns pre-seeded outcomes per
+    story id, a `MemStore` for `test_runs`, and a fixture
+    `stories/` directory with declared `depends_on` edges.
+
+    Binary-level tests (two tests:
+    `stories_test_selectors_via_binary.rs`,
+    `stories_test_unknown_id_exits_2.rs`) live under
+    `crates/agentic-cli/tests/` as Rust integration tests, driven
+    via `assert_cmd`. They use an env var (or equivalent
+    mechanism) to swap the real cargo-test executor for a stub in
+    the test harness — details pinned in implementation; the
+    behavioural claim is "the test executor was invoked exactly N
+    times with these test-file arguments." None of these tests
+    invoke real cargo test (that would make the test suite O(n²)
+    in DAG traversals).
+
+  Deferred — explicitly NOT in this story.
+    - `agentic stories test --since <commit>`: run tests only for
+      stories whose `related_files` intersect the diff. Cleanly
+      composes over story 9's staleness scoping, but adds a
+      second selection axis (commit-range, not DAG-position) that
+      deserves its own story and its own UAT.
+    - Parallel test execution across stories in the subtree.
+      Ergonomics; deferred. The default impl runs sequentially
+      and may be slow on large subtrees. A future story adds
+      parallelism with its own fairness/ordering contract.
+    - Test-output streaming. The current contract is
+      batch-mode: the runner collects outcomes and writes rows
+      after every story completes. Streaming per-story output to
+      stdout as each story finishes is a future ergonomics story;
+      the current contract says nothing about stdout order
+      beyond "some per-story summary is visible."
+
+depends_on:
+- 2
+- 6
+- 10
+related_files:
+- crates/agentic-ci-record/src/**
+- crates/agentic-cli/src/**
+- crates/agentic-story/src/**

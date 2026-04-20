@@ -1,0 +1,557 @@
+id: 13
+title: Classify a story as unhealthy when any transitive ancestor is not healthy
+outcome: |
+  A developer reading any story's classified health sees it reflect
+  its ancestry — a story whose transitive ancestors are not all
+  `healthy` classifies as `unhealthy` — so nothing downstream is
+  falsely trusted while its foundation is unproven.
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-dashboard/tests/health_inherits_unhealthy_from_direct_ancestor.rs
+    justification: |
+      Proves the core inheritance rule at the classifier boundary:
+      given a story `<id>` whose own on-disk `status` is `healthy`,
+      whose latest `uat_signings.verdict=pass` commit equals HEAD,
+      whose latest `test_runs.verdict` is `pass`, and whose
+      `related_files` (if any) have not changed — but whose direct
+      ancestor `<A>` classifies as something other than `healthy`
+      (e.g. `<A>` is `under_construction`) — the dashboard classifies
+      `<id>` as `unhealthy`, NOT `healthy`. Without this, a story
+      can claim healthy while standing on an unproven parent and the
+      dashboard's read view silently approves the forgery.
+
+  - file: crates/agentic-dashboard/tests/health_inherits_unhealthy_from_transitive_ancestor.rs
+    justification: |
+      Proves the transitive reach: given `<id>` depends_on `<A>`,
+      `<A>` depends_on `<B>`, `<A>` classifies `healthy` (all its own
+      signals are clean), but `<B>` is `under_construction`, the
+      dashboard classifies `<id>` as `unhealthy` — the rule reaches
+      past direct ancestors to the first non-healthy link. Without
+      this, the rule is a direct-only check and the same "healthy
+      ancestor but broken grandparent" loophole story 11 closes at
+      the UAT gate stays open at the read boundary.
+
+  - file: crates/agentic-dashboard/tests/health_composes_with_file_staleness.rs
+    justification: |
+      Proves composition with story 9 AND pins the exact combined
+      ordering inside `not_healthy_reason` when own-signals and
+      ancestor offenders fire on the same row. Given a story whose
+      OWN latest `test_runs.verdict` is `fail`, whose own
+      `related_files` have changed since its UAT pass commit, AND
+      whose two direct `depends_on` parents `<A>` and `<C>` both
+      classify non-healthy (with a healthy `<B>` in between and
+      `<A>.id < <C>.id`), the dashboard classifies it as
+      `unhealthy` and emits `not_healthy_reason` equal to EXACTLY
+      `["own_tests", "own_files", "ancestor:<A>", "ancestor:<C>"]`
+      — own-signals first in the locked order `"own_tests"` then
+      `"own_files"`, then every offending direct parent ordered
+      ascending by id; `<B>` is absent. Without this, a story hit
+      by several independent unhealth signals either surfaces only
+      one of them (operator fixes the visible one only to see the
+      row still red) or surfaces them in a permuted order that
+      downstream JSON consumers cannot rely on.
+
+  - file: crates/agentic-dashboard/tests/health_all_healthy_ancestors_do_not_affect_classification.rs
+    justification: |
+      Proves the non-interference guarantee: a story whose OWN
+      signals are all clean AND whose entire transitive ancestry
+      classifies `healthy` (or whose `depends_on` is empty)
+      classifies `healthy` — the ancestor check adds no false
+      positives. Without this, the inheritance rule could
+      accidentally reject every story (a silent catastrophic
+      tightening indistinguishable, to the operator, from "the
+      dashboard is broken"), exactly the symmetric concern the
+      `uat_permits_all_healthy_ancestors` test in story 11 guards
+      on the write side.
+
+  - file: crates/agentic-dashboard/tests/health_ancestor_reason_names_offending_id.rs
+    justification: |
+      Proves the reason-channel token contract by pinning the exact
+      string forms. When a story classifies `unhealthy` because of
+      a direct `depends_on` parent `<A>`, its `--json` row's
+      `not_healthy_reason` array contains exactly `"ancestor:<A>"`
+      (literal prefix `ancestor:` followed by the parent's numeric
+      story id, no whitespace, no padding). When the rule also
+      fires from an own-signal, the array contains exactly one of
+      `"own_tests"` (own `test_runs.verdict == fail`) or
+      `"own_files"` (own `related_files` changed since the UAT
+      pass commit) alongside the ancestor entry (e.g.
+      `["own_tests", "ancestor:7"]`). These three token forms —
+      `"own_tests"`, `"own_files"`, `"ancestor:<id>"` — are the
+      complete reason vocabulary; nothing else is emitted. Without
+      a test pinning the exact strings, downstream JSON consumers
+      (drilldown renderer, external dashboards, future report
+      tooling) depend on an unenforced contract and the tokens
+      drift the first time someone refactors the classifier's
+      reason-string builder.
+
+  - file: crates/agentic-dashboard/tests/health_reason_lists_all_direct_offenders.rs
+    justification: |
+      Proves the multi-offender rule: given a story `<id>` with
+      multiple direct `depends_on` parents `<A>`, `<B>`, `<C>`
+      where both `<A>` and `<C>` classify non-healthy (and `<B>`
+      is healthy), the `--json` row's `not_healthy_reason` array
+      contains BOTH `"ancestor:<A>"` AND `"ancestor:<C>"` — one
+      entry per direct offender, ordered by ascending parent id
+      for deterministic output — and does NOT contain an entry
+      for `<B>` (healthy parent) nor for any grandparent of `<A>`
+      or `<C>` (transitive offenders are reached by drilling into
+      the direct parent's own row, which surfaces its own
+      `not_healthy_reason`; the chain walks itself). Without this,
+      the reason channel collapses a multi-parent fan-out to a
+      single offender and the operator sees "blocked by one
+      ancestor" when in reality several parents are broken — a
+      false sense of how much work the unblock requires.
+
+  - file: crates/agentic-dashboard/tests/health_drilldown_names_offending_ancestor.rs
+    justification: |
+      Proves drilldown parity with the JSON contract: `agentic
+      stories health <id>` for a story classified unhealthy due to
+      its direct `depends_on` parents renders a line listing
+      EVERY offending direct ancestor by id — comma-separated and
+      ordered ascending by parent id, matching the JSON
+      `not_healthy_reason` array's `"ancestor:<id>"` entries
+      one-for-one — plus each offending ancestor's own
+      classification. A fixture with two offending direct parents
+      (e.g. `<A>` and `<C>`, with a healthy `<B>` in between)
+      exercises the multi-offender case. Without this, the
+      structured signal surfaces every offender in `--json` but
+      the terminal operator running drilldown sees only a single
+      ancestor (or "unhealthy" alone), and the human view silently
+      diverges from the machine view the reason channel was built
+      to share.
+
+  - file: crates/agentic-dashboard/tests/health_permissive_absent_related_files_preserved.rs
+    justification: |
+      Proves the ancestor rule does NOT silently change the
+      permissive-absent rule story 9 pinned: a story whose
+      `related_files` is absent AND whose ancestors all classify
+      `healthy` AND whose own UAT pass is older than HEAD still
+      classifies `healthy` — the file-staleness check remains
+      permissive when the field is absent, independent of the new
+      ancestor rule. Without this pinning, story 13's author or a
+      future refactor could accidentally tighten story 9's default
+      under cover of the inheritance change.
+
+  uat: |
+    Goal: convince yourself that a story inherits `unhealthy` from
+    any not-healthy ancestor (direct or transitive), that the
+    inheritance composes cleanly with own-tests-red and own-files-
+    stale signals (both cited in the reason channel when both
+    apply), and that an all-healthy ancestry produces no false
+    positives.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status`
+         and confirm the working tree is clean.
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the
+         just-installed binary.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. On a scratch branch (so no real YAML is disturbed),
+         construct a three-story chain: `<leaf-id>` depends_on
+         `<mid-id>`, `<mid-id>` depends_on `<root-id>`. Give each a
+         trivially-passable UAT walkthrough for this exercise.
+
+    All-healthy baseline:
+      5. Drive `<root-id>` → `<mid-id>` → `<leaf-id>` through
+         `agentic uat <id> --verdict pass --store "$AGENTIC_STORE"`
+         in order. Each should succeed. All three now have
+         `status: healthy` on disk and valid signing rows.
+      6. Run `agentic stories health --all --store "$AGENTIC_STORE"`.
+         Observe: all three classify as `healthy`. Row order and
+         other columns follow story 3's contract.
+
+    Direct-ancestor inheritance:
+      7. Edit `<mid-id>`'s YAML back to `status: under_construction`
+         (hand edit, commit so the tree is clean). The dashboard
+         will reclassify `<mid-id>` as `under_construction` (no
+         historical pass-at-HEAD any more).
+      8. Run `agentic stories health --all --store "$AGENTIC_STORE"`.
+         Observe:
+           - `<mid-id>` classifies `under_construction`.
+           - `<leaf-id>` NOW classifies `unhealthy`, not
+             `healthy` — even though `<leaf-id>`'s own YAML is
+             still healthy, its test_run is pass, and its UAT
+             signing is at HEAD. The inheritance rule fired.
+      9. Run `agentic stories health <leaf-id> --json --store
+         "$AGENTIC_STORE"`. Confirm the row's `not_healthy_reason`
+         array contains exactly the entry `"ancestor:<mid-id>"`
+         (literal prefix `ancestor:` followed by the parent's
+         numeric story id — this is the locked JSON contract, not
+         a suggestion).
+     10. Run `agentic stories health <leaf-id> --store
+         "$AGENTIC_STORE"`. Confirm the drilldown view names
+         `<mid-id>` and its classification as the offending
+         ancestor. (When multiple direct parents are offending,
+         the drilldown lists every one of them comma-separated
+         and ordered ascending by parent id — one-for-one with
+         the `"ancestor:<id>"` entries in the JSON row. Exercised
+         explicitly in the multi-offender step 12c below.)
+
+    Transitive-ancestor inheritance:
+     11. Restore `<mid-id>` to `status: healthy` (re-run the UAT
+         drive so a fresh signing row exists and the on-disk YAML
+         matches). Edit `<root-id>` to
+         `status: under_construction` and commit.
+     12. Run `agentic stories health --all --store "$AGENTIC_STORE"`.
+         Observe:
+           - `<root-id>` classifies `under_construction`.
+           - `<mid-id>` classifies `unhealthy` (inherits from
+             `<root-id>`).
+           - `<leaf-id>` classifies `unhealthy` (inherits
+             transitively from `<root-id>`).
+         Run `agentic stories health <leaf-id> --json`. The
+         `not_healthy_reason` for `<leaf-id>` cites ONLY
+         `<mid-id>` (its direct `depends_on` parent) as
+         `"ancestor:<mid-id>"`, NOT `<root-id>` — the reason
+         channel is direct-only by design. Drill into `<mid-id>`
+         with `agentic stories health <mid-id> --json` and
+         observe its `not_healthy_reason` cites `"ancestor:<root-id>"`.
+         The chain walks itself, one hop per drill.
+
+    Multi-offender reason listing:
+     12a. Restore the chain to all-healthy as in step 5. Extend
+          `<leaf-id>`'s `depends_on` to include a second direct
+          parent `<mid2-id>` (construct a sibling story and drive
+          it to healthy first, at an id deliberately LOWER than
+          `<mid-id>` to make the ordering check meaningful).
+     12b. Edit BOTH `<mid-id>` and `<mid2-id>` back to
+          `status: under_construction` and commit.
+     12c. Run `agentic stories health <leaf-id> --json --store
+          "$AGENTIC_STORE"`. Confirm `not_healthy_reason` contains
+          TWO `"ancestor:"` entries — one for each offending
+          direct parent — ordered ascending by parent id
+          (i.e. `"ancestor:<mid2-id>"` before `"ancestor:<mid-id>"`
+          given the id ordering in 12a). Neither parent is
+          silently dropped. A healthy sibling parent (if you add
+          one for good measure) does NOT appear. Then run
+          `agentic stories health <leaf-id> --store
+          "$AGENTIC_STORE"` (no `--json`) and confirm the
+          drilldown view lists BOTH offending ancestor ids
+          comma-separated in the SAME ascending order (e.g.
+          `<mid2-id>, <mid-id>`) — drilldown and JSON are
+          symmetric.
+
+    Composition with file-staleness:
+     13. Restore the chain to all-healthy as in step 5. Edit
+         `<leaf-id>`'s YAML to declare `related_files:
+         ["README.md"]` and re-drive UAT pass so the row is
+         healthy at the new commit.
+     14. Edit `<mid-id>` back to `status: under_construction` and
+         commit.
+     15. Make a further commit that edits `README.md` (touching
+         `<leaf-id>`'s declared related file).
+     16. Run `agentic stories health <leaf-id> --json --store
+         "$AGENTIC_STORE"`. Confirm:
+           - `<leaf-id>` classifies `unhealthy`.
+           - `not_healthy_reason` equals EXACTLY
+             `["own_files", "ancestor:<mid-id>"]` in that order
+             — `"own_files"` (story 9's signal) before
+             `"ancestor:<mid-id>"` (the direct parent), per the
+             locked three-band ordering. Both causes are cited;
+             neither silently wins over the other, and the
+             sequence is stable across runs.
+
+    All-healthy ancestry non-interference:
+     17. Revert `<mid-id>` to healthy and the `related_files`
+         edits; re-drive the chain to all-healthy at a clean HEAD.
+         Run `agentic stories health --all`. Observe: every row is
+         `healthy` again. The inheritance rule did not produce a
+         false positive anywhere.
+
+    Cleanup:
+     18. `git reset --hard <pre-scratch-sha>` (or checkout main) to
+         drop every scratch commit.
+     19. `rm -rf "$AGENTIC_STORE"` to clear the store.
+     20. If you want the installed binary gone: `cargo uninstall
+         agentic-cli`.
+guidance: |
+  This story adds ONE new input to the dashboard's health
+  classifier: ancestor classification. A story is `unhealthy` if any
+  of:
+    - its own latest test_runs verdict is `fail` (story 3 signal),
+    - its own UAT commit is older than HEAD and at least one
+      declared `related_files` entry matches a changed file (story 9
+      signal),
+    - any TRANSITIVE ANCESTOR classifies as something other than
+      `healthy` (this story's new signal).
+  The three inputs compose: any ONE firing makes the story
+  unhealthy. All three clean means `healthy` (subject to the
+  existing classifier's proposed / under_construction rules).
+
+  Why this is a separate story from 3 (the classifier).
+    Story 3 is `healthy` today on a per-story classifier contract
+    ("each story's health is computed from its own signals"). This
+    story adds a cross-story input — the classifier now walks the
+    DAG while classifying. That is a classifier-rule change with
+    its own observable (a story classified differently when its
+    ancestor is broken, regardless of the story's own signals), a
+    distinct starting context (a fixture corpus with a controllable
+    ancestor-status chain), and a distinct rebuild brief (DAG walk
+    + reason channel addition vs. the four-case table story 3
+    pinned). Folding into story 3 would retroactively widen story
+    3's scope to include DAG traversal. Per the splitting-rule's
+    tiebreakers (distinct starting contexts, separate rebuild
+    briefs, distinct observable), this is a separate story. Story
+    3's YAML will need a small guidance update AFTER this story
+    ships healthy — performed by a subsequent story-writer pass,
+    auto-reverting story 3 to `under_construction`. That is correct
+    behaviour; pre-editing at this story's authoring time would
+    re-open story 3 prematurely.
+
+  Why this is a separate story from 9 (file-staleness).
+    Story 9's input (per-story file-staleness via declared
+    `related_files`) is conceptually close to this story's input
+    (per-story ancestor-staleness via declared `depends_on`) — both
+    are "a staleness signal beyond latest test verdict" — but they
+    have distinct observables (a changed file vs. a not-healthy
+    ancestor), distinct fixture shapes (a commit range vs. a DAG
+    chain), and distinct rebuild briefs (glob matching vs. graph
+    traversal). Folding them would conflate two separate causes of
+    unhealth under one mechanism and blur the reason channel. The
+    permissive-absent rule story 9 pinned (`related_files` absent
+    means no file-based signal applies) is explicitly preserved
+    here; the ancestor rule is NOT permissive (`depends_on` being
+    empty means the story has no ancestors, which is a legitimate
+    and common shape — the check applies and finds nothing).
+
+  Why this is a separate story from 10 (frontier view).
+    Story 10 is a VIEW-shape change: which rows appear and how
+    they're sorted. This story is a CLASSIFIER-rule change: what
+    status a given story reports. Distinct observables: story 10's
+    observable is "which rows render"; this story's is "what status
+    a specific story reports." Distinct starting contexts for UAT
+    (story 10: fixture with DAG shape and mixed statuses; this
+    story: fixture with controllable ancestor statuses on a chain).
+    Folding into 10 would mix lens + classifier concerns; folding
+    into 9 would conflate file-staleness and DAG-staleness. The two
+    stories COMPOSE cleanly — when this story ships, the frontier
+    view story 10 pins immediately benefits from the richer
+    classification without re-authoring.
+
+  Why this is a separate story from 11 (UAT ancestor gate).
+    Story 11's ancestor rule is at the WRITE path: the UAT gate
+    refuses to sign a Pass verdict when an ancestor is not healthy.
+    This story's ancestor rule is at the READ path: the classifier
+    computes `unhealthy` when an ancestor is not healthy. The
+    domain concept is the same; the sides of the store are
+    different. Story 11 operates on `Uat::run` inputs; this story
+    operates on `Dashboard::classify` inputs.
+
+    We deliberately DUPLICATE the "ancestor is healthy" predicate
+    between `agentic-uat` (story 11) and `agentic-dashboard` (this
+    story) rather than share a cross-crate helper. Rationale:
+    `agentic-uat` must stay standalone-resilient-library-shaped and
+    must not grow a dashboard dependency. If the duplication proves
+    fragile over time, the next step is extracting a shared
+    `classify_health` or `is_healthy` helper into `agentic-story`
+    (the domain centre) that both the UAT gate and the dashboard
+    call — NOT a shared crate dedicated to health logic. That
+    extraction is a refactor, not a new story; a future curator
+    pass spots the drift and proposes it.
+
+  The rule, precisely.
+    After story 3's four-case classifier computes a per-story
+    health (ignoring ancestry), apply this override:
+
+      for S in corpus:
+        # Classification: ANY transitive ancestor non-healthy
+        # flips S to `unhealthy` if S's own classification was
+        # `healthy`. If S is already non-healthy for its own
+        # reasons, classification stays non-healthy.
+        if any transitive ancestor of S (via depends_on)
+           classifies as something other than `healthy`:
+          if S's own classification == `healthy`:
+            S's classification becomes `unhealthy`
+
+        # Reason channel: list every DIRECT `depends_on` parent
+        # that classifies non-healthy, one entry each, ordered
+        # by ascending parent id for determinism.
+        for P in sorted(S.depends_on):
+          if P classifies as something other than `healthy`:
+            S's not_healthy_reason += "ancestor:<P.id>"
+
+    Classification reaches transitively (any broken link anywhere
+    in the ancestry chain flips S to `unhealthy`); the reason
+    channel lists ONLY direct `depends_on` offenders. Transitive
+    (grandparent+) offenders are NOT listed — an operator reading
+    the reason channel sees every broken direct parent and can
+    drill into each offending parent's own row to see ITS
+    `not_healthy_reason`. The chain walks itself, one hop per
+    drill, which keeps each row's reason channel bounded in size
+    and localises "whose fault" to the immediate dependency
+    surface.
+
+    The transitive-classification walk is guarded by a visited
+    set (cycle defence in depth; the loader should reject cycles
+    already, but the classifier does not trust that guarantee).
+
+  Reason channel — locked JSON contract.
+    The `not_healthy_reason` field on each per-story JSON row is
+    an ordered array of tokens drawn from exactly this vocabulary
+    (no other token forms are emitted):
+
+      - `"own_tests"` — own latest `test_runs.verdict` is `fail`.
+      - `"own_files"` — own UAT pass commit is older than HEAD
+        AND at least one declared `related_files` entry matches a
+        file changed since that commit.
+      - `"ancestor:<id>"` — a DIRECT `depends_on` parent whose
+        numeric story id is `<id>` classifies as something other
+        than `healthy`. One entry per offending direct parent.
+        The prefix is the literal string `ancestor:` (lowercase,
+        single colon, no whitespace) and `<id>` is the parent's
+        story id rendered as a base-10 integer with no padding.
+
+    Ordering within the array is deterministic and locked as
+    three fixed bands:
+      1. `"own_tests"` — first, if present.
+      2. `"own_files"` — second, if present.
+      3. `"ancestor:<id>"` entries — every offending direct
+         parent, ordered ascending by `<id>` (base-10 integer
+         comparison, not lexicographic).
+    Any combination is allowed; absent bands are skipped without
+    leaving a gap. Examples: `["own_tests"]`,
+    `["own_files", "ancestor:7"]`,
+    `["own_tests", "own_files", "ancestor:3", "ancestor:11"]`.
+    Consumers that want sort-stable output across runs get it for
+    free; the test
+    `health_composes_with_file_staleness.rs` (or an equivalent
+    multi-signal test if that one stays single-own-signal) pins
+    the exact combined sequence when own-signals and ancestor
+    offenders appear on the same row.
+
+    Direct only, by design. The reason channel lists only DIRECT
+    `depends_on` offenders. Transitive offenders (grandparents
+    and deeper) are reached by drilling into each direct parent's
+    own row, which surfaces its own `not_healthy_reason`. The
+    operator walks the chain one hop at a time; each row's
+    reason channel stays small and localised.
+
+    When a story is `healthy`, `not_healthy_reason` is omitted
+    (not `null`, not `[]`) — consumers distinguish "no reason"
+    from "no field" the same absent-means-clean convention story
+    9 uses for `stale_related_files`.
+
+    The table view renders the reason channel as short visible
+    cues: failing test basenames (story 3's existing
+    `Failing tests` column, unchanged) for `own_tests`; a
+    stale-files cue for `own_files` (story 9's existing drilldown
+    cue, unchanged); a parenthetical `(blocked by <id>[, <id>...])`
+    suffix in the health column, or a dedicated `Ancestor` cell,
+    for `ancestor:<id>` entries. Exact table rendering is pinned
+    by the library tests; the JSON contract above is the
+    authoritative shape and the downstream consumer contract.
+
+    Drilldown parity with JSON. The human drilldown view
+    (`agentic stories health <id>` without `--json`) lists every
+    offending direct ancestor by id, comma-separated and ordered
+    ascending — one-for-one with the `"ancestor:<id>"` entries in
+    the JSON `not_healthy_reason` array. The two views are
+    symmetric: whatever the JSON surfaces, the drilldown also
+    surfaces, in the same order. Pinned by
+    `health_drilldown_names_offending_ancestor.rs`.
+
+  Permissive-absent rule — preserved.
+    Story 9 pinned: a story whose `related_files` is absent or
+    empty takes no file-staleness signal. This story does NOT
+    change that. The absent-field default for `related_files`
+    remains permissive, independent of ancestors. The ancestor rule
+    is orthogonal — `depends_on` being empty does not turn the
+    ancestor rule off either (there are no ancestors to check), but
+    that is not "permissive" in the story-9 sense; it is simply a
+    vacuous truth.
+
+  Composition with story 10's frontier.
+    Story 10's frontier filter hides any story whose classified
+    health is not `healthy` AND whose ancestry contains a
+    not-healthy story. When this story ships, the classifier
+    produces `unhealthy` for any story whose ancestor is
+    not-healthy. The frontier filter still hides those stories
+    from the default view (their ancestors are not-healthy, so
+    they are not the frontier). The two rules are consistent:
+    neither subsumes the other, and neither contradicts the other.
+
+  Allowed dependencies for `agentic-dashboard`.
+    Unchanged from story 3. Adding the DAG traversal does not
+    require a new crate — the corpus is already loaded via
+    `agentic-story`, which exposes `depends_on`. The `Store` trait
+    already gives the classifier every `uat_signings` and
+    `test_runs` row it needs. No new crate dependency, no
+    standalone-resilient-library pattern to apply (the dashboard
+    deliberately does not apply that pattern — see story 3's
+    "Why no standalone-resilient-library pattern" section).
+
+  Test file locations.
+    Library-level tests (eight tests:
+    `health_inherits_unhealthy_from_direct_ancestor.rs`,
+    `health_inherits_unhealthy_from_transitive_ancestor.rs`,
+    `health_composes_with_file_staleness.rs`,
+    `health_all_healthy_ancestors_do_not_affect_classification.rs`,
+    `health_ancestor_reason_names_offending_id.rs`,
+    `health_reason_lists_all_direct_offenders.rs`,
+    `health_drilldown_names_offending_ancestor.rs`,
+    `health_permissive_absent_related_files_preserved.rs`) live
+    under `crates/agentic-dashboard/tests/` as Rust integration
+    tests. They use `MemStore` seeded with synthetic `test_runs`
+    and `uat_signings` rows, a fixture `stories/` directory with a
+    controllable three-story chain (sufficient to exercise direct
+    AND transitive inheritance), and assert on classified health,
+    the `not_healthy_reason` channel, and drilldown output. No
+    binary-level tests are added — the CLI surface is unchanged by
+    this story, and story 3's and story 10's existing binary tests
+    already prove the argv-to-Dashboard wire. Adding more would
+    restate those proofs rather than this story's.
+
+  Relationship to story 3.
+    This story replaces one branch of story 3's classifier (a
+    story's own signals determine its health) with a more
+    expressive version (a story's own signals AND its ancestry
+    determine its health). Story 3's own-signal rules are preserved
+    verbatim; this story adds an override on top. When this story
+    ships `healthy`, story 3's YAML guidance becomes slightly stale
+    (its "Health computation rules — the four cases" section
+    describes the pre-inheritance rule). The fix is a small
+    guidance edit on story 3 by a subsequent story-writer pass
+    after THIS story passes UAT — auto-reverting story 3 to
+    `under_construction`. Pre-editing at authoring time would
+    re-open story 3 prematurely.
+
+  Relationship to story 9.
+    This story's composition with story 9 is explicit: both signals
+    can fire on the same story, both are cited in the reason
+    channel, and the permissive-absent rule is preserved. Story
+    9's YAML does not need any edit because story 9 already
+    includes "permissive absent-field default" as a pinned
+    behaviour, which this story respects.
+
+  Relationship to story 11.
+    Intentional duplication of the "ancestor classifies healthy"
+    predicate across `agentic-dashboard` (this story, read path)
+    and `agentic-uat` (story 11, write path). No shared crate. If
+    duplication drifts, a future refactor lifts a shared helper
+    into `agentic-story`. See "Why this is a separate story from
+    11" above.
+
+  Deferred — explicitly NOT in this story.
+    - Caching the classification across renders. The DAG walk is
+      O(V + E) per story, and the dashboard re-derives it on every
+      call; for corpora this size that is fast enough. Memoization
+      is a future perf story if the render gets slow.
+    - Listing transitive (grandparent+) offenders in the reason
+      channel. This story's reason channel is DIRECT-only by
+      design — transitive offenders are reached by drilling into
+      each direct parent's own row. A future story may add a
+      "full offender chain" rendering if operators report that
+      one-hop-per-drill is painful.
+
+depends_on:
+- 3
+- 6
+- 9
+related_files:
+- crates/agentic-dashboard/src/**
+- crates/agentic-story/src/**

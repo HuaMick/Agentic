@@ -1,0 +1,414 @@
+id: 11
+title: UAT refuses to sign Pass for a story standing on an unproven ancestor
+outcome: |
+  A developer running `agentic uat <id> --verdict pass` against a story
+  whose ancestors are not all `healthy` receives a typed refusal with
+  no signing row written, so a Pass verdict cannot attest a story
+  whose foundation is unproven.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-uat/tests/uat_refuses_unhealthy_ancestor.rs
+    justification: |
+      Proves the core refusal at the library boundary: given a story
+      `<id>` whose `depends_on` names at least one ancestor story
+      whose current on-disk `status` is not `healthy` (i.e. one of
+      `proposed`, `under_construction`, or a status reflecting
+      historical regression), `Uat::run` with a Pass verdict returns
+      `UatError::AncestorNotHealthy` naming the offending ancestor
+      id, writes zero rows to `uat_signings`, and does NOT rewrite
+      the target story's YAML `status` field. Without this, the epic's
+      central invariant ("Pass is only signable when the whole
+      ancestry is proven") is unshipped and a leaf can claim Pass
+      while standing on an `under_construction` foundation — forging
+      the same trust shape a dirty-tree signing would.
+
+  - file: crates/agentic-uat/tests/uat_permits_all_healthy_ancestors.rs
+    justification: |
+      Proves the non-interference guarantee: given a story `<id>`
+      whose `depends_on` lists only ancestors whose on-disk status is
+      `healthy` AND each of those ancestors has a valid
+      `uat_signings.verdict=pass` row in the store (not just the YAML
+      claim), `Uat::run` with a Pass verdict proceeds through its
+      usual path, writes exactly one `uat_signings.verdict=pass` row,
+      and rewrites the target story YAML to `status: healthy` — same
+      as story 1's happy path. Without this, the ancestor-gate could
+      accidentally refuse every Pass (a silent catastrophic tightening
+      indistinguishable, to the operator, from "UAT is broken").
+
+  - file: crates/agentic-uat/tests/uat_refuses_ancestor_with_stale_yaml_status.rs
+    justification: |
+      Proves the evidence-over-claim rule: given a story `<id>` whose
+      direct ancestor `<A>` has `status: healthy` on disk but has NO
+      `uat_signings.verdict=pass` row in the store (a hand-edited or
+      orphan claim), `Uat::run` with a Pass verdict on `<id>` returns
+      `UatError::AncestorNotHealthy` naming `<A>` with a reason
+      distinguishable from "ancestor YAML says it isn't healthy" —
+      e.g. "no signing row." Without this, a hand-written `status:
+      healthy` on an ancestor could side-step the gate and undermine
+      the "only `agentic uat` writes healthy" invariant exactly where
+      it matters (on a story that depends on the hand-edited one).
+
+  - file: crates/agentic-uat/tests/uat_refuses_transitive_unhealthy_ancestor.rs
+    justification: |
+      Proves the transitive reach: given `<id>` depends_on `<A>`,
+      `<A>` depends_on `<B>`, `<A>` is `healthy` with a valid
+      `uat_signings.verdict=pass` row, but `<B>` is
+      `under_construction`, `Uat::run` on `<id>` with a Pass verdict
+      returns `UatError::AncestorNotHealthy` naming `<B>` (not `<A>`)
+      and writes no row. Without this the gate only enforces direct
+      ancestors — a pattern the legacy system's "just check
+      depends_on" shortcut would produce — and a leaf sitting two
+      hops above a broken foundation would promote.
+
+  - file: crates/agentic-uat/tests/uat_fail_verdict_ignores_ancestor_health.rs
+    justification: |
+      Proves the asymmetry: given a story whose ancestors are NOT all
+      healthy, `Uat::run` with a `--verdict fail` still writes the
+      Fail row to `uat_signings` as usual and does not return
+      `AncestorNotHealthy`. Without this, a story whose tests genuinely
+      regressed could not have its Fail recorded while an ancestor is
+      also broken — which would cascade a real negative signal into
+      silence and make the dashboard's "fell from grace" detection
+      unreachable for whole subtrees.
+
+  - file: crates/agentic-uat/tests/uat_refuses_ancestor_cycle.rs
+    justification: |
+      Proves the invariant defence at the UAT boundary: given a
+      `stories/` directory the loader accepted but where a cycle
+      somehow reached the UAT call (e.g. a regression in the loader's
+      DAG check), `Uat::run` returns `UatError::Cycle` naming the
+      offending edge, writes no row, and does not rewrite any YAML.
+      Without this, a cycle reaching the UAT path would either loop
+      forever computing "is every ancestor healthy" or panic — both
+      strictly worse than a loud refusal.
+
+  - file: crates/agentic-cli/tests/uat_ancestor_refusal_exits_2.rs
+    justification: |
+      Proves the typed refusal reaches the operator through the
+      binary: `agentic uat <id> --verdict pass` where `<id>`'s
+      ancestors are not all healthy exits with code 2 (could-not-
+      verdict, matching the fail-closed-on-dirty-tree pattern's
+      mapping), writes zero rows to `uat_signings`, leaves the
+      fixture YAML unchanged, and emits stderr naming the offending
+      ancestor id and the refusal reason. Without this, a CLI
+      wrapper that mistranslated `AncestorNotHealthy` to exit 1
+      would turn "retry after promoting the ancestor" into "the UAT
+      failed," which is exactly the CI distinction the exit-code
+      contract exists to preserve.
+
+  uat: |
+    Goal: convince yourself that `agentic uat --verdict pass` refuses
+    to sign a story whose ancestors are not all `healthy`-with-signing-
+    row, that a Fail verdict is unaffected, that the refusal is
+    transitive (two hops deep), and that the binary exits 2 (could-
+    not-verdict) on refusal.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status` and
+         confirm the working tree is clean.
+      2. Install the binary: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves to the just-
+         installed binary.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. Identify (or construct on a scratch branch) a small chain of
+         fixture stories: `<leaf-id>` depends_on `<mid-id>`,
+         `<mid-id>` depends_on `<root-id>`. Each should have a
+         trivially-passable UAT walkthrough for the purposes of this
+         exercise. Note the initial `status` of each.
+
+    All-healthy baseline (the non-interference check):
+      5. Drive `<root-id>` through `agentic uat <root-id> --verdict
+         pass --store "$AGENTIC_STORE"` so it becomes `healthy` with
+         a valid signing row.
+      6. Drive `<mid-id>` through `agentic uat <mid-id> --verdict pass
+         --store "$AGENTIC_STORE"` so it becomes `healthy` with a
+         valid signing row. Observe: process exits 0; the YAML now
+         says `status: healthy`; exactly one new signing row exists.
+         The gate permitted the Pass because `<mid-id>`'s ancestor
+         (`<root-id>`) is `healthy` with a valid signing.
+      7. Drive `<leaf-id>` through `agentic uat <leaf-id> --verdict
+         pass --store "$AGENTIC_STORE"`. Observe: same happy path as
+         step 6. The chain is fully healthy.
+
+    Direct-ancestor refusal:
+      8. Edit `<mid-id>`'s YAML back to `status: under_construction`
+         (no commit necessary — or commit it; both shapes matter and
+         the test suite pins the dirty-tree behaviour separately).
+         If you committed, re-run on a clean tree. Either way, the
+         on-disk `status` of `<mid-id>` is now `under_construction`.
+      9. Run `agentic uat <leaf-id> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 2 (not 0, not 1 — the could-not-verdict
+             code).
+           - stderr names `<mid-id>` as the offending ancestor with a
+             refusal reason phrased so the operator knows exactly
+             which ancestor to fix.
+           - `stories/<leaf-id>.yml` is UNCHANGED — `status:` field
+             did not advance.
+           - No new row was written to `uat_signings` for
+             `<leaf-id>`.
+
+    Transitive-ancestor refusal:
+     10. Restore `<mid-id>` to `status: healthy` (re-run
+         `agentic uat <mid-id> --verdict pass ...` to re-promote it
+         with a fresh signing row — the tree must be clean).
+     11. Edit `<root-id>`'s YAML to `status: under_construction`.
+     12. Run `agentic uat <leaf-id> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 2.
+           - stderr names `<root-id>` as the offending ancestor (NOT
+             `<mid-id>` — the gate reaches past the direct ancestor
+             to the first non-healthy link in the chain).
+           - `<leaf-id>` YAML unchanged; no new signing row.
+
+    Hand-edited-healthy refusal (the evidence-over-claim check):
+     13. Restore `<root-id>` to `status: healthy` via HAND EDIT only —
+         do NOT run `agentic uat <root-id> ...`. This simulates the
+         case where someone tried to short-circuit the gate.
+         (Note: on disk the previous signing row for `<root-id>`
+         still exists from step 5, so for this walkthrough you may
+         need to clear the store — `rm -rf "$AGENTIC_STORE" && mkdir
+         -p "$AGENTIC_STORE"` — and redo steps 5–7 for the chain,
+         stopping before you actually run UAT on `<root-id>` so no
+         signing row is present. Exact mechanics vary by what the
+         store looks like; the point is: `<root-id>` is `healthy`
+         in YAML but has zero `uat_signings.verdict=pass` rows.)
+     14. Run `agentic uat <leaf-id> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 2.
+           - stderr names `<root-id>` and indicates the refusal
+             reason is "no signing row" (or equivalent phrasing), not
+             "YAML says not healthy" — the distinction matters so an
+             operator knows a hand-edit did not stand in for a real
+             UAT.
+           - No new row; no YAML mutation.
+
+    Fail-verdict unaffected:
+     15. With the chain still in the hand-edited state from step 13
+         (so ancestors are NOT all valid-healthy), run
+         `agentic uat <leaf-id> --verdict fail --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 1 (the Fail exit, per story 1's contract).
+           - Exactly one new row in `uat_signings` for `<leaf-id>`
+             with `verdict=fail`.
+           - `<leaf-id>` YAML unchanged (Fail never promotes).
+           The gate did not interpose on the Fail path — story 1's
+           Fail contract is intact.
+
+    Cleanup:
+     16. Revert any YAML edits made during the walkthrough
+         (`git checkout stories/<leaf-id>.yml`, etc.) so the corpus
+         matches HEAD.
+     17. `rm -rf "$AGENTIC_STORE"` to clear the ephemeral store.
+     18. If you want the installed binary gone: `cargo uninstall
+         agentic-cli`.
+guidance: |
+  This story adds ONE invariant to the UAT gate: a Pass verdict
+  refuses to sign when any transitive ancestor is not `healthy`
+  backed by a valid `uat_signings.verdict=pass` row. The signing
+  row contract, the dirty-tree refusal, the promotion rewrite, the
+  exit-code contract, the store-location semantics, the executor
+  trait — all pinned by story 1 — are unchanged. This is an
+  additional refusal, not a new signing flow.
+
+  Why this is a separate story from 1 (the UAT gate).
+    Story 1 is `healthy` today on a single-story signing contract.
+    This story composes Pass refusal across the DAG — it reads the
+    ancestry graph and every ancestor's signing history before
+    deciding whether `Uat::run` may proceed with a Pass. That is a
+    refusal-surface addition, not a refactor of story 1's contract.
+    The UAT walkthrough above has a distinct starting context
+    (multi-story chain with deliberately-broken ancestors) from
+    story 1's single-story walkthrough, and its observable is the
+    new `AncestorNotHealthy` refusal. Per the splitting-rule:
+    distinct starting contexts, distinct observable, distinct
+    command argument shape (the Pass path is exercised against a
+    graph, not a story). Story 1's YAML will need a small guidance
+    update AFTER this story ships healthy — by a subsequent story-
+    writer pass, auto-reverting story 1 to `under_construction` per
+    the system design. That is correct behaviour; attempting to
+    pre-edit story 1 would re-open it prematurely.
+
+  Why the refusal is transitive, not just direct.
+    A direct-only check treats "my parent is healthy" as sufficient
+    proof the foundation is sound — but "healthy" is recursive by
+    design: an ancestor is healthy only if ITS ancestors were
+    healthy when it signed. Checking only direct `depends_on` would
+    let an operator mark one intermediate story healthy via a Pass
+    signed when its own ancestry was broken, then stand a whole
+    subtree on top. The transitive check closes that loophole. It
+    also costs us nothing in practice: `depends_on` is a DAG and
+    the traversal is a single DFS bounded by the corpus size.
+
+  Why we check the signing row, not just the YAML claim.
+    `healthy` is supposed to be writable only by `agentic uat` on a
+    Pass verdict (story 1). In practice, a hand-edit, a revert
+    that retained the status field, or a merge accident can leave
+    `status: healthy` on disk without a corresponding
+    `uat_signings.verdict=pass` row. If we checked YAML alone, the
+    gate would be fooled by any of those states exactly where it
+    matters most (when a descendant is about to stand on the
+    claim). Checking the store instead means the gate trusts the
+    same evidence the dashboard trusts — one source of truth,
+    which is the whole point of the four-status model.
+
+    Note: this intentionally duplicates a small amount of
+    classification logic between `agentic-dashboard` (story 3's
+    `healthy` rule: YAML == healthy AND latest
+    `uat_signings.verdict=pass` row matches HEAD) and
+    `agentic-uat` (this story's ancestor check: same rule applied
+    to each ancestor). We prefer duplication over a cross-crate
+    dependency from the uat library to the dashboard — the UAT
+    library is standalone-resilient-library-shaped (see the
+    referenced pattern) and must not grow a dashboard dependency.
+    If the duplication proves fragile, the next step is extracting
+    a shared `health_of` helper into `agentic-story` (the domain
+    center); that is a refactor, not a shared crate.
+
+  Why Fail is unaffected.
+    Recording a Fail verdict is strictly useful even when the
+    ancestry is broken — it is how the "fell from grace" signal
+    reaches the dashboard for stories whose tests genuinely
+    regressed. If the gate refused Fail too, a subtree with any
+    broken ancestor would become invisible to the dashboard, and
+    operators would lose exactly the signal the four-status model
+    was built to surface. The invariant is precisely "Pass is a
+    composable attestation" — not "the gate freezes on broken
+    foundations."
+
+  Refusal semantics.
+    - Error variant: `UatError::AncestorNotHealthy { ancestor_id,
+      reason }`. The `reason` is a typed sub-enum distinguishing
+      "YAML status != healthy" from "no signing row" from
+      "signing row present but latest verdict is fail" from
+      "signing row present but latest verdict pre-dates the
+      ancestor's current related_files staleness" (composition
+      with story 9 — see "Composition with story 9" below).
+    - Exit code: 2 (could-not-verdict). The fail-closed-on-dirty-
+      tree pattern's mapping is reused: "retry after fixing the
+      prerequisite," not "the UAT itself failed."
+    - The refusal fires BEFORE the dirty-tree check. Rationale: an
+      operator running UAT on a leaf whose ancestors are broken
+      should be told "fix the ancestry" whether or not their tree
+      is dirty; we do not want the two refusal messages to race
+      and surface whichever happens to fire first. If BOTH refusal
+      conditions hold, the ancestor refusal wins — it points at
+      the larger problem.
+
+  Composition with story 9 (related_files staleness).
+    Story 9's dashboard treats a `healthy` classification as
+    permissive when the UAT signing commit pre-dates HEAD but
+    none of the story's `related_files` changed. The ancestor
+    gate here respects that composition: an ancestor is
+    "healthy with valid signing" when the SAME rule the dashboard
+    applies returns `healthy`. If story 9 later ships transitive
+    staleness (an ancestor whose related_files changed marks
+    descendants stale too), this gate's ancestor check composes
+    over it automatically — the dashboard computation the gate
+    reuses handles the shift. No explicit coordination is
+    required between this story and the hypothetical transitive-
+    staleness story.
+
+  Cycle defence.
+    The traversal is guarded by a visited set. If a cycle is
+    encountered (which should be impossible after story 6's
+    loader check, but the gate defends in depth), return
+    `UatError::Cycle { edge }` and stop. This mirrors the
+    dashboard's cycle-refusal contract pinned in story 10.
+
+  Signing log bookkeeping on refusal.
+    A refusal writes NOTHING to `uat_signings`. No "refused"
+    record, no partial row, no marker. Rationale: the signing
+    table is for attestations, not for every attempted call.
+    Operator-visible audit trails (what was attempted, by whom,
+    when) belong in a future "command history" table with its
+    own retention policy, NOT in the attestation table. Keep
+    `uat_signings` small, queryable, and purely attestational.
+
+  CLI shape.
+    `agentic uat <id> --verdict <pass|fail> [--store <path>]`
+    argv is unchanged from story 1. The new refusal manifests
+    only as a new stderr message and exit code 2 under the same
+    argv shape operators already know. No new flag, no
+    `--skip-ancestor-check` escape hatch — same principle as the
+    fail-closed-on-dirty-tree pattern's "no best-effort escape
+    hatch" clause.
+
+  Allowed dependencies for `agentic-uat` (unchanged from story 1).
+    `agentic-story`, `agentic-store`, `agentic-events`, `git2`.
+    The ancestor check needs access to the full loaded corpus —
+    which `agentic-story` already provides — and access to the
+    store's `uat_signings` table, which `agentic-store` already
+    provides. No new dependency is added. The standalone-resilience
+    test from story 1 continues to cover the crate; adding a new
+    one for this story would duplicate the claim. See
+    `standalone-resilient-library` pattern — the dependency floor
+    is unchanged, so no new test is needed for this story.
+
+  Relationship to the patterns.
+    `standalone-resilient-library` applies for the same reason
+    story 1 applied it: `agentic-uat` must still sign correctly
+    when the rest of the system is in flames. This story does not
+    loosen that posture.
+    `fail-closed-on-dirty-tree` continues to apply. The
+    ancestor refusal is a SECOND fail-closed axis on the same
+    library: the signing-is-only-valid-if-tree-is-clean axis
+    from story 1, and the signing-is-only-valid-if-ancestry-is-
+    healthy axis from this story. Both map to exit code 2. Both
+    refuse to write evidence. Both have no escape hatch. This
+    story uses the same pattern for the same reasons; the
+    pattern's contract fits both axes without modification.
+
+  Test file locations.
+    Library-level tests (six tests:
+    `uat_refuses_unhealthy_ancestor.rs`,
+    `uat_permits_all_healthy_ancestors.rs`,
+    `uat_refuses_ancestor_with_stale_yaml_status.rs`,
+    `uat_refuses_transitive_unhealthy_ancestor.rs`,
+    `uat_fail_verdict_ignores_ancestor_health.rs`,
+    `uat_refuses_ancestor_cycle.rs`) live under
+    `crates/agentic-uat/tests/` as Rust integration tests. They
+    construct a temporary git repo via `tempfile` + `git2`, seed
+    it with a minimal multi-story fixture (a three-story chain is
+    sufficient for the transitive test; a two-story pair for the
+    direct test), and either pre-seed `uat_signings` rows via
+    `MemStore` or drive `Uat::run` against the ancestors first to
+    build real rows.
+
+    Binary-level tests (one test:
+    `uat_ancestor_refusal_exits_2.rs`) lives under
+    `crates/agentic-cli/tests/` as a Rust integration test,
+    driven via `assert_cmd`. Only one binary test is added
+    because the binary's exit-code wire is already pinned by
+    story 1's four binary tests; this story's new contract adds
+    ONE new mapping (`AncestorNotHealthy` → exit 2) and that is
+    the only new thing to pin at the binary boundary. Restating
+    the dirty-tree or bad-id exit mappings here would duplicate
+    story 1's proofs.
+
+  Relationship to story 10.
+    Independent. Story 10 is read-only (dashboard lens shift).
+    This story is write-refusal (UAT gate extension). They share
+    no code path; they share only the domain concept "ancestry."
+    Shipping order within the epic is flexible — neither depends
+    on the other.
+
+  Relationship to story 12.
+    Independent. Story 12 is CI subtree execution; it does not
+    sign anything. The ancestor-health rule here does not gate
+    CI runs — running tests on a story whose ancestry is broken
+    is legitimate (you may be debugging that exact situation).
+    The gate applies only to the Pass attestation path.
+depends_on:
+- 1
+- 3
+- 6
+related_files:
+- crates/agentic-uat/src/**
+- crates/agentic-cli/src/**
+- crates/agentic-story/src/**

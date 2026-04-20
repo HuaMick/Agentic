@@ -16,16 +16,49 @@ acceptance:
   tests:
     - file: crates/agentic-test-builder/tests/scaffolds_missing_files.rs
       justification: |
-        Proves the happy path: given a story whose acceptance.tests[]
-        lists two file paths that do not exist on disk and whose
-        justifications are substantive, `TestBuilder::run` writes both
-        files as compilable Rust integration tests, runs each one,
-        observes each fail, and appends one red-state JSONL row to
-        `evidence/runs/<id>/` with one `verdict: red` entry per scaffold
-        and the current HEAD commit hash. Without this the whole
-        contract is empty — red-state evidence is the artefact this
-        agent exists to produce, and if the happy path does not write
-        it the rest is theatre.
+        Proves the runtime-red happy path: given a story whose
+        acceptance.tests[] lists two file paths that do not exist
+        on disk and whose justifications are substantive prose
+        whose first line implies behaviour the fixture's existing
+        implementation can already be CALLED into (imports resolve
+        and the crate compiles) but that asserts a condition the
+        implementation does not yet satisfy, `TestBuilder::run`
+        writes both files as compilable Rust integration tests,
+        runs each one, observes each fail with a `panic!` whose
+        message is the justification's first line, and appends one
+        red-state JSONL row to `evidence/runs/<id>/` with one
+        `verdict: red` entry per scaffold, `red_path: "runtime"` on
+        each entry, `diagnostic` equal to that first line of the
+        panic message, and the current HEAD commit hash. Without
+        this the whole contract is empty — red-state evidence is
+        the artefact this agent exists to produce, and if the
+        happy path does not write it the rest is theatre. The
+        compile-red branch of the same evidence shape is pinned
+        separately by `scaffolds_compile_red_variant.rs`.
+
+    - file: crates/agentic-test-builder/tests/scaffolds_compile_red_variant.rs
+      justification: |
+        Proves the compile-red happy path — the second branch of
+        the evidence row's `red_path` discriminant, currently
+        unpinned if `scaffolds_missing_files.rs` covers only the
+        runtime-red branch. Given a story whose acceptance.tests[]
+        lists a file path that does not exist on disk and whose
+        substantive justification implies a symbol (e.g. a public
+        function, struct, or method) the fixture's implementation
+        has not yet declared, `TestBuilder::run` writes a scaffold
+        that references that symbol, `cargo check
+        --package <crate> --test <name>` fails with a rustc error
+        (not a runtime panic), and the red-state JSONL row for
+        that scaffold carries `verdict: red`,
+        `red_path: "compile"`, and `diagnostic` equal to the first
+        line of the captured rustc error output. Runtime-red
+        rows remain absent from this evidence row (or belong to a
+        different scaffold in the same run). Without this, the
+        evidence-shape contract covers only one side of the
+        `red_path` enum — an implementation could default every
+        row to `"runtime"` (or vice versa) and the rest of the
+        suite would miss it, breaking the handshake with
+        build-rust and UAT which branch on that discriminant.
 
     - file: crates/agentic-test-builder/tests/preserves_existing_tests.rs
       justification: |
@@ -66,15 +99,71 @@ acceptance:
     - file: crates/agentic-test-builder/tests/evidence_row_shape.rs
       justification: |
         Proves the evidence shape that downstream agents (build-rust,
-        `agentic uat`) rely on: after a happy-path run the JSONL row
-        contains exactly the keys `run_id`, `story_id`, `commit`,
-        `timestamp`, and `verdicts`, where `verdicts` is an array with
-        one entry per acceptance.tests[].file keyed by `file` with
-        `verdict` in {`red`, `preserved`} and a `diagnostic` field on
-        red rows whose value is the first line of the scaffold's panic
-        output. Without this, the handshake with build-rust and UAT is
-        a conventions-not-contract situation — the next agent that
-        reads the evidence file has nothing stable to parse against.
+        `agentic uat`, `agentic-verify`) rely on: after a happy-path
+        run the JSONL row contains exactly the keys `run_id` (UUID v4),
+        `story_id`, `commit` (40-hex HEAD SHA), `timestamp` (ISO-8601
+        UTC), and `verdicts`. `verdicts` is an array with one entry per
+        acceptance.tests[].file keyed by `file`, with `verdict` in
+        {`red`, `preserved`}. Red rows carry two additional fields:
+        `red_path` in {`compile`, `runtime`} and `diagnostic` — the
+        first line of the rustc error for compile-red, the first line
+        of the panic message for runtime-red. Preserved rows carry
+        neither `red_path` nor `diagnostic`. Without this, the
+        handshake with build-rust and UAT is a conventions-not-contract
+        situation — the next agent that reads the evidence file has
+        nothing stable to parse against.
+
+    - file: crates/agentic-test-builder/tests/empty_file_treated_as_missing.rs
+      justification: |
+        Proves the empty-file classification: given a story whose
+        acceptance.tests[] entry points at a file that exists on disk
+        but whose content is empty (zero bytes) or whitespace-only,
+        `TestBuilder::run` treats it as SCAFFOLD (writes a real failing
+        test into it and records a `red` verdict), not PRESERVED. The
+        process.yml contract is "preserved means non-empty content";
+        without a test pinning the empty-file case, a zero-byte file
+        left behind by a prior failed run would be forever preserved
+        as a no-op — re-rennying would never happen, and the story
+        would never get a real scaffold.
+
+    - file: crates/agentic-test-builder/tests/zero_acceptance_tests_is_escalation.rs
+      justification: |
+        Proves the zero-tests refusal: given a story whose
+        `acceptance.tests` is an empty array (or absent), `TestBuilder::run`
+        returns `TestBuilderError::NoAcceptanceTests` (or an equivalent
+        typed variant), writes zero scaffolds, and writes zero
+        evidence. The schema should block this at story-writer time,
+        but the agent defends in depth — a story with zero executable
+        tests would produce a zero-verdict evidence row, which is an
+        attestation claiming "this story is red" without any observable
+        to stand behind. The refusal makes the empty-acceptance case a
+        story-writer escalation, not a silent green-from-nothing.
+
+    - file: crates/agentic-test-builder/tests/adds_dev_deps_but_not_runtime_deps.rs
+      justification: |
+        Proves the narrow Cargo.toml authority granted by
+        `agents/test/test-builder/contract.yml`: test-builder MAY
+        append entries under `[dev-dependencies]` in the TARGET
+        crate's `Cargo.toml` when a scaffold it is about to author
+        would not compile without them (happy path — the entry
+        appears, the scaffold compiles and fails red, and the run
+        summary names each added dev-dep), but MUST NOT touch
+        `[dependencies]`, `[build-dependencies]`, `[features]`,
+        `[package]`, or any other section of that Cargo.toml, nor
+        ANY other Cargo.toml in the workspace (root or sibling
+        crates), nor `Cargo.lock`. A fixture that requests a
+        runtime-deps edit — or any non-`[dev-dependencies]` mutation
+        — causes `TestBuilder::run` to return a typed out-of-scope
+        error variant (implementation choice; suggest
+        `TestBuilderError::OutOfScopeEdit`), write zero scaffolds,
+        write zero evidence, and leave every Cargo.toml in the
+        workspace bytes-identical to its pre-run state. Without this
+        test the narrow Cargo.toml authority in contract.yml is
+        ungated — an implementer could silently widen
+        test-builder's reach into runtime deps or the workspace
+        root, turning the red-state writer into a build-graph
+        mutator, and the fail-closed-on-dirty-tree pattern cannot
+        catch it (these edits would be perfectly clean on commit).
 
   uat: |
     Goal: convince yourself that `agentic test-build` writes red-state
@@ -103,9 +192,14 @@ acceptance:
          `run_id`, `story_id`, `commit`, `timestamp`, and `verdicts`;
          and that every acceptance.tests[].file path appears in
          `verdicts` exactly once.
-      7. For each CREATED row, run `cargo test --package <crate>
-         --test <name>` and confirm the test panics with the first
-         line of its justification.
+      7. For each CREATED row, inspect the evidence row's `red_path`.
+         If `compile`: run `cargo check --workspace --tests` and
+         confirm it fails with a rustc error whose first line matches
+         the row's `diagnostic` field (the scaffold references a
+         symbol the implementation has not yet declared). If
+         `runtime`: run `cargo test --package <crate> --test <name>`
+         and confirm the test fails with a panic whose first line
+         matches the row's `diagnostic` field.
 
     Preservation check:
       8. Revert the untracked scaffolds and evidence from the happy
@@ -177,10 +271,23 @@ guidance: |
   - **Evidence shape is the handshake.** The JSONL row's keys are
     fixed (`run_id`, `story_id`, `commit`, `timestamp`, `verdicts`).
     Each verdict carries `file`, `verdict`, and — for `red` only —
-    `diagnostic` (the first line of the scaffold's panic output,
-    captured from a real `cargo test` invocation). Downstream agents
-    parse this shape; changing it is a breaking change that requires
-    an ADR update, not a code change.
+    `red_path` (one of `compile`, `runtime`) and `diagnostic` (the
+    first line of the rustc error for compile-red, the first line of
+    the panic message for runtime-red, each captured from a real
+    `cargo check` or `cargo test` invocation). Preserved rows carry
+    neither `red_path` nor `diagnostic`. Downstream agents parse this
+    shape; changing it is a breaking change that requires an ADR
+    update, not a code change.
+
+  - **`agentic test-build` is the red-state creator, not a runner.**
+    The verb creates failing scaffolds for stories that do not yet
+    have them, on a clean tree, and records the red-state evidence.
+    It is distinct from `agentic stories test <selector>` (story 12),
+    which RUNS already-committed acceptance tests across a DAG
+    subtree and records per-story `test_runs` rows. test-build
+    writes JSONL under `evidence/runs/<id>/`; `stories test` writes
+    upserted rows to the `test_runs` table. The two verbs do not
+    share a code path and do not share an exit-code contract.
 
   - **Thin-justification detection is local.** The refusal rule is
     evaluated per acceptance.tests[] entry independently: thin =
@@ -206,7 +313,36 @@ guidance: |
     re-opened for write. No migration branch in the code; the
     invariant "existing file is bytes-immutable" already covers it.
 
-depends_on: []
+  - **Relationship to story 11 (UAT ancestor gate).** Story 7 and
+    story 11 touch the same concept (red-state / healthy-state
+    evidence) but produce DIFFERENT artefacts with NO runtime
+    interaction. This story (test-builder) writes JSONL files to
+    `evidence/runs/<id>/` — append-only, on-disk, one file per
+    red-state observation at a commit. Story 11 (UAT ancestor
+    gate) reads `uat_signings` rows from the store — upserted,
+    in-DB, one row per Pass verdict. Neither artefact is read or
+    written by the other's code path; test-builder never consults
+    `uat_signings`, and `agentic uat` never reads
+    `evidence/runs/`. Reconciling the two into a single "is this
+    story's proof complete end-to-end" check is the job of a
+    future `agentic-verify` (its own story, not yet written and
+    explicitly out of scope here). Until that story exists, the
+    two artefacts live side-by-side and downstream tooling reads
+    whichever one answers its question.
+
+  Why depends_on is [6] and not [2]. test-builder reads the target
+    story's YAML via `agentic-story`'s loader (story 6) — it needs a
+    typed Story value with validated `acceptance.tests[]` before it
+    can classify scaffolds. It does NOT write to the `test_runs`
+    table (story 2's concern); its bookkeeping is the JSONL file
+    under `evidence/runs/<id>/`. Story 2's recorder and this story's
+    evidence file are independent — they track different facts (one
+    row per story's latest CI result vs. one file per red-state
+    observation at a specific commit). A future `agentic-verify`
+    that reconciles the two is a separate story.
+
+depends_on:
+- 6
 related_files:
 - crates/agentic-test-builder/src/**
 - crates/agentic-cli/src/**
@@ -214,3 +350,4 @@ related_files:
 - agents/test/test-builder/inputs.yml
 - agents/test/test-builder/process.yml
 - docs/decisions/0005-red-green-is-a-contract.md
+- schemas/story.schema.json

@@ -1,0 +1,126 @@
+name: dag-primary-lens
+objective: |
+  Shift the agentic system's mental model from "flat list of stories" to
+  "DAG of stories with frontier-of-work and drilldown as the primary
+  lens." A story describes and tests a single component; the graph of
+  `depends_on` composes those components into system behaviour. The
+  dashboard, the classifier, the UAT gate, and the CI/test selector
+  all read the same DAG — each operates at the level where it most
+  reduces noise.
+
+  Concretely this epic ships four user-observable shifts:
+
+  1. Dashboard default view is the FRONTIER of not-healthy work —
+     stories that are themselves not `healthy` AND have no not-healthy
+     ancestor. Each frontier row carries a `lvl` depth (longest path
+     to a DAG leaf, negated) and a blast-radius column (immediate
+     downstream ids + transitive count of blocked descendants). Today's
+     flat list becomes a secondary `--all` mode; a middle `--expand`
+     mode shows every not-healthy story (frontier + descendants).
+     Drilldown into any story renders its DAG subtree (ancestors
+     above, descendants below) the way a dbt model renders its
+     lineage.
+  2. `agentic uat` refuses to sign Pass for a story whose ancestors are
+     not `healthy`, treating "prove-it" as a composable contract: a
+     story that claims Pass while standing on an unproven ancestor is
+     forgery of the same shape dirty-tree signing would be.
+  3. `agentic stories test +<id>` (and the inverse selectors) runs the
+     acceptance suite only for the affected subtree on a commit,
+     cutting CI noise when the PR touches one leaf of the graph.
+  4. The classifier propagates not-healthy from ancestors to
+     descendants: a story whose transitive ancestry is not all
+     `healthy` classifies as `unhealthy`, with a reason channel that
+     names the offending ancestor. This is what closes the loop
+     between "the view trusts its inputs" and "the inputs trust
+     their foundations" across the DAG.
+
+stories:
+  - 10
+  - 11
+  - 12
+  - 13
+
+depends_on:
+  - 1
+  - 2
+  - 3
+  - 6
+  - 9
+
+branch: dag-primary-lens
+
+notes: |
+  Why an epic rather than one story. The four stories share a
+  unifying direction (DAG-primary) but have distinct observables
+  (dashboard output shape, UAT refusal, CI test selection,
+  classifier rule), distinct commands (`agentic stories health`,
+  `agentic uat`, `agentic stories test`, and the classifier's
+  rule change surfaced via the dashboard), and distinct starting
+  contexts (operator reviewing health; test-uat agent signing a
+  verdict; CI runner on a PR commit; operator observing a
+  descendant reclassify). An epic captures the objective; the
+  stories capture the executable specs. See the splitting analysis
+  recorded in each story's guidance.
+
+  Why a new selector grammar rather than reusing an existing one.
+  The dbt `+<id>` / `<id>+` / `+<id>+` grammar is already familiar
+  to any operator who has done lineage work on data models; it
+  maps cleanly onto a DAG of stories without inventing a fourth
+  dialect the team has to learn. The epic commits to the dbt
+  grammar verbatim for the CLI surface; stories 10 and 12 both
+  pin it with tests.
+
+  CLI verb placement. Story 10 ships `agentic stories health`
+  (extending story 3's verb with selectors, `--expand`, and
+  frontier-default semantics). Story 12 ships `agentic stories
+  test <selector>` — parallel to `stories health` under the
+  shared `stories` noun, distinct from story 2's `agentic ci
+  record` primitive which remains the one-row upsert verb for
+  CI plumbing. A later curator pass MAY unify `ci record` under
+  `stories`; the epic does not force that unification today.
+
+  Pattern extraction — deferred. The selector grammar will appear
+  in story 10 (dashboard) and story 12 (CI) guidance. That is the
+  2+ threshold for pattern extraction, but the stories are
+  `proposed`; per the pattern-authoring anti-pattern "premature
+  extraction," we inline the grammar in story 10 and reference it
+  from story 12 until both stories are `healthy`. The follow-up
+  curator pass extracts `dag-selector-grammar.yml` from the two
+  healthy stories at that point.
+
+  Read-path / write-path split (stories 11 and 13). Stories 11 and
+  13 both enforce an "ancestors must be healthy" rule, but at
+  different sides of the store. Story 11 enforces on WRITE (UAT
+  refuses to sign a Pass attesting a story with an unproven
+  ancestor). Story 13 enforces on READ (classifier computes
+  `unhealthy` for a descendant of a not-healthy story). The rule
+  is duplicated across `agentic-uat` (story 11) and
+  `agentic-dashboard` (story 13) — deliberately — to preserve
+  `agentic-uat`'s standalone-resilient-library posture. If the
+  duplication proves fragile, a future refactor extracts a shared
+  `classify_health` helper into `agentic-story`; that is a
+  refactor, not a new story.
+
+  Story 13 ships AFTER story 10. Rationale: story 10's frontier
+  view immediately benefits from the richer classification story
+  13 produces, but story 10's own observables (frontier filter,
+  `lvl`, blast-radius columns) are independent of whether a
+  descendant inherits `unhealthy` or merely stays `healthy` —
+  both shapes produce a frontier, and story 10's UAT pins that
+  without needing story 13 to have shipped. Story 13 ships
+  independently and the view re-reads the richer classification
+  without re-authoring.
+
+  Relationship to stories 3 and 9. Both are `healthy` today.
+  Story 10 will, on UAT pass, invalidate story 3's proof (the
+  flat-list default is no longer the dashboard's primary shape)
+  and leave story 9 untouched (file-based staleness is
+  orthogonal to DAG staleness — they compose). Story 11
+  invalidates story 1's proof (the UAT gate grows a new refusal
+  reason). Story 12 is additive over story 2 (the recorder
+  contract is unchanged; the new `agentic stories test` verb is
+  a caller, not a replacement). Story 13 invalidates story 3's
+  proof again (the classifier grows a third input). A curator
+  pass after each story ships updates the upstream stories'
+  guidance to reflect the new composition — NOT done at
+  authoring time, which would re-open healthy stories prematurely.
