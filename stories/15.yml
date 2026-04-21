@@ -4,7 +4,7 @@ outcome: |
   A developer running `agentic test-build <id>` against a proposed story can
   see the per-scaffold authoring plan, write the scaffolds with their own
   tools, and have the CLI atomically verify and record red-state evidence.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -132,6 +132,71 @@ acceptance:
       could drop `--json`, swap plan and record's semantics,
       or write evidence under the wrong path and the operator
       would never notice.
+  - file: crates/agentic-test-builder/tests/record_classifies_compile_red_correctly_across_rustc_ice.rs
+    justification: |
+      Proves record's compile-vs-runtime classifier is robust
+      to rustc's JSON diagnostic-renderer failing mid-emit:
+      given a fixture story whose scaffold on disk contains
+      three or more unresolved `use foo::Bar;` imports (the
+      specific pattern that trips rustc 1.95's annotate-
+      snippets ICE, "slice index starts at N but ends at
+      N-1" inside `StyledBuffer::replace`), `agentic
+      test-build record <id>` classifies the verdict as
+      `red_path: compile` for that scaffold — not `runtime`.
+      The probe MUST key on a signal other than the
+      stderr-rendered `error[EXXXX]` pattern, because that
+      pattern may never emit when the renderer panics first:
+      `cargo check`'s non-zero exit code (before parsing
+      stderr), `--message-format=short`, or `--message-
+      format=json` with its structured diagnostic channel
+      are all acceptable implementations; `grep error\\[E`
+      over human-rendered stderr is not. Without this,
+      compile-red vs runtime-red in evidence stops being
+      trustworthy across toolchain updates, and downstream
+      tooling (the dashboard, UAT readers, future audit
+      agents) cannot rely on `red_path` as a classifier
+      signal.
+  - file: crates/agentic-test-builder/tests/record_evidence_diagnostic_is_per_scaffold_not_aliased.rs
+    justification: |
+      Proves the per-scaffold `diagnostic` in evidence is a
+      snapshot of that scaffold's own probe, not a shared
+      reference to a later-mutated buffer: given a fixture
+      story with three scaffolds, each failing with a
+      DIFFERENT observable failure — scaffold A has
+      unresolved import `alpha_missing`, scaffold B has
+      unresolved import `beta_missing`, scaffold C has a
+      runtime `assert_eq!(1, 2)` panic — `agentic test-build
+      record <id>` writes an evidence JSONL whose three
+      verdict rows each carry a `diagnostic` that contains
+      the string signature of THAT scaffold's own failure
+      (row A's diagnostic contains `alpha_missing`, row B's
+      contains `beta_missing`, row C's contains `assertion`
+      along with the literal values `1` and `2`), and the
+      three diagnostics are pairwise distinct. Per-verdict
+      `diagnostic` must be a per-iteration snapshot, not the
+      last-probed scaffold's output written into every row.
+      Without this, the evidence JSONL lies to downstream
+      readers about what actually failed and which scaffold
+      owns which failure — a forgery axis one layer down
+      from the evidence-atomicity contract.
+  - file: crates/agentic-test-builder/tests/record_evidence_diagnostic_is_always_non_empty.rs
+    justification: |
+      Proves no red verdict is ever stamped with a silent or
+      whitespace-only diagnostic: given any fixture story
+      whose scaffolds all probe red, every `verdicts[]` entry
+      in the written JSONL whose `verdict` is `red` has a
+      `diagnostic` field whose trimmed length is greater than
+      zero. If the probe captures nothing — because the
+      subprocess crashed before any output, because the
+      buffer was lost, or because a refactor silently
+      swallowed the stream — record must fail-closed with a
+      typed error naming the scaffold and exit 2, NOT write
+      a red verdict with an empty diagnostic. This pins a
+      distinct failure mode from the diagnostic-aliasing
+      contract above (aliasing is "wrong content"; this is
+      "no content"); both can regress independently as
+      toolchains and ICE paths shift, and evidence has to
+      survive both.
   uat: |
     Goal: convince yourself that `agentic test-build` is a
     two-phase tool whose library plans and records but does not
@@ -235,6 +300,45 @@ guidance: |
   and supersedes TWO retired stories, and it is the only story
   future readers should consult for what the verb does and how
   its evidence is shaped.
+
+  Amendments (2026-04-20). Two defects surfaced in record's
+    probe and evidence writer during the dag-primary-lens epic
+    loop, AFTER this story reached its first UAT pass:
+      1. Classification misclassification. `record`'s compile-
+         vs-runtime classifier keys on `error[EXXXX]` in
+         rustc's human-rendered stderr. Under rustc 1.95,
+         scaffolds with three or more unresolved imports can
+         trip an ICE in the diagnostic renderer
+         (`annotate_snippets::renderer::styled_buffer::
+         StyledBuffer::replace`, "slice index starts at N but
+         ends at N-1") that panics BEFORE that string emits.
+         The probe then falls through to `cargo test`,
+         captures the ICE panic as a "runtime" diagnostic,
+         and stamps `red_path: runtime` on genuine compile-
+         red scaffolds. Fix: classify on something other than
+         human-rendered stderr (exit code first, JSON
+         diagnostic stream, or `--message-format=short`).
+      2. Diagnostic aliasing. The evidence JSONL writer
+         serialises the same trailing `diagnostic` string
+         into every verdict row (every row's `file` is
+         correct; only `diagnostic` aliases). Hypothesis
+         (for build-rust, not this story): shared mutable
+         buffer across probe iterations serialised at the
+         end. Fix: snapshot diagnostic per iteration.
+    Both defects were unpinned by the first UAT pass because
+    no acceptance test exercised the multi-scaffold
+    per-diagnostic observable, and no test exercised the
+    rustc-ICE classification path. They are now pinned by
+    `record_classifies_compile_red_correctly_across_rustc_ice
+    .rs`, `record_evidence_diagnostic_is_per_scaffold_not_
+    aliased.rs`, and `record_evidence_diagnostic_is_always_
+    non_empty.rs`. The implementation gap is fixed as part
+    of this story's continued life — status auto-reverts to
+    `under_construction`, test-builder re-scaffolds, build-
+    rust fixes, re-UAT closes the loop. This is the
+    claude-as-user / story-is-owner-of-its-domain pattern:
+    defects discovered in a story's surface go back into
+    that story's acceptance tests, never into a new story.
 
   Story 14 (retired 2026-04-20). The prior story 14's contract
     embedded AI inference INSIDE the library — the library spawned
