@@ -51,12 +51,16 @@ parameters:
       `agentic uat <story_id> --verdict <pass|fail>` at the end.
   - name: store_path
     description: |
-      Optional override for the `--store` flag / `AGENTIC_STORE`
-      environment variable passed to the CLI. Use a tempdir
-      (`mktemp -d`) by default so the signing run is isolated from
-      any prior state; pass an explicit path only when re-running
-      against an existing store is the whole point of the session.
-    required_when: a persistent store location is required by the caller (otherwise default to a per-session tempdir).
+      Optional override scoped to WALKTHROUGH FIXTURE steps only
+      (e.g. `agentic uat <fixture-id> --verdict pass --store
+      /tmp/agentic-uat-<id>-fixture` to exercise a scratch fixture
+      corpus on a scratch branch). A tempdir (`mktemp -d`) is the
+      right shape for fixtures that should vanish after the
+      walkthrough. The FINAL attestation — `agentic uat <story_id>
+      --verdict <pass|fail>` where `<story_id>` is the real story
+      being UAT-ed — MUST NOT pass `--store`; the signing row
+      belongs in the default store so the dashboard reads it.
+    required_when: a walkthrough step exercises a fixture corpus in a scratch store (otherwise omit; the final sign invocation uses the default store).
 
 tools:
   - Read
@@ -82,10 +86,14 @@ commands:
       into the run summary so the caller can cross-reference against
       the `uat_signings` row the CLI writes.
   - name: agentic-uat-invoke
-    invocation_example: agentic uat <id> --verdict pass --store "$AGENTIC_STORE"
+    invocation_example: agentic uat <id> --verdict pass
     purpose: |
       The promotion call. `--verdict pass` or `--verdict fail` is
       mandatory; the flag is the agent's whole-walkthrough judgement.
+      **NO `--store` flag** — the signing row must land in the default
+      store (the one `agentic stories health` reads from). Scratch
+      stores are for walkthrough fixtures only, never for the final
+      attestation.
       On exit code 0 the story is promoted to `healthy` on disk. On
       exit code 1 a Fail verdict was recorded, no promotion. On exit
       code 2 the CLI could not produce a verdict (dirty tree, bad id,

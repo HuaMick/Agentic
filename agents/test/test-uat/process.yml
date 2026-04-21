@@ -95,7 +95,13 @@ workflow:
       detail: |
         Run the installed `agentic` binary once, with the judged
         verdict:
-          agentic uat <story_id> --verdict <pass|fail> --store "<path>"
+          agentic uat <story_id> --verdict <pass|fail>
+        Do NOT pass `--store` on this final sign invocation — the
+        signing row must land in the default store (the one
+        `agentic stories health` reads from). Walkthrough steps that
+        exercise `agentic uat` against fixture corpora MAY pass
+        `--store /tmp/agentic-uat-<id>-fixture`, but those are separate
+        invocations from the final attestation.
         Capture exit code, stdout, stderr.
         Expected mapping (see the story's `guidance:` block for the
         authoritative contract):
@@ -117,11 +123,13 @@ workflow:
         On a Fail invocation, re-read the story file and confirm the
         `status:` field is unchanged. A Fail that silently promoted
         would be a catastrophic regression; surface it immediately.
-        If the run's `--store` is a tempdir created for this session,
-        optionally query `uat_signings` to confirm exactly one new
-        row for the story with the judged verdict — this is helpful
-        evidence, not a contract. Do not block on the query if the
-        store shell is not available.
+        Optionally query `uat_signings` in the DEFAULT store
+        (`~/.local/share/agentic/store`, or whatever `AGENTIC_STORE`
+        resolves to) to confirm exactly one new row for the story
+        with the judged verdict — this is helpful evidence, not a
+        contract. Never query a fixture/scratch store for the
+        signing row; the signing row lives in the default store by
+        design.
 
     - step: Report.
       detail: |
@@ -155,6 +163,7 @@ guidance:
     - A CLI exit code of 2 is NOT a Fail. Exit 0 is a signed Pass; exit 1 is a signed Fail; exit 2 is the CLI declining to sign and is always an escalation (dirty tree, unknown story, store unavailable, missing `--verdict` flag). Do not translate exit 2 into a Fail verdict in the report — report it as "CLI could not sign" with the cause.
     - WSL cargo routing per CLAUDE.md. When a UAT step prescribes `cargo ...`, route through `wsl bash -c "source ~/.cargo/env && cd /home/code/Agentic && cargo <cmd>"` from Windows sessions. The routing is environment plumbing; the prose's command is still authoritative.
     - Subscription auth via the local `claude` binary is the runtime's concern, not UAT's. `agentic-runtime` (the orchestrator crate) is the only caller that spawns `claude`; this agent never shells out to `claude` itself. UAT's job is to drive the product CLI (`agentic uat`, `agentic stories health`, etc.) and judge the observables the prose names. If a walkthrough step indirectly causes the runtime to spawn a subagent under the hood, that is fine and invisible to UAT — but UAT itself generates no content via AI and never invokes `claude -p`. See CLAUDE.md and ADR-0003.
+    - Fixture stores are ephemeral; the final signing invocation uses the default store. Walkthroughs frequently use a scratch store (e.g. `--store /tmp/agentic-uat-<id>-fixture`) to exercise fixture corpora without touching real data — that is correct. But the final `agentic uat <story_id> --verdict pass` attestation MUST NOT pass `--store`. It must write to the default store (`~/.local/share/agentic/store`, or whatever `AGENTIC_STORE` resolves to) so the signing row persists into the system the dashboard reads from. If you cleaned up a scratch store before signing, double-check your sign command has no `--store` flag. Losing the row silently produces "ghost healthy" drift — the YAML reads `healthy` on disk but the dashboard marks the story `unhealthy` because the staleness classifier (story 9 rule) can't find the signing row, cascading through the ancestor-inheritance classifier (story 13 rule).
 
   anti_patterns:
     - "Editing a test file, source file, or any other authored artefact to make a UAT observable pass. A Fail observable is a signal that build-rust or test-builder has upstream work to do — it is not an invitation for the UAT runner to fix the code under test. Silent edits turn the gate into theatre."
@@ -162,6 +171,7 @@ guidance:
     - Invoking `agentic uat --verdict pass` when any observable in the walkthrough failed, however "trivially." Partial Pass is Fail. A Pass verdict that turned out to hide a real regression is worse than a clean Fail because the `uat_signings` row then attests to a walkthrough that did not actually pass.
     - Paraphrasing a prose command into a "clearer" or "shorter" form before running it. The prose is the contract; paraphrasing is drift. If the prose is itself unclear, STOP and escalate to story-writer — do not resolve the ambiguity unilaterally.
     - Letting scratch artefacts survive the run. A `crates/<crate>/examples/<name>.rs` file left on disk turns the tree dirty at signing time, and the CLI will refuse to sign. Worse, if the agent does not re-check the tree before invoking the CLI, the run reports "could not sign" as a system fault rather than as the housekeeping failure it actually is.
+    - Signing the final verdict with `--store <scratch-path>` when the scratch store is about to be deleted (or was only meant to hold fixture rows). The signing row vanishes with the cleanup and the story drifts into ghost-healthy state — YAML says `healthy`, dashboard says `unhealthy` via the staleness classifier finding no/stale signing row. The default store is the only correct target for the final sign invocation; scratch stores are for walkthrough fixtures, never for attestation.
     - "Silently `git restore`-ing files the agent did not create to clean the tree before signing. Those edits belong to whoever authored them; erasing them to pass the clean-tree gate is a proof-preservation edit in the signing layer."
     - Treating CLI exit code 2 as a Fail. Exit 2 is "could not sign" — always an escalation. Reporting it as Fail writes a false Fail row to `uat_signings` (or no row at all, if the CLI short-circuited) and misleads downstream readers.
     - "Editing `stories/<id>.yml` to set `status: healthy` manually when the CLI did not promote it. Manual status edits are forbidden by the schema for `healthy` (per the story-writer contract) and by this agent's own scope. The CLI is the only author of `healthy`; this agent is the caller of the CLI."
