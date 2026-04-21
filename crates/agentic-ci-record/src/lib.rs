@@ -38,7 +38,8 @@
 //! call them. The `record_standalone_resilience` integration test enforces
 //! this by linking only against the allowed set.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -77,6 +78,86 @@ impl Verdict {
         }
     }
 }
+
+/// Outcome of a single test-executor invocation.
+///
+/// Returned by [`TestExecutor::run_tests`]. Carries the verdict and
+/// failing test names (basenames only) that will be written to `test_runs`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutorOutcome {
+    /// The verdict: Pass or Fail.
+    pub verdict: Verdict,
+    /// On Pass, always empty. On Fail, basenames of tests that failed.
+    pub failing_tests: Vec<String>,
+}
+
+impl ExecutorOutcome {
+    /// Build a Pass outcome (failing_tests forced empty).
+    pub fn pass() -> Self {
+        Self {
+            verdict: Verdict::Pass,
+            failing_tests: Vec::new(),
+        }
+    }
+
+    /// Build a Fail outcome naming the failed tests.
+    pub fn fail(failing_tests: Vec<String>) -> Self {
+        Self {
+            verdict: Verdict::Fail,
+            failing_tests,
+        }
+    }
+}
+
+/// Pluggable test executor trait. Story 12 injects this so tests can
+/// stub execution without invoking real cargo.
+pub trait TestExecutor: Send + Sync {
+    /// Run the acceptance tests for the given story. Test files are
+    /// absolute paths (typically under `crates/<name>/tests/`). Returns
+    /// the verdict and (on fail) the basenames of failed tests.
+    fn run_tests(&self, story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome;
+}
+
+/// Error type for [`CiRunner::run`].
+#[derive(Debug)]
+pub enum CiRunError {
+    /// The selector named a story id that does not exist.
+    UnknownStory { id: u32 },
+    /// The loaded corpus contains a cycle in `depends_on` edges.
+    Cycle { participants: Vec<u32> },
+    /// The selector syntax was invalid.
+    BadSelector { input: String, reason: String },
+    /// The executor failed to run (IO, compilation, etc.). The subtree
+    /// run is halted; already-completed stories' rows remain in `test_runs`.
+    ExecutorFailed { story_id: u32, reason: String },
+    /// The test executor invocation returned an error or panic.
+    ExecutorPanic { story_id: u32, reason: String },
+    /// Store or filesystem error.
+    Store(String),
+}
+
+impl std::fmt::Display for CiRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CiRunError::UnknownStory { id } => write!(f, "unknown story id: {id}"),
+            CiRunError::Cycle { participants } => {
+                write!(f, "cycle in depends_on graph: {:?}", participants)
+            }
+            CiRunError::BadSelector { input, reason } => {
+                write!(f, "bad selector {}: {}", input, reason)
+            }
+            CiRunError::ExecutorFailed { story_id, reason } => {
+                write!(f, "executor failed for story {}: {}", story_id, reason)
+            }
+            CiRunError::ExecutorPanic { story_id, reason } => {
+                write!(f, "executor panic for story {}: {}", story_id, reason)
+            }
+            CiRunError::Store(msg) => write!(f, "store error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for CiRunError {}
 
 /// Input to [`Recorder::record`] — the typed shape an already-parsed
 /// test-runner output takes before being upserted into `test_runs`.
@@ -281,6 +362,453 @@ impl Recorder {
 
         self.store.upsert(TEST_RUNS_TABLE, &key, doc)?;
         Ok(())
+    }
+}
+
+/// Selector-scoped test runner. Loads stories from disk, traverses the DAG
+/// per the selector, invokes the test executor for each story in the
+/// selected set, and upserts rows to `test_runs` via the [`Recorder`].
+pub struct CiRunner {
+    store: Arc<dyn Store>,
+    executor: Box<dyn TestExecutor>,
+    stories_dir: PathBuf,
+}
+
+impl CiRunner {
+    /// Create a new runner with the given store, executor, and stories directory.
+    pub fn new(
+        store: Arc<dyn Store>,
+        executor: Box<dyn TestExecutor>,
+        stories_dir: PathBuf,
+    ) -> Self {
+        Self {
+            store,
+            executor,
+            stories_dir,
+        }
+    }
+
+    /// Run tests for stories matching the selector. The selector grammar:
+    /// - `+<id>`: target plus transitive ancestors.
+    /// - `<id>+`: target plus transitive descendants.
+    /// - `+<id>+`: target plus ancestors and descendants (full subtree).
+    /// - `<id>`: target story only.
+    ///
+    /// Returns the overall exit code: 0 if all tests Pass, 1 if any Fail,
+    /// 2 on UnknownStory/Cycle/BadSelector.
+    pub fn run(&self, selector: &str) -> Result<i32, CiRunError> {
+        // Parse selector
+        let (target_id, include_ancestors, include_descendants) = self.parse_selector(selector)?;
+
+        // Load and validate the corpus
+        let stories = self.load_stories()?;
+        let story_index: HashMap<u32, usize> = stories
+            .iter()
+            .enumerate()
+            .map(|(idx, story_id)| (*story_id, idx))
+            .collect();
+
+        // Check that target exists
+        if !story_index.contains_key(&target_id) {
+            return Err(CiRunError::UnknownStory { id: target_id });
+        }
+
+        // Compute the selected set
+        let selected = self.compute_selected_set(
+            &stories,
+            &story_index,
+            target_id,
+            include_ancestors,
+            include_descendants,
+        )?;
+
+        // Topologically sort the selected set
+        let sorted = self.topological_sort(&stories, &story_index, &selected)?;
+
+        // Run tests for each story in order, recording results
+        let mut all_pass = true;
+        for story_id in &sorted {
+            let outcome = self.run_story(*story_id)?;
+            if outcome.verdict == Verdict::Fail {
+                all_pass = false;
+            }
+        }
+
+        Ok(if all_pass { 0 } else { 1 })
+    }
+
+    /// Parse the selector string into (target_id, include_ancestors, include_descendants).
+    fn parse_selector(&self, selector: &str) -> Result<(u32, bool, bool), CiRunError> {
+        let has_plus_prefix = selector.starts_with('+');
+        let has_plus_suffix = selector.ends_with('+');
+
+        let id_str = if has_plus_prefix && has_plus_suffix {
+            // +<id>+ case
+            selector
+                .strip_prefix('+')
+                .and_then(|s| s.strip_suffix('+'))
+                .unwrap_or("")
+        } else if has_plus_prefix {
+            // +<id> case
+            selector.strip_prefix('+').unwrap_or("")
+        } else if has_plus_suffix {
+            // <id>+ case
+            selector.strip_suffix('+').unwrap_or("")
+        } else {
+            // bare <id> case
+            selector
+        };
+
+        if id_str.is_empty() {
+            return Err(CiRunError::BadSelector {
+                input: selector.to_string(),
+                reason: "selector must contain a numeric id".to_string(),
+            });
+        }
+
+        let target_id = id_str.parse::<u32>().map_err(|_| CiRunError::BadSelector {
+            input: selector.to_string(),
+            reason: format!("'{}' is not a valid story id", id_str),
+        })?;
+
+        Ok((target_id, has_plus_prefix, has_plus_suffix))
+    }
+
+    /// Load and validate stories from the stories directory. Returns a list
+    /// of all story ids in dependency order (parents before children).
+    fn load_stories(&self) -> Result<Vec<u32>, CiRunError> {
+        let mut stories = HashMap::new();
+        let mut depends_on = HashMap::new();
+
+        // Read all .yml files
+        let entries = std::fs::read_dir(&self.stories_dir)
+            .map_err(|e| CiRunError::Store(format!("failed to read stories dir: {}", e)))?;
+
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| CiRunError::Store(format!("failed to read directory entry: {}", e)))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("yml") {
+                continue;
+            }
+
+            // Parse the file to extract id and depends_on
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| CiRunError::Store(format!("failed to read story file: {}", e)))?;
+
+            let value: serde_yaml::Value = serde_yaml::from_str(&content)
+                .map_err(|e| CiRunError::Store(format!("failed to parse story YAML: {}", e)))?;
+
+            let id = value
+                .get("id")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32)
+                .ok_or_else(|| CiRunError::Store("story file missing id field".to_string()))?;
+
+            let deps: Vec<u32> = value
+                .get("depends_on")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            stories.insert(id, path);
+            depends_on.insert(id, deps);
+        }
+
+        // Detect cycles using Kahn's algorithm
+        self.detect_cycles(&depends_on)?;
+
+        // Return stories in a reasonable order (we'll sort by id for determinism)
+        let mut ids: Vec<u32> = stories.keys().copied().collect();
+        ids.sort();
+        Ok(ids)
+    }
+
+    /// Detect cycles in the dependency graph using DFS.
+    fn detect_cycles(&self, depends_on: &HashMap<u32, Vec<u32>>) -> Result<(), CiRunError> {
+        let mut visited = HashSet::new();
+        let mut rec_stack = HashSet::new();
+
+        for &node in depends_on.keys() {
+            if !visited.contains(&node) {
+                if self.has_cycle_dfs(node, &mut visited, &mut rec_stack, depends_on) {
+                    // Collect participants
+                    let participants: Vec<u32> = rec_stack.iter().copied().collect();
+                    return Err(CiRunError::Cycle {
+                        participants: {
+                            let mut p = participants;
+                            p.sort();
+                            p
+                        },
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// DFS helper for cycle detection.
+    fn has_cycle_dfs(
+        &self,
+        node: u32,
+        visited: &mut HashSet<u32>,
+        rec_stack: &mut HashSet<u32>,
+        depends_on: &HashMap<u32, Vec<u32>>,
+    ) -> bool {
+        visited.insert(node);
+        rec_stack.insert(node);
+
+        if let Some(deps) = depends_on.get(&node) {
+            for &dep in deps {
+                if !visited.contains(&dep) {
+                    if self.has_cycle_dfs(dep, visited, rec_stack, depends_on) {
+                        return true;
+                    }
+                } else if rec_stack.contains(&dep) {
+                    return true;
+                }
+            }
+        }
+
+        rec_stack.remove(&node);
+        false
+    }
+
+    /// Compute the set of story ids matching the selector.
+    fn compute_selected_set(
+        &self,
+        stories: &[u32],
+        story_index: &HashMap<u32, usize>,
+        target_id: u32,
+        include_ancestors: bool,
+        include_descendants: bool,
+    ) -> Result<HashSet<u32>, CiRunError> {
+        let mut selected = HashSet::new();
+        selected.insert(target_id);
+
+        if include_ancestors {
+            self.collect_ancestors(&mut selected, target_id, stories, story_index)?;
+        }
+        if include_descendants {
+            self.collect_descendants(&mut selected, target_id, stories, story_index)?;
+        }
+
+        Ok(selected)
+    }
+
+    /// Recursively collect ancestor story ids.
+    fn collect_ancestors(
+        &self,
+        result: &mut HashSet<u32>,
+        story_id: u32,
+        stories: &[u32],
+        story_index: &HashMap<u32, usize>,
+    ) -> Result<(), CiRunError> {
+        // Load the story to get its depends_on list
+        let _idx = *story_index
+            .get(&story_id)
+            .ok_or_else(|| CiRunError::UnknownStory { id: story_id })?;
+        let _ = stories; // Keep the param for potential future use
+
+        let story_path = self.stories_dir.join(format!("{}.yml", story_id));
+        let content = std::fs::read_to_string(&story_path)
+            .map_err(|e| CiRunError::Store(format!("failed to read story {}: {}", story_id, e)))?;
+
+        let value: serde_yaml::Value = serde_yaml::from_str(&content)
+            .map_err(|e| CiRunError::Store(format!("failed to parse story {}: {}", story_id, e)))?;
+
+        let deps: Vec<u32> = value
+            .get("depends_on")
+            .and_then(|v| v.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u32))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for dep_id in deps {
+            if !result.contains(&dep_id) {
+                result.insert(dep_id);
+                self.collect_ancestors(result, dep_id, stories, story_index)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recursively collect descendant story ids.
+    fn collect_descendants(
+        &self,
+        result: &mut HashSet<u32>,
+        story_id: u32,
+        stories: &[u32],
+        story_index: &HashMap<u32, usize>,
+    ) -> Result<(), CiRunError> {
+        // Find all stories that depend on story_id
+        for &other_id in stories {
+            let story_path = self.stories_dir.join(format!("{}.yml", other_id));
+            let content = std::fs::read_to_string(&story_path).map_err(|e| {
+                CiRunError::Store(format!("failed to read story {}: {}", other_id, e))
+            })?;
+
+            let value: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
+                CiRunError::Store(format!("failed to parse story {}: {}", other_id, e))
+            })?;
+
+            let deps: Vec<u32> = value
+                .get("depends_on")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if deps.contains(&story_id) && !result.contains(&other_id) {
+                result.insert(other_id);
+                self.collect_descendants(result, other_id, stories, story_index)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Topologically sort a set of story ids using Kahn's algorithm.
+    fn topological_sort(
+        &self,
+        _stories: &[u32],
+        _story_index: &HashMap<u32, usize>,
+        selected: &HashSet<u32>,
+    ) -> Result<Vec<u32>, CiRunError> {
+        // Build the dependency graph for selected stories only
+        let mut in_degree: HashMap<u32, usize> = Default::default();
+        let mut graph: HashMap<u32, Vec<u32>> = Default::default();
+
+        for &id in selected {
+            in_degree.insert(id, 0);
+            graph.insert(id, Vec::new());
+        }
+
+        for &story_id in selected {
+            let story_path = self.stories_dir.join(format!("{}.yml", story_id));
+            let content = std::fs::read_to_string(&story_path).map_err(|e| {
+                CiRunError::Store(format!("failed to read story {}: {}", story_id, e))
+            })?;
+
+            let value: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
+                CiRunError::Store(format!("failed to parse story {}: {}", story_id, e))
+            })?;
+
+            let deps: Vec<u32> = value
+                .get("depends_on")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            for dep_id in deps {
+                if selected.contains(&dep_id) {
+                    if let Some(vec) = graph.get_mut(&dep_id) {
+                        vec.push(story_id);
+                    }
+                    let count = in_degree.get(&story_id).copied().unwrap_or(0);
+                    in_degree.insert(story_id, count + 1);
+                }
+            }
+        }
+
+        // Kahn's algorithm
+        let mut queue = Vec::new();
+        for (&id, &degree) in &in_degree {
+            if degree == 0 {
+                queue.push(id);
+            }
+        }
+        queue.sort_unstable();
+
+        let mut result = Vec::new();
+        loop {
+            queue.sort_unstable();
+            if queue.is_empty() {
+                break;
+            }
+            let node = queue.pop().unwrap();
+            result.push(node);
+
+            if let Some(neighbors) = graph.get(&node) {
+                for &neighbor in neighbors {
+                    let count = in_degree.get(&neighbor).copied().unwrap_or(0);
+                    if count > 0 {
+                        in_degree.insert(neighbor, count - 1);
+                        if count - 1 == 0 {
+                            queue.push(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+
+        if result.len() != selected.len() {
+            // Cycle detected (should have been caught earlier but safety check)
+            let missing: Vec<u32> = selected
+                .iter()
+                .filter(|id| !result.contains(id))
+                .copied()
+                .collect();
+            return Err(CiRunError::Cycle {
+                participants: missing,
+            });
+        }
+
+        Ok(result)
+    }
+
+    /// Run tests for a single story and upsert the result row.
+    fn run_story(&self, story_id: u32) -> Result<ExecutorOutcome, CiRunError> {
+        // Load the story to get its test files
+        let story_path = self.stories_dir.join(format!("{}.yml", story_id));
+        let content = std::fs::read_to_string(&story_path)
+            .map_err(|e| CiRunError::Store(format!("failed to read story {}: {}", story_id, e)))?;
+
+        let value: serde_yaml::Value = serde_yaml::from_str(&content)
+            .map_err(|e| CiRunError::Store(format!("failed to parse story {}: {}", story_id, e)))?;
+
+        let test_files: Vec<PathBuf> = value
+            .get("acceptance")
+            .and_then(|v| v.get("tests"))
+            .and_then(|v| v.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .filter_map(|v| v.get("file").and_then(|f| f.as_str()).map(PathBuf::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Invoke the executor
+        let outcome = self.executor.run_tests(story_id, &test_files);
+
+        // Record the result
+        let input = match outcome.verdict {
+            Verdict::Pass => RunInput::pass(story_id as i64),
+            Verdict::Fail => RunInput::fail(story_id as i64, outcome.failing_tests.clone()),
+        };
+
+        let recorder = Recorder::new(self.store.clone());
+        recorder.record(input).map_err(|e| {
+            CiRunError::Store(format!("failed to record story {}: {}", story_id, e))
+        })?;
+
+        Ok(outcome)
     }
 }
 

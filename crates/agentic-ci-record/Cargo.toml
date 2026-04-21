@@ -22,6 +22,12 @@ serde_json.workspace = true
 # runs from any workspace crate's directory.
 git2 = { version = "0.19", default-features = false }
 
+# Story 12: the runner loads and parses story YAML files to extract
+# id, depends_on, and acceptance.tests[].file for DAG traversal and
+# test execution. serde_yaml is the standard Rust YAML deserializer
+# and matches versions used across the workspace.
+serde_yaml.workspace = true
+
 [dev-dependencies]
 # Story 12: the library-level selector scaffolds build a fixture
 # `stories/` directory under a `TempDir` per test so the developer's

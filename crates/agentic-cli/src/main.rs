@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use agentic_ci_record::{ExecutorOutcome, TestExecutor};
 use agentic_dashboard::Dashboard;
 use agentic_store::SurrealStore;
 use agentic_story::Story;
@@ -65,6 +66,15 @@ enum StoriesSubcommand {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Path to the store
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+    /// Run tests on stories matching a selector
+    Test {
+        /// Selector: <id> (single story), +<id> (ancestors), <id>+ (descendants), +<id>+ (subtree)
+        selector: String,
 
         /// Path to the store
         #[arg(long)]
@@ -251,6 +261,67 @@ fn main() {
                 };
 
                 println!("{output}");
+            }
+            StoriesSubcommand::Test { selector, store } => {
+                let store_path = resolve_store_path(store);
+                eprintln!("store: {}", store_path.display());
+
+                let store = match SurrealStore::open(&store_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("failed to open store: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                let stories_dir = PathBuf::from("stories");
+                if !stories_dir.exists() {
+                    eprintln!("stories directory not found");
+                    std::process::exit(2);
+                }
+
+                // Create the test executor (stub or real)
+                let executor: Box<dyn agentic_ci_record::TestExecutor> =
+                    if std::env::var("AGENTIC_CI_TEST_EXECUTOR").as_deref() == Ok("stub-pass") {
+                        Box::new(StubTestExecutor)
+                    } else {
+                        Box::new(CargoTestExecutor)
+                    };
+
+                let runner =
+                    agentic_ci_record::CiRunner::new(Arc::new(store), executor, stories_dir);
+
+                match runner.run(&selector) {
+                    Ok(0) => {
+                        // All tests passed
+                        std::process::exit(0);
+                    }
+                    Ok(1) => {
+                        // Some tests failed
+                        std::process::exit(1);
+                    }
+                    Ok(_) => {
+                        // Should not happen
+                        eprintln!("unexpected exit code from runner");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_ci_record::CiRunError::UnknownStory { id }) => {
+                        eprintln!("unknown story id: {id}");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_ci_record::CiRunError::Cycle { participants: _ }) => {
+                        eprintln!("cycle detected in depends_on graph");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_ci_record::CiRunError::BadSelector { input, reason }) => {
+                        eprintln!("bad selector '{}': {}", input, reason);
+                        std::process::exit(2);
+                    }
+                    Err(e) => {
+                        eprintln!("runner error: {e}");
+                        std::process::exit(2);
+                    }
+                }
             }
         },
         Commands::Uat { id, verdict, store } => {
@@ -448,6 +519,55 @@ fn main() {
                     std::process::exit(2);
                 }
             }
+        }
+    }
+}
+
+/// Stub test executor that always returns Pass.
+struct StubTestExecutor;
+
+impl TestExecutor for StubTestExecutor {
+    fn run_tests(&self, _story_id: u32, _test_files: &[PathBuf]) -> ExecutorOutcome {
+        ExecutorOutcome::pass()
+    }
+}
+
+/// Real test executor that runs `cargo test --test <name>` for each test file.
+struct CargoTestExecutor;
+
+impl TestExecutor for CargoTestExecutor {
+    fn run_tests(&self, _story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome {
+        let mut failing_tests = Vec::new();
+
+        for test_file in test_files {
+            // Extract the test name from the file path (basename without extension)
+            let test_name = test_file
+                .file_stem()
+                .and_then(|os| os.to_str())
+                .unwrap_or_else(|| "unknown");
+
+            // Run `cargo test --test <name>` for this test file
+            let output = std::process::Command::new("cargo")
+                .args(&["test", "--test", test_name])
+                .output();
+
+            match output {
+                Ok(status) => {
+                    if !status.status.success() {
+                        failing_tests.push(test_name.to_string());
+                    }
+                }
+                Err(_e) => {
+                    // If cargo invocation fails, mark this test as failing
+                    failing_tests.push(test_name.to_string());
+                }
+            }
+        }
+
+        if failing_tests.is_empty() {
+            ExecutorOutcome::pass()
+        } else {
+            ExecutorOutcome::fail(failing_tests)
         }
     }
 }

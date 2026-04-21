@@ -15,6 +15,7 @@ agentic-story = { path = "../agentic-story" }
 agentic-uat = { path = "../agentic-uat" }
 agentic-dashboard = { path = "../agentic-dashboard" }
 agentic-test-builder = { path = "../agentic-test-builder" }
+agentic-ci-record = { path = "../agentic-ci-record" }
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
 git2 = { version = "0.19", default-features = false }

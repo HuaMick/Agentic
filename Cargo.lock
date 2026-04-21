@@ -9,6 +9,7 @@ dependencies = [
  "agentic-store",
  "git2",
  "serde_json",
+ "serde_yaml",
  "tempfile",
 ]
 
@@ -16,6 +17,7 @@ dependencies = [
 name = "agentic-cli"
 version = "0.1.0"
 dependencies = [
+ "agentic-ci-record",
  "agentic-dashboard",
  "agentic-store",
  "agentic-story",
