@@ -127,6 +127,39 @@ guidance:
         and legacy/AgenticEngineering/docs/userstories/Planning/10_feedback_recovery.yml
         ("Two stories validating the same CLI surface is the fragmentation
         anti-pattern the journey principle warns against").
+    - name: defects-amend-the-owning-story
+      detail: |
+        Defects go back into the owning story, not a new story. When a
+        defect is found in a healthy story's implementation — an
+        observable that its acceptance tests don't yet pin — the fix is
+        to AMEND that story: add a new `acceptance.tests[]` entry whose
+        justification names the defect's correct behaviour, flip
+        `status` to `under_construction`, let test-builder scaffold the
+        new test red, let build-rust fix the impl, re-UAT. Do NOT draft
+        a separate story to "fix story X." Each story owns its domain;
+        defects in the impl are gaps in its coverage, not a new concern.
+
+        Amending a healthy story auto-reverts it to `under_construction`
+        per the lifecycle — that is by design. The system is asking for
+        a re-UAT because the contract shape changed. See also the
+        `editing a healthy story is legal and auto-reverts status` rule
+        above.
+
+        First reflex on "story X has a bug": ask "what acceptance.tests
+        entry of story X is missing that would have caught this?" — not
+        "draft new story Y."
+
+        Exception: if the defect reveals a NEW contract shape (new API
+        surface, new CLI subcommand, new observable beyond the owning
+        story's outcome), a new story may be appropriate. "The
+        observable exists but is wrongly implemented" = amend. "A new
+        observable is required" = judgment call, surface to the user.
+
+        Rationale: without this rule, the corpus fragments. Every bug
+        becomes a new story; every story depends on N prior stories
+        that patch each other; the DAG turns into a briar patch. With
+        it, each story stays the single owner of its domain and
+        defect-history lives inside the story that owns the behaviour.
     - name: uat-first-fence
       detail: |
         Before finalising any story, draft its `acceptance.uat` FIRST. If
@@ -202,6 +235,7 @@ guidance:
     - Splitting stories along crate, module, or component boundaries instead of along user journeys.
     - "Splitting stories based on role labels (\"library author\", \"operator\", \"consumer\", \"reviewer\") when the same real person exercises all roles in the same workflow."
     - "Two stories covering the same CLI surface or user-action pattern without explicit splitting-rule justification — this is the fragmentation anti-pattern the journey principle warns against."
+    - "Drafting a new story to fix a defect in an existing healthy story's implementation — defects amend the owning story (new acceptance.tests entry, status flip to under_construction, re-UAT). See `defects-amend-the-owning-story`."
     - Finalising a story before its `acceptance.uat` prose is coherent — the UAT walkthrough is the sizing test, not a field to backfill.
     - Thickening a thin UAT walkthrough with prose instead of resizing the story that produced it.
     - Acceptance tests phrased as implementation steps rather than invariants.
