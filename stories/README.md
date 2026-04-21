@@ -50,18 +50,18 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 | id | title | status |
 |----|-------|--------|
-| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | under_construction |
-| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | under_construction |
+| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | healthy |
+| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | healthy |
 | 3 | `agentic stories health` dashboard (library + CLI) | healthy |
 | 4 | `Store` trait + `MemStore` impl | healthy |
-| 5 | `SurrealStore` backed by `surrealkv` | under_construction |
+| 5 | `SurrealStore` backed by `surrealkv` | healthy |
 | 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
-| 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | under_construction |
-| 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | proposed |
-| 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | proposed |
-| 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | proposed |
-| 15 | test-build is a plan-and-record CLI whose user writes the scaffolds | proposed |
+| 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | healthy |
+| 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | healthy |
+| 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | healthy |
+| 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | healthy |
+| 15 | test-build is a plan-and-record CLI whose user writes the scaffolds | healthy |
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather
