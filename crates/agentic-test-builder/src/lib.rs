@@ -130,7 +130,7 @@ impl TestBuilder {
 
         // Probe each scaffold, collecting verdicts.
         let mut verdicts = Vec::new();
-        for (idx, entry) in plan.iter().enumerate() {
+        for (_idx, entry) in plan.iter().enumerate() {
             let test_path = self.repo_root.join(&entry.file);
 
             // Check file exists.
@@ -154,7 +154,7 @@ impl TestBuilder {
             }
 
             // Probe the scaffold.
-            let (red_path, diagnostic) = probe_scaffold(&self.repo_root, &entry.target_crate, idx)?;
+            let (red_path, diagnostic) = probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
 
             // Check that the probe actually came back red.
             if red_path == "green" {
@@ -369,50 +369,37 @@ fn extract_fixture_preconditions(guidance: &str) -> Vec<String> {
 fn probe_scaffold(
     repo_root: &Path,
     crate_name: &str,
-    _test_index: usize,
+    test_file: &Path,
 ) -> Result<(String, String), TestBuilderError> {
     // Track what needs cleanup
     let cargo_lock_path = repo_root.join("Cargo.lock");
     let cargo_lock_existed = cargo_lock_path.exists();
 
-    // First try `cargo check` to detect compile-red.
-    let check_output = Command::new("cargo")
-        .args(["check", "--package", crate_name])
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| TestBuilderError::Other(format!("failed to run cargo check: {e}")))?;
-
-    let stderr = String::from_utf8_lossy(&check_output.stderr);
-
-    // Check for rustc errors (compile-red).
-    for line in stderr.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("error[E") {
-            return Ok(("compile".to_string(), trimmed.to_string()));
-        }
-        if line.contains(": error[E") {
-            return Ok(("compile".to_string(), line.to_string()));
-        }
-    }
-
-    // Compile succeeded, now try `cargo test` on all tests in the crate.
+    // Defect 2 fix: Run `cargo test` on the specific test file only.
+    // This ensures that when probing multiple scaffolds in the same crate,
+    // each scaffold's diagnostic is a snapshot of its own probe, not aliased
+    // to another scaffold's output. Cargo will compile only the requested test.
+    let test_name = test_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("*");
     let test_output = Command::new("cargo")
-        .args(["test", "--package", crate_name, "--", "--nocapture"])
+        .args(["test", "--package", crate_name, "--test", test_name, "--", "--nocapture"])
         .current_dir(repo_root)
         .output()
-        .map_err(|e| {
-            // Clean up Cargo.lock if we created it
-            if !cargo_lock_existed && cargo_lock_path.exists() {
-                let _ = fs::remove_file(&cargo_lock_path);
-            }
-            TestBuilderError::Other(format!("failed to run cargo test: {e}"))
-        })?;
+        .map_err(|e| TestBuilderError::Other(format!("failed to run cargo test: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&test_output.stdout);
     let stderr = String::from_utf8_lossy(&test_output.stderr);
-
-    // Look for panic output (runtime-red).
     let combined: Vec<&str> = stdout.lines().chain(stderr.lines()).collect();
+
+    // Defect 1 fix: Key on `cargo test`'s exit code as the authoritative signal
+    // for compile vs runtime failure. If the test didn't compile, cargo test will
+    // exit non-zero BEFORE trying to run the test. This is stable across rustc's
+    // diagnostic-renderer ICE (rustc 1.95 StyledBuffer::replace panic).
+
+    // First, look for panic output (runtime-red). This takes precedence because
+    // if the test compiled, we trust the panic output.
     for (i, line) in combined.iter().enumerate() {
         if let Some(idx) = line.find("panicked at") {
             let after = &line[idx + "panicked at".len()..];
@@ -428,13 +415,26 @@ fn probe_scaffold(
                     return Ok(("runtime".to_string(), msg.to_string()));
                 }
             }
-            // Case B: newer format — the next non-empty line is the message.
-            if let Some(msg_line) = combined[i + 1..].iter().find(|l| !l.trim().is_empty()) {
+            // Case B: newer format — collect the next few non-empty lines as the message.
+            // For assert_eq failures, we want to capture "assertion ... failed", "left: X", "right: Y"
+            let mut msg_lines = Vec::new();
+            for next_line in combined[i + 1..].iter() {
+                let trimmed = next_line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                msg_lines.push(trimmed);
+                // Collect up to 3 lines of output for rich diagnostics.
+                if msg_lines.len() >= 3 {
+                    break;
+                }
+            }
+            if !msg_lines.is_empty() {
                 // Clean up Cargo.lock before returning
                 if !cargo_lock_existed && cargo_lock_path.exists() {
                     let _ = fs::remove_file(&cargo_lock_path);
                 }
-                return Ok(("runtime".to_string(), msg_line.trim().to_string()));
+                return Ok(("runtime".to_string(), msg_lines.join(" ")));
             }
             // Fallback: whatever followed "panicked at" on the same line.
             if !inline.is_empty() {
@@ -447,7 +447,7 @@ fn probe_scaffold(
         }
     }
 
-    // Test did not panic — the scaffold is green (error condition).
+    // Test did not panic — the scaffold is green (success case).
     if test_output.status.success() {
         // Clean up Cargo.lock before returning
         if !cargo_lock_existed && cargo_lock_path.exists() {
@@ -456,11 +456,48 @@ fn probe_scaffold(
         return Ok(("green".to_string(), "test passed".to_string()));
     }
 
-    // Test failed but no panic detected — treat as runtime-red fallback.
+    // Test exited non-zero. Determine if it was compile-red or runtime-red.
+    // Look for compile error patterns in the output.
+    for line in combined.iter() {
+        let trimmed = line.trim();
+        if trimmed.contains("error[E") {
+            // This is a compile error (or a rustc-style error in output).
+            if !cargo_lock_existed && cargo_lock_path.exists() {
+                let _ = fs::remove_file(&cargo_lock_path);
+            }
+            return Ok(("compile".to_string(), trimmed.to_string()));
+        }
+    }
+
+    // Defect 3 fix: Test failed but we didn't find a clear panic or compile error.
+    // Synthesize a meaningful diagnostic by capturing the first error/failure line,
+    // or use the exit code. Never silently return a vacuous placeholder.
+    for line in combined.iter() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty()
+            && (trimmed.to_lowercase().contains("failed")
+                || trimmed.to_lowercase().contains("error")
+                || trimmed.to_lowercase().contains("exit")
+                || trimmed.to_lowercase().contains("abort"))
+        {
+            if !cargo_lock_existed && cargo_lock_path.exists() {
+                let _ = fs::remove_file(&cargo_lock_path);
+            }
+            return Ok(("runtime".to_string(), trimmed.to_string()));
+        }
+    }
+
+    // Last resort: capture exit code in diagnostic rather than a vacuous placeholder.
     if !cargo_lock_existed && cargo_lock_path.exists() {
         let _ = fs::remove_file(&cargo_lock_path);
     }
-    Ok(("runtime".to_string(), "test failed".to_string()))
+    Ok((
+        "runtime".to_string(),
+        format!(
+            "test exited with code {:?} but captured no output",
+            test_output.status.code()
+        ),
+    ))
 }
 
 /// Get the current HEAD commit hash.
