@@ -1,5 +1,18 @@
 # 08 — Open questions for the next session
 
+> **⚠️ Status (2026-04-22):** **Tier 1 questions (Q1–Q4) are resolved**
+> in `09-tier1-resolutions.md` — the resolutions are the revised Phase
+> ladder, not the original recommendations at the bottom of this note
+> (which proposed SurrealDB Cloud, Cloud Workstations, etc. and have
+> been superseded). **Tier 2 questions (Q5–Q8) are partially resolved**
+> by the Phase 0 shape: Q5 / Q6 collapse into "one `docker run` per
+> inner loop, host-laptop-driven"; Q7 stays "leave signings as fossil
+> record"; Q8 resolves to "sandbox-local via `build_config.models`."
+> **Tier 3 questions (Q9–Q14) remain open** for future sessions — they
+> are long-horizon (multi-human, reproducibility audit cadence, era
+> vs supersession chain, 12-month vision). Skim tier 3 when planning
+> post-Phase-1 work.
+
 Questions that need answering before implementation begins. Organised
 by urgency. Each has context + candidate answers + the decision maker.
 

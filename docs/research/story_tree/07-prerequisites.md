@@ -1,5 +1,23 @@
 # 07 — Prerequisites: what needs to land locally before cloud
 
+> **⚠️ Status (2026-04-22):** the P1–P6 prerequisite taxonomy in this
+> note has been **superseded** by the concrete Phase 0 story list in
+> `10-phase1-story-outlines.md` (stories 16–22). Mapping:
+> - P1 (retirement) → story 21
+> - P2 (signer) → story 18
+> - P3 (reproducibility audit) → ceremony, deferred per note 12
+> - P4 (ephemeral worktree hygiene) → dropped — Docker container is
+>   the primitive now, not local worktrees
+> - P5 (agentic-runtime) → story 19 (un-deferred for Phase 0)
+> - P6 (container image reproducibility) → bundled into story 20 +
+>   `infra/sandbox/Dockerfile`
+>
+> Also new since this note was authored: stories 16 (runs
+> observability), 17 (`build_config`), 20 (`agentic story build`),
+> 22 (cloud Store). The "cleaner foundation" decision tree at the
+> bottom is still useful reasoning; the specific story counts are
+> wrong. For the current list, go to note 10.
+
 Cloud is the migration target. Before we migrate, the local system
 needs to satisfy some preconditions. Some are already met; some need
 work.

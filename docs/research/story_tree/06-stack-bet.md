@@ -1,5 +1,17 @@
 # 06 — Stack bet: GCP + cost-controlled + Gemma option
 
+> **⚠️ Status (2026-04-22):** the specific compute recommendations in
+> this note (Cloud Workstations as the primary tier, two-tier
+> interactive + agent split) are **superseded** by the Phase 0 / 0.5 /
+> 1 ladder in note 09. Current shape: Docker-local first, no cloud
+> compute until Phase 1, and even then Cloud Build / Cloud Run jobs
+> — never Workstations. **Still valid** from this note: the $10s/mo
+> cost envelope, self-hosted SurrealDB on GCE for Phase 1, Gemma as a
+> second-tier agent pool via `build_config.models`, Terraform-first
+> infra discipline, budget alerts at day 1. For current decisions,
+> read note 09; use this note for the cost reasoning and GCP-service
+> mapping.
+
 ## User's constraints
 
 > "I'm a gcp data engineer so i think gcp makes sense, however i want

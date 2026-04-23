@@ -1,5 +1,14 @@
 # 04 — The cloud sandbox model
 
+> **⚠️ Status (2026-04-22):** this note is the early exploration that
+> led to the Phase 0 / 0.5 / 1 ladder in `09-tier1-resolutions.md`.
+> Decision B (Cloud Workstations) is **rejected** — the dev works
+> locally; cloud is for headless agent runs only. The rest of the
+> note (sandbox-as-atomic-unit framing, four-decision decomposition,
+> failure modes, ancestor-gate question) is still useful as context.
+> For the current shape, read note 09 first, then use this note for
+> historical framing.
+
 ## The user's framing
 
 > "If we think of branches as cloud sandboxes, is this something that
