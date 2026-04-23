@@ -50,6 +50,11 @@ from cloud-first to **Docker-local-first**. Key shifts:
   added to superseded notes (04, 06, 07, 08) pointing future agents
   to the current state. README rewritten to separate current /
   context / historical notes.
+- **Git coordination model** (note 14, session 2026-04-23):
+  story-tree branches ≠ git branches; git branches are whole-tree
+  snapshots; Phase 0 auto-merges sandbox branches on green with no
+  human review gate; bad merges are the research signal that
+  forces the recovery + gating work in Phase 2+.
 
 ## Stories to author (revised 2026-04-23 — eventual consistency)
 

@@ -61,7 +61,8 @@ Scope, Alternatives considered, Consequences.**
 
 ### Decision
 
-Seven load-bearing parts:
+Eight load-bearing parts (the eighth — git coordination — surfaced
+2026-04-23 in note 14):
 
 1. **Phase 0 is the primary unit of Phase 1 proof.** A single Docker
    image, with the whole build system baked in (agentic binary, all
@@ -110,6 +111,17 @@ Seven load-bearing parts:
    rebuild is a candidate but must be validated at scale). The
    Reflexion confirmation-bias literature supports this caution
    (see `12-external-patterns.md`).
+
+8. **Git coordination: story-tree branches ≠ git branches.** The
+   story tree is corpus (YAML); git branches are whole-tree
+   snapshots. Per run: the sandbox creates an ephemeral
+   `run/<story-id>-<short>` branch cloned from main at launch. On
+   GREEN, the host auto-merges the sandbox's diff to main (one
+   squash commit per run). On EXHAUSTED / CRASHED, nothing merges;
+   the branch state is captured in the run row for inspection. No
+   human review gate in Phase 0. Bad merges are expected and are
+   the signal that forces Phase 2+ recovery + gating work. See
+   `14-git-coordination.md` for the full treatment.
 
 ### Scope
 

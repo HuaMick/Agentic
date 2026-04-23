@@ -56,8 +56,13 @@ authoritative artefacts, the authoritative artefacts win.
   Sandboxing is commoditising; story-tree + cold-rebuild attestation
   is the genuine research bet.
 - **`13-existing-stories-impact.md`** — which of the 12 live
-  healthy stories will need **amendments** (6), **touch-ups** (4),
+  healthy stories will need **amendments** (7), **touch-ups** (4),
   or **no change** (1) when the Phase 0 pipeline lands.
+- **`14-git-coordination.md`** — how the story tree (YAML corpus)
+  composes with git branches (file-level coordination). Story-tree
+  branches ≠ git branches; git branches are whole-tree snapshots;
+  auto-merge on green in Phase 0 with recovery/gating as forced
+  discovery.
 - **`NEXT-SESSION.md`** — the ordered action list for the next
   session. Start here.
 
