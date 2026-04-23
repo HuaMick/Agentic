@@ -1,0 +1,33 @@
+[package]
+name = "agentic-signer"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Story 18 shell bootstrap: the crate exists so the failing test scaffolds
+# in `tests/` can be discovered and run via
+# `cargo test --package agentic-signer`. No runtime dependencies are
+# declared — the public surface (`Resolver`, `Signer`, `SignerError`,
+# `Source`, `InvalidReason`, `SignerSource`) is build-rust's to author
+# once red-state evidence is on disk. The scaffolds use compile-red as
+# their natural failure path: every test `use`s at least one symbol the
+# crate does not yet declare, so `cargo check` fails with a rustc
+# "unresolved import" error before any runtime code runs.
+
+[dependencies]
+
+[dev-dependencies]
+# Story 18 scaffolds: the tier-3 scaffold and the standalone-resilience
+# scaffold both construct tempdir git repos via `git2` and read / set
+# `user.email` through the same binding the resolver uses. Same pin as
+# every other crate in the workspace that touches libgit2. Dev-scope
+# only — the resolver itself may take `git2` as a runtime dep when
+# build-rust lands it; this is the test-side floor.
+git2 = { version = "0.19", default-features = false }
+
+# Story 18 scaffolds: every tempdir-based test roots its fixture under
+# a `TempDir` so no test ever writes outside the ephemeral area. Named
+# in the standalone-resilience justification as part of the allowed
+# dev-dependency floor.
+tempfile.workspace = true

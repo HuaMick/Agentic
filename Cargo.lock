@@ -59,6 +59,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentic-signer"
+version = "0.1.0"
+dependencies = [
+ "git2",
+ "tempfile",
+]
+
+[[package]]
 name = "agentic-store"
 version = "0.1.0"
 dependencies = [
