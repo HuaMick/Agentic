@@ -1,0 +1,583 @@
+id: 16
+title: Persist one run row per inner-loop invocation with a tee'd NDJSON trace
+outcome: |
+  An operator inspecting the `runs` Store table after any inner-loop
+  invocation finds a single structured row describing that attempt —
+  including story id, signer, outcome, per-iteration summaries, git
+  branch state, and the filesystem path to a non-empty NDJSON trace
+  of the underlying subprocess stream — so the attempt is inspectable
+  and replayable without re-execution.
+status: proposed
+patterns:
+- standalone-resilient-library
+acceptance:
+  tests:
+  - file: crates/agentic-store/tests/runs_table_round_trips_structured_run_row.rs
+    justification: |
+      Proves the `runs` table accepts the full documented row
+      shape: a row carrying `run_id` (uuid v4 string),
+      `story_id` (int), `story_yaml_snapshot` (64-char lowercase
+      hex SHA256), `signer` (non-empty string), `started_at` and
+      `ended_at` (RFC3339 UTC), `build_config` (arbitrary JSON
+      object), `outcome` (one of `green` / `inner_loop_exhausted`
+      / `crashed`), `iterations` (JSON array, possibly empty),
+      `branch_state` (JSON object with `start_sha`, `end_sha`,
+      `commits`, `merged`, `merge_shas`), and
+      `trace_ndjson_path` (filesystem path relative to the runs
+      root) round-trips through `Store::append` +
+      `Store::query(table="runs", filter={run_id=<id>})`
+      byte-identical on the value fields a downstream reader
+      cares about. Without this, every later consumer (a future
+      dashboard, `agentic story build`, UAT readers) would each
+      re-discover the row shape by observation and we'd ship
+      twelve slightly different readers.
+  - file: crates/agentic-store/tests/runs_table_rejects_malformed_outcome.rs
+    justification: |
+      Proves the outcome enum is validated at the library
+      boundary, not just documented: `RunRecorder::write` called
+      with an `outcome` string outside the set
+      `{green, inner_loop_exhausted, crashed}` returns a typed
+      `RunRecorderError::InvalidOutcome` naming the offending
+      value, writes zero rows, and leaves the `runs` table
+      unchanged. Without this, a typo in a caller — or a future
+      outcome variant added to the schema but not to the writer
+      — would land as a `runs` row whose `outcome` no downstream
+      reader recognises, and the dashboard's three-way status
+      branch degrades to "whatever string happens to be in the
+      column."
+  - file: crates/agentic-runtime/tests/run_recorder_tees_ndjson_to_configured_trace_path.rs
+    justification: |
+      Proves the tee: given a configured trace path
+      `<root>/<run-id>/trace.ndjson`, a `TraceTee` driven by a
+      canned fixture NDJSON stream (N lines) writes exactly
+      those N lines to the trace file in order, AND forwards
+      each line unchanged to the downstream consumer (iterator
+      / channel) the caller passes in. The file is created
+      fresh (not appended to a pre-existing file at the same
+      path), its parent directory is created if absent, and
+      the final byte is a newline. Without this, the "tee" in
+      the architecture is wishful thinking: a consumer could
+      observe events that never land in the trace, or vice
+      versa, and the replay-without-re-execution promise
+      collapses.
+  - file: crates/agentic-runtime/tests/run_recorder_writes_row_with_outcome_green_on_clean_exit.rs
+    justification: |
+      Proves the green outcome wiring: given a
+      `RunRecorder::start(story_id, signer, build_config)`
+      call followed by one or more `record_iteration(summary)`
+      calls and a final `finish(Outcome::Green { signing_run_id
+      })` call against a `MemStore`, a single row appears in
+      the `runs` table whose `outcome` is `green`, whose
+      `iterations` array length equals the number of
+      `record_iteration` calls in insertion order, whose
+      `ended_at` is strictly after `started_at`, and whose
+      `trace_ndjson_path` points at a file whose first line is
+      a valid JSON object. Without this, the recorder's happy
+      path is untested — every consumer trusts it, nothing
+      proves it.
+  - file: crates/agentic-runtime/tests/run_recorder_writes_row_with_outcome_exhausted_on_budget.rs
+    justification: |
+      Proves the exhausted outcome wiring: given a recorder
+      started with a budget of N iterations and fed exactly N
+      `record_iteration` calls followed by a
+      `finish(Outcome::InnerLoopExhausted)`, the resulting
+      `runs` row has `outcome: inner_loop_exhausted`, exactly
+      N entries in `iterations`, and NO pointer to any
+      `uat_signings` row. Without this, the signal that drives
+      the outer loop (human-in-the-loop amendment on
+      exhaustion, per ADR-0006 §7) is indistinguishable from a
+      crash, and the operator cannot tell "agent ran to budget"
+      from "agent died mid-iteration."
+  - file: crates/agentic-runtime/tests/run_recorder_writes_row_with_outcome_crashed_on_subprocess_failure.rs
+    justification: |
+      Proves the crashed outcome wiring: given a recorder
+      whose driven subprocess exits non-zero mid-iteration (or
+      whose writer observes a broken pipe from the subprocess
+      stdout), a `finish(Outcome::Crashed { error })` call
+      yields a `runs` row whose `outcome` is `crashed`, whose
+      final `iterations[]` entry carries a non-empty `error`
+      field naming the failure, and whose `trace_ndjson_path`
+      still points at a readable (possibly truncated) trace
+      file containing whatever was captured before the crash.
+      Without this, a subprocess crash produces either no row
+      (silent loss of evidence) or a row mislabelled as
+      exhausted (misdirected human attention), and the partial
+      trace — often the most diagnostic artefact — is
+      discarded.
+  - file: crates/agentic-runtime/tests/run_recorder_story_yaml_snapshot_is_sha256_at_launch.rs
+    justification: |
+      Proves the snapshot field is a content hash, not a path
+      or a mutable reference: given a recorder started with
+      `story_yaml_bytes: &[u8]` equal to the exact bytes of the
+      story YAML at launch, the resulting `runs` row's
+      `story_yaml_snapshot` equals `sha256(bytes)` as 64
+      lowercase hex characters. Mutating the story YAML on
+      disk AFTER recorder start does NOT change the value in
+      the row. Without this, the reproducibility receipt is
+      forgeable: a later edit to the story would retroactively
+      rewrite what the agent was supposedly working from, and
+      the "cold agent can rebuild from spec alone" attestation
+      (ADR-0006 §6) loses its anchor.
+  - file: crates/agentic-runtime/tests/run_recorder_captures_branch_state_from_git_repo.rs
+    justification: |
+      Proves the `branch_state` sub-object is populated from
+      real git observation, not caller-supplied fiction: given
+      a tempdir git repo with a baseline commit on `main`, a
+      recorder `start_branch(repo_path, "run/16-abc123")` that
+      cuts a branch from HEAD, two commits made on that
+      branch, and a `finish_branch(merged=false)` call, the
+      `runs` row's `branch_state` has `start_sha` equal to the
+      pre-branch HEAD SHA, `end_sha` equal to the second
+      commit's SHA, `commits` as a two-element array each
+      carrying `{sha, author, subject}`, `merged: false`, and
+      `merge_shas: []`. Without this, the `branch_state`
+      field is prose an author might invent — violating the
+      "run row is the authoritative post-mortem" promise note
+      14 bets on for Phase 2 recovery work.
+  - file: crates/agentic-runtime/tests/run_recorder_trace_path_is_under_runs_root_and_never_escapes.rs
+    justification: |
+      Proves the trace-path discipline: `RunRecorder::start`
+      configured with a runs root at `<root>` produces a
+      `trace_ndjson_path` equal to `<run-id>/trace.ndjson`
+      (relative path, forward slashes, no leading slash, no
+      `..` components, no absolute path), and the actual file
+      is written at `<root>/<run-id>/trace.ndjson` on disk. A
+      `run_id` constructed to attempt path traversal
+      (`../../etc/passwd`-shaped, or containing `\` / `/` /
+      null bytes) is rejected by the recorder with a typed
+      `RunRecorderError::InvalidRunId` before any file is
+      created. Without this, the filesystem-as-trace-backing
+      decision (see guidance) leaks into a path-injection
+      vulnerability the first time a malicious or
+      mis-generated run id lands — a class of bug the
+      embedded-Store-path avoided by default.
+  - file: crates/agentic-runtime/tests/run_recorder_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim: the
+      `agentic-runtime` crate's `RunRecorder` + `TraceTee`
+      types can be constructed and driven end-to-end from a
+      test that links only against `agentic-runtime`,
+      `agentic-store` (for `MemStore`), `serde`, and
+      `tempfile`. No `agentic-cli`, no `agentic-orchestrator`,
+      no `agentic-sandbox`, no LLM subprocess. The test
+      drives a fixture NDJSON stream (a `&[u8]` slice —
+      not `claude`), records three iterations, finishes
+      green, and asserts the `runs` row plus the on-disk
+      trace. Without this, the recorder's "prove-it path"
+      posture is aspirational; the first downstream consumer
+      would drag orchestrator dependencies back in and we'd
+      only notice when the system was in flames.
+  uat: |
+    Goal: convince yourself that every inner-loop invocation —
+    driven here by a stub subprocess, not a real claude — lands a
+    single structured `runs` row in the Store, a non-empty NDJSON
+    trace on disk at the documented path, and that the three
+    outcome branches (`green`, `inner_loop_exhausted`, `crashed`)
+    each write a row whose shape a doc-blind reader can
+    distinguish from the other two.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. `cargo build -p agentic-runtime -p agentic-store` (via
+         WSL: `wsl bash -c "source ~/.cargo/env && cd /home/code/
+         Agentic && cargo build -p agentic-runtime -p agentic-
+         store"`). Both crates must build clean.
+      3. Pick an empty tempdir `<runs-root>` for trace files
+         (e.g. `$(mktemp -d)`). Confirm it is empty.
+      4. Pick a fixture story YAML body — the literal bytes of
+         `stories/15.yml` are fine — and compute its SHA256 with
+         `sha256sum stories/15.yml | awk '{print $1}'`. Remember
+         this value as `<expected-hash>`.
+
+    Green walkthrough:
+      5. Write (or reuse) a small example under `crates/agentic-
+         runtime/examples/run_recorder_smoke_green.rs` that:
+           a. Constructs a `MemStore`.
+           b. Constructs a `RunRecorder` with runs_root=<runs-
+              root>, story_id=15, story_yaml_bytes=<bytes of
+              stories/15.yml>, signer="sandbox:stub-
+              subprocess@run-aaa111", build_config=`{"max_inner_
+              loop_iterations": 3}`.
+           c. Drives a stub NDJSON stream — the literal bytes
+              `{"kind":"tool_call","i":0}\n{"kind":"tool_
+              result","i":0}\n` — through `TraceTee` wrapping
+              the recorder's trace writer. Observe the iterator
+              yields both lines, byte-identical.
+           d. Calls `record_iteration(summary=...)` once.
+           e. Calls `finish(Outcome::Green {
+              signing_run_id: "stub-signing-1" })`.
+      6. Run the example. Observe: process exits 0.
+      7. `ls <runs-root>`. Observe exactly one subdirectory
+         named for the run id, containing exactly one file
+         `trace.ndjson`.
+      8. `cat <runs-root>/<run-id>/trace.ndjson`. Observe
+         exactly the two canned JSON lines, newline-terminated.
+      9. Query the `MemStore` for rows where
+         `table="runs", run_id=<id>`. Observe exactly one row.
+         Confirm:
+           - `story_id == 15`
+           - `story_yaml_snapshot == <expected-hash>`
+           - `signer == "sandbox:stub-subprocess@run-aaa111"`
+           - `outcome == "green"`
+           - `iterations` is a one-element array
+           - `trace_ndjson_path == "<run-id>/trace.ndjson"`
+             (RELATIVE, no leading slash)
+           - `ended_at` is strictly greater than `started_at`
+             (both RFC3339 UTC)
+
+    Exhausted walkthrough:
+     10. Adapt the example to call `record_iteration` three
+         times (matching the `max_inner_loop_iterations: 3`
+         budget) and then `finish(Outcome::InnerLoop
+         Exhausted)` instead of green. Run.
+     11. Query the `MemStore` again. Confirm a second row
+         exists whose `outcome == "inner_loop_exhausted"`,
+         `iterations.length == 3`, and which contains NO
+         field pointing to a `uat_signings` row.
+
+    Crashed walkthrough:
+     12. Adapt the example to feed a truncated NDJSON stream
+         (cut one of the canned lines in half, no trailing
+         newline), capture the write error from the tee, and
+         call `finish(Outcome::Crashed { error: "stub pipe
+         broke mid-line" })`. Run.
+     13. Query the `MemStore`. Confirm a third row exists with
+         `outcome == "crashed"`, whose last `iterations[]`
+         entry carries a non-empty `error` field, and whose
+         `trace_ndjson_path` still points at a readable (but
+         possibly short) trace file.
+
+    Branch-state walkthrough:
+     14. Create a second tempdir `<repo-root>`. In it:
+         `git init`, commit an empty `baseline.txt`. Run the
+         example with `start_branch(<repo-root>,
+         "run/16-bbb222")` before recording iterations, make
+         two trivial commits on that branch inside the
+         example (`git commit --allow-empty`), finish green,
+         and call `finish_branch(merged=false)`.
+     15. Query the row. Confirm `branch_state.start_sha`
+         matches the baseline commit's SHA, `branch_state.
+         end_sha` matches the second commit's SHA,
+         `branch_state.commits.length == 2` with each
+         element having `sha`, `author`, `subject`, and
+         `branch_state.merged == false`,
+         `branch_state.merge_shas == []`.
+
+    Failure mode walkthrough:
+     16. Call `RunRecorder::start` with a
+         `run_id == "../escape"` or `run_id == "a/b"`.
+         Confirm the call returns `RunRecorderError::
+         InvalidRunId`, writes no row, and creates no file
+         or directory under `<runs-root>`.
+     17. Call `RunRecorder::finish_with_outcome_string(
+         "partially-exploded")`. Confirm the call returns
+         `RunRecorderError::InvalidOutcome`, writes no row,
+         and the trace file (if the recorder had already
+         opened one) is left in whatever state the tee had
+         flushed — but no `runs` row exists.
+
+    Cleanup:
+     18. Remove `<runs-root>` and `<repo-root>`.
+     19. `git restore` or delete any scratch example files
+         you added under `crates/agentic-runtime/examples/`.
+     20. Confirm `git status` is clean.
+guidance: |
+  This story introduces the observability substrate the outer
+  loop (ADR-0006 §5) depends on. It ships the `runs` Store
+  table shape, the `RunRecorder` + `TraceTee` API in
+  `agentic-runtime`, and the filesystem layout for NDJSON
+  traces. It deliberately does NOT ship the `Runtime` trait or
+  `ClaudeCodeRuntime` — those are story 19's scope. The two
+  stories compose: story 19's runtime uses this story's
+  recorder; neither story blocks on the other reaching green
+  first.
+
+  Decision 1 — schema AND emitter ship together in this story.
+    Note 10's open question asked whether to split schema (here)
+    from emission (with story 19). The decision is one story:
+    schema without emission is vaporware (an un-exercised JSON
+    shape drifts from what the emitter actually writes within
+    a week), and emission without schema is noise (a downstream
+    reader has nothing stable to parse). The proof-of-emission
+    obligation is satisfied without dragging in the `Runtime`
+    trait by exercising the recorder against a stub NDJSON
+    stream — a `&[u8]` slice of canned events — rather than a
+    real subprocess. See the `run_recorder_standalone_
+    resilience.rs` test: the recorder's critical-path
+    behaviour is proven without `claude`, without the runtime
+    trait, without `agentic-orchestrator`. Story 19's job
+    becomes "wire `ClaudeCodeRuntime` into this recorder,"
+    not "invent a recorder."
+
+    This decision also honours the `depends_on: [4, 5]` edge
+    note 10 proposed: the recorder needs a `Store` (trait +
+    SurrealDB impl) and nothing else from the corpus. Adding
+    `depends_on: [19]` would be the wrong direction because
+    story 19 is downstream, not upstream.
+
+  Decision 2 — trace blobs live on the filesystem; the Store
+  carries the path only.
+    Note 10's second open question asked whether to write
+    NDJSON traces into the Store as a big value or to a
+    filesystem path referenced from the row. The decision is
+    filesystem. Three reasons, in descending weight:
+
+      - Trace blobs grow fast (one multi-hour agent run at
+        hundreds of kilobytes per minute is plausible). A
+        schemaless document DB storing multi-megabyte blobs
+        per row turns every `Store::query` that projects
+        the trace field into a large read, and the cloud
+        migration (per user memory) becomes costlier in
+        bandwidth than it needs to be.
+      - The trace is append-heavy-then-immutable. A bare
+        file on disk + `fsync` per line is a more honest
+        model of that write pattern than a document DB's
+        upsert semantics. It also lets standard tooling
+        (`tail -f`, `jq`, `less`) work on live traces
+        without a bespoke reader.
+      - The Store row stays small and query-fast. A
+        dashboard reading thousands of `runs` rows doesn't
+        pay for trace bytes it doesn't need; when it wants
+        a specific run's trace, it opens the file.
+
+    Consequences paid:
+      - A trace file can become orphaned (file exists, row
+        doesn't, or vice versa). The `run_recorder_writes_
+        row_*.rs` tests pin the happy paths, but cross-
+        drift between filesystem and Store is possible on
+        partial crashes. Phase 0 accepts this — the outer
+        loop's recovery work (deliberately deferred per
+        ADR-0006) is where orphan detection lives.
+      - Cloud migration needs an object store (e.g. GCS)
+        alongside the Store. Per the user's project
+        memory ("Store will move from local to cloud"),
+        the migration plan should treat the trace path
+        as an opaque URI that the recorder can render
+        either as a local path or a `gs://...` URL
+        behind a trivial abstraction. Phase 0 ships the
+        local-filesystem implementation only; the URI
+        shape is a local relative path (`<run-id>/trace.
+        ndjson`), forward slashes, no leading slash — a
+        shape that round-trips cleanly into an object-
+        store key later.
+      - Path-injection is a real class of bug. The
+        `run_recorder_trace_path_is_under_runs_root_and_
+        never_escapes.rs` test pins the defence:
+        `run_id` is validated against a strict charset
+        before any path is constructed.
+
+  RunRecorder API shape (auditable).
+    Four entry points:
+
+      - `RunRecorder::start(cfg: RunRecorderConfig) ->
+        Result<RunRecorder, RunRecorderError>`. Opens the
+        trace file at `<runs_root>/<run_id>/trace.ndjson`,
+        records `started_at`, hashes
+        `cfg.story_yaml_bytes`, stores the provisional
+        row in memory (not yet written to the Store).
+      - `RunRecorder::trace_tee(&self) -> TraceTee`. Hands
+        out a writer that tees every NDJSON line to the
+        trace file AND forwards it unchanged to the
+        caller's consumer channel. Multiple calls return
+        the SAME underlying tee (not fresh — callers share
+        one stream per recorder).
+      - `RunRecorder::record_iteration(summary:
+        IterationSummary)`. Appends one iteration entry in
+        memory; does NOT write the row yet. An iteration
+        has `{i, started_at, ended_at, probes: [...],
+        verdict: Option<...>, error: Option<String>}`.
+      - `RunRecorder::finish(outcome: Outcome) -> Result<(),
+        RunRecorderError>`. Records `ended_at`, flushes
+        the trace file, writes the complete row to the
+        Store via `Store::append(table="runs", ...)`.
+        Idempotent on repeated calls only in the sense
+        that a second call returns `AlreadyFinished`; it
+        does not write a second row.
+
+    `RunRecorderConfig` carries: `store: Arc<dyn Store>`,
+    `runs_root: PathBuf`, `run_id: String`, `story_id:
+    i64`, `story_yaml_bytes: Vec<u8>`, `signer: String`,
+    `build_config: serde_json::Value`. Absent fields are
+    rejected at construction — no defaults; the recorder
+    is a recorder, not a guesser.
+
+  Outcome enum (auditable).
+    Three variants, each carrying its own payload:
+      - `Green { signing_run_id: String }` — the
+        `signing_run_id` points at the `uat_signings` row
+        the Pass verdict wrote (story 1's contract). The
+        recorder does NOT write the signing; it only
+        carries a pointer. Story 1's UAT gate remains the
+        sole author of `uat_signings` rows.
+      - `InnerLoopExhausted` — no payload; the iteration
+        list IS the evidence of what the agent tried.
+      - `Crashed { error: String }` — a one-line human-
+        readable cause; the full diagnostic lives in the
+        trace file.
+
+    Story 19's `ClaudeCodeRuntime` is responsible for
+    mapping subprocess-level signals (non-zero exit,
+    broken pipe, rate-limit-after-retries) to
+    `Outcome::Crashed`. This story's scope stops at the
+    recorder's API.
+
+  Row shape, field-by-field (the authoritative reference).
+    ```
+    run_id:                string (uuid v4, validated charset)
+    story_id:              integer (matches an existing stories/<id>.yml)
+    story_yaml_snapshot:   string (64-char lowercase hex SHA256
+                           of the story YAML bytes at launch)
+    signer:                string (non-empty; convention
+                           "sandbox:<model>@<run_id>" for agents,
+                           "<email>" for humans — story 18's scope)
+    started_at:            string (RFC3339 UTC)
+    ended_at:              string (RFC3339 UTC, strictly > started_at)
+    build_config:          object (passthrough; no schema pin in this
+                           story — story 17 pins build_config's shape)
+    outcome:               string, one of {green,
+                           inner_loop_exhausted, crashed}
+    iterations:            array of {
+                             i: integer (0-indexed),
+                             started_at: RFC3339,
+                             ended_at: RFC3339,
+                             probes: array (free-form per iteration),
+                             verdict: optional {pass|fail},
+                             error: optional string
+                           }
+    branch_state:          {
+                             start_sha: string (40-char hex, the SHA
+                                        the sandbox branch was cut from),
+                             end_sha: optional string (the tip SHA of
+                                      the sandbox branch at finish;
+                                      absent if no commits were made),
+                             commits: array of {sha, author, subject},
+                             merged: boolean,
+                             merge_shas: array of strings (the
+                                        resulting main commits on
+                                        auto-merge; empty when
+                                        merged==false)
+                           }
+    trace_ndjson_path:     string (relative to runs_root; always
+                           "<run-id>/trace.ndjson" in Phase 0;
+                           forward slashes, no leading slash, no
+                           `..` components)
+    ```
+
+    Downstream readers (the future dashboard, `agentic story
+    build`'s exhaustion-handling UI, UAT replay tooling)
+    parse this shape. Extra keys are not added by the
+    recorder. A strict parser (`serde_json` with
+    `deny_unknown_fields`) on the row subset this story
+    owns should round-trip cleanly.
+
+  OpenTelemetry GenAI semantic-convention alignment (future-
+  compat, NOT a Phase 0 constraint).
+    Note 12's survey identified OpenTelemetry's GenAI semantic
+    conventions as the emerging portable layer for agent
+    trace observability — span tree for tool calls,
+    cost/latency/model-id per span, Langfuse/LangSmith
+    interop by config. This story's `iterations[].probes[]`
+    array is the natural span-tree slot: each probe entry
+    SHOULD carry `{kind, started_at, ended_at, attributes}`
+    where `attributes` can hold `gen_ai.request.model`,
+    `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+    etc. We do NOT pin OTel conformance here — that's a
+    premature bet on a spec still landing in the community —
+    but we do keep the shape loose enough that a later
+    exporter (a cargo feature writing OTel-JSON alongside the
+    NDJSON, say) becomes additive code, not a row-shape
+    migration. Downstream tooling can treat non-OTel-shaped
+    probes as opaque bags.
+
+  What this story explicitly does NOT do.
+    - Does NOT un-defer the `Runtime` trait or ship
+      `ClaudeCodeRuntime`. Those are story 19's scope. This
+      story's acceptance tests use a stub NDJSON source
+      (byte slice), not `claude`.
+    - Does NOT validate `build_config`'s shape beyond "it's
+      a JSON object we passthrough." Story 17 owns the
+      `build_config` contract; this story doesn't
+      pre-commit to it.
+    - Does NOT write `uat_signings` rows. Story 1 owns that
+      path; the recorder only carries a pointer in
+      `Outcome::Green`.
+    - Does NOT implement the auto-merge behaviour (note 14,
+      ADR-0006 §8). `branch_state.merged` and
+      `branch_state.merge_shas` are populated by the caller
+      (story 20's `agentic story build` host command) — this
+      recorder just stores them. The branch-state test
+      exercises the observation path (start_sha, end_sha,
+      commits from real git), not the merge path.
+    - Does NOT orphan-detect across the filesystem/Store
+      boundary. A crash between the trace flush and the
+      Store append can leave an orphan trace file or an
+      orphan row. Phase 0 accepts the eventual-consistency
+      posture (ADR-0006's "bad merges and orphans are the
+      signal that forces Phase 2+ recovery work").
+    - Does NOT ship a dashboard view. The `runs` rows are
+      machine-readable; a render pass is a later story when
+      run volume justifies it (ADR-0006 Scope: "Web UI for
+      the story tree: deferred until run volume justifies
+      it; the `runs` schema is shaped to render later").
+    - Does NOT pin OTel semantic-convention compliance.
+      Alignment is a shape-permissiveness stance, not a
+      contract.
+
+  Standalone-resilience posture.
+    The `run_recorder_standalone_resilience.rs` test pins
+    the dependency floor. `agentic-runtime` for the
+    recorder + `agentic-store` for `MemStore` + `serde` +
+    `tempfile` are the allowed crates. Forbidden:
+    `agentic-cli`, `agentic-orchestrator`, `agentic-
+    sandbox`, and any LLM subprocess. Per the
+    standalone-resilient-library pattern's carve-out,
+    `agentic-runtime` as a whole is an orchestration crate
+    and may depend on the world — but the `RunRecorder` +
+    `TraceTee` sub-module specifically is on the "system
+    is in flames" critical path (evidence must write even
+    when the agent is crashing) and holds to the narrower
+    dependency floor. The test enforces it. When story 19
+    adds `ClaudeCodeRuntime` elsewhere in the same crate,
+    that code is allowed a wider dependency set, but it
+    must not be imported by the recorder.
+
+  Relationship to stories 1, 2, 4, 5, 17, 18, 19, 20.
+    - Story 4 (`Store` trait + `MemStore`) — hard
+      prerequisite. The recorder writes via `dyn Store`.
+    - Story 5 (`SurrealStore`) — hard prerequisite. The
+      `runs` table ships against both impls via story 5's
+      trait-parity harness; no new trait-parity test is
+      added here because the table is schemaless under
+      ADR-0002 and story 5 already pins the behaviour.
+    - Story 1 (`uat_signings` writer) — sibling. The
+      recorder's `Outcome::Green` carries a pointer to a
+      signing row; it does not write the signing itself.
+    - Story 2 (`test_runs`) — unrelated at the data-
+      model level; `test_runs` and `runs` coexist in the
+      same Store but do not cross-reference.
+    - Story 17 (`build_config` on story YAML) — future;
+      this story accepts `build_config` as opaque JSON.
+      When 17 lands, the recorder still passes it through
+      unchanged.
+    - Story 18 (signer identity chain) — future; this
+      story requires `signer` as a non-empty string and
+      nothing more. Story 18 formalises resolution and
+      the `sandbox:<model>@<run_id>` convention.
+    - Story 19 (`Runtime` trait + `ClaudeCodeRuntime`) —
+      sibling, immediate downstream. Story 19 wires the
+      recorder into the runtime and proves end-to-end
+      flow with a real `claude` subprocess. This story
+      does not block on 19 reaching green; 19 depends on
+      this story's API shape.
+    - Story 20 (`agentic story build`) — future; the
+      host command populates `branch_state.merged` and
+      `branch_state.merge_shas` after auto-merge. This
+      story exposes the fields; 20 writes them.
+depends_on:
+- 4
+- 5
+related_files:
+- crates/agentic-runtime/src/**
+- crates/agentic-store/src/**
+- docs/decisions/0006-sandboxed-story-hardening-loop.md

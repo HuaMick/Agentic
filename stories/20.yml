@@ -1,0 +1,1023 @@
+id: 20
+title: "`agentic story build <id>` launches the sandbox and returns an attested run"
+outcome: |
+  A developer running `agentic story build <id>` on their laptop against a
+  proposed story receives, on container exit, a mounted `runs/<run-id>/`
+  directory whose run row either attests the story green (with the sandbox
+  branch's diff squash-merged onto main) or records exactly where the
+  inner loop stopped.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-story-build/tests/host_composes_expected_docker_run_argv.rs
+    justification: |
+      Proves the host-side argv contract at the library boundary:
+      given a fixture story id, a `BuildConfig` carrying
+      `max_inner_loop_iterations: 3`, a resolved image tag
+      `agentic-sandbox:<sha>`, a runs root, an ancestor snapshot
+      path, and a credentials path, `StoryBuild::compose_docker_argv`
+      returns a `Vec<String>` whose first element is `docker` (or
+      the resolved docker binary path), whose subcommand is `run`,
+      whose `--rm` is present, whose `-v` mounts include
+      `<story-yaml-path>:/work/story.yml:ro`,
+      `<creds-path>:/work/.claude/.credentials.json:ro`,
+      `<snapshot-path>:/work/snapshot.json:ro`, and
+      `<runs-root>:/output/runs` (read-write), whose `-e` env
+      vars include `AGENTIC_SIGNER=sandbox:<model>@<run-id>` and
+      `AGENTIC_RUN_ID=<run-id>`, whose image argument is
+      `agentic-sandbox:<sha>`, and whose command tail is
+      `agentic story build --in-sandbox <id>`. The order of
+      `-v` / `-e` flags is stable across invocations so a strict
+      parser in the test can compare. Without this, each
+      downstream refactor of the compose function silently drifts
+      the argv and the host-vs-container contract collapses into
+      "whatever shipped today."
+  - file: crates/agentic-story-build/tests/host_fails_cleanly_when_docker_absent.rs
+    justification: |
+      Proves the host refuses before side-effects when docker is
+      missing: given a `$PATH` that does not contain a `docker`
+      binary (simulated by pointing `DOCKER_BINARY` at a
+      non-existent path or constructing `StoryBuild` with a
+      stubbed resolver), `StoryBuild::run` returns
+      `StoryBuildError::DockerUnavailable` naming the looked-up
+      binary, exits the CLI with code 2 (could-not-verdict), and
+      creates ZERO directories under the runs root, writes ZERO
+      rows to the host's Store, and leaves `git status
+      --porcelain` byte-identical to its pre-invocation output.
+      Without this, a missing docker translates into a
+      half-composed argv, a spawn error wrapped in a panic, or
+      worse — an empty `runs/<run-id>/` directory claiming the
+      agent "tried" when nothing ever ran. The typed refusal
+      makes the failure machine-distinguishable from
+      `InnerLoopExhausted` and `Crashed`.
+  - file: crates/agentic-store/tests/snapshot_for_story_returns_ancestor_closure.rs
+    justification: |
+      Proves the snapshot primitive's closure property: given a
+      `MemStore` seeded with `uat_signings` rows for a three-story
+      fixture chain (`leaf` depends_on `mid`, `mid` depends_on
+      `root`), each ancestor carrying a valid
+      `verdict=pass` row, `Store::snapshot_for_story(leaf_id)`
+      returns a `StoreSnapshot` containing exactly the two
+      ancestor signings (`root` and `mid`) and does NOT contain
+      the leaf's own signing (even if one exists) nor signings
+      for unrelated stories present in the same store. The
+      snapshot is deterministic: two calls against the same
+      store state return byte-identical JSON when serialised
+      with sorted keys. Without this, the sandbox's embedded
+      Store is seeded with either too little (ancestor gate
+      spuriously refuses inside the container) or too much (the
+      sandbox appears to know things about unrelated corpus
+      state, muddying the reproducibility receipt). This test
+      is the story 4 amendment's first proof point; story 5
+      mirrors it against `SurrealStore`.
+  - file: crates/agentic-store/tests/restore_roundtrips_snapshot_into_embedded_store.rs
+    justification: |
+      Proves the restore primitive's idempotence and
+      completeness: given a `StoreSnapshot` produced by
+      `snapshot_for_story` on a seeded source store, a fresh
+      `MemStore` whose `runs` and `uat_signings` tables are empty,
+      and a call to `Store::restore(snapshot)`, the destination
+      store's `uat_signings` table ends with exactly the rows the
+      snapshot carried (same `signer`, `verdict`, `commit`, and
+      `story_id` values), and a subsequent ancestor-gate query
+      (e.g. `has_pass_verdict(mid_id)`) returns true. A second
+      `restore` call with the same snapshot is rejected with
+      `StoreError::AlreadyRestored` rather than silently
+      double-writing — restore is a one-shot seeding operation,
+      not an append loop. Without this, the sandbox's ancestor
+      gate (story 11) cannot fire inside the container at all,
+      and `agentic uat --verdict pass` inside the sandbox always
+      refuses as `AncestorNotHealthy` even for stories whose
+      ancestors ARE proven.
+  - file: crates/agentic-story-build/tests/in_sandbox_seeds_ancestor_signings_into_embedded_store.rs
+    justification: |
+      Proves the container-side seeding step runs before the
+      inner loop: given a mounted ancestor snapshot at
+      `/work/snapshot.json`, a mounted story at `/work/story.yml`,
+      and the `--in-sandbox` flag, `StoryBuild::run_in_sandbox`
+      initialises an embedded `SurrealStore`, calls
+      `Store::restore(snapshot)`, and BEFORE spawning claude
+      verifies `Uat::ancestor_gate(story_id)` returns
+      `Satisfied` (using the same function story 11 pins). If
+      the snapshot would NOT satisfy the gate, the sandbox exits
+      with `StoryBuildError::AncestorSnapshotInsufficient`
+      naming the ancestor whose signing is missing, writes a
+      `runs` row with `outcome: crashed` and a clear error
+      phrasing the seeding failure, and DOES NOT spawn claude.
+      Without this, the sandbox could spawn a full inner-loop
+      agent that runs for the entire budget only to discover at
+      UAT time that the gate refuses — wasting the budget and
+      muddying the `inner_loop_exhausted` signal's meaning.
+  - file: crates/agentic-story-build/tests/in_sandbox_green_run_writes_signing_and_run_row.rs
+    justification: |
+      Proves the green outcome wiring end-to-end with a stub
+      inner loop: given a fixture story with one trivial
+      acceptance test that passes cleanly, a pre-seeded
+      ancestor snapshot satisfying the gate, and a stub
+      `Runtime` impl that emits a canned NDJSON trace ending
+      with claude declaring "I have greened this story — run
+      `agentic uat <id> --verdict pass`" and exiting cleanly,
+      `StoryBuild::run_in_sandbox` writes (a) exactly one
+      `uat_signings` row with `verdict: pass`, `signer:
+      "sandbox:<model>@<run-id>"`, `story_id: <id>`, and a
+      commit hash matching the branch tip; (b) exactly one
+      `runs` row with `outcome: "green"`, `signer` matching
+      the signing row, and `branch_state.commits` non-empty;
+      (c) the `runs` row's `branch_state.merged` is initially
+      `false` (the host is what flips it to `true`). The
+      signer on both rows is byte-identical. Without this, the
+      two tables drift — a `runs` row attesting green with no
+      matching `uat_signings` row, or a Pass signing floating
+      without a run row to point back at it — and the
+      reproducibility receipt becomes ambiguous about WHICH run
+      achieved the signing.
+  - file: crates/agentic-story-build/tests/in_sandbox_exhausted_run_writes_run_row_no_signing.rs
+    justification: |
+      Proves the exhausted outcome wiring with a stub that
+      never greens: given the same fixture as the green test
+      but a stub `Runtime` that emits iterations up to the
+      budget (`max_inner_loop_iterations: 3`) without ever
+      declaring green and without ever invoking `agentic uat
+      --verdict pass`, the resulting store state has
+      (a) exactly ZERO new `uat_signings` rows for the fixture
+      story; (b) exactly one `runs` row with `outcome:
+      "inner_loop_exhausted"`, `iterations.length == 3`, and
+      `branch_state.merged == false`. The trace file on disk
+      at `/output/runs/<run-id>/trace.ndjson` is non-empty and
+      contains the full NDJSON sequence the stub emitted.
+      Without this, an exhausted run could silently forge a
+      signing row (the signer convention would make it look
+      legitimate to a casual reader) and a story would promote
+      to healthy without ever passing its own acceptance gate.
+  - file: crates/agentic-story-build/tests/in_sandbox_crashed_run_writes_run_row_no_signing.rs
+    justification: |
+      Proves the crashed outcome wiring with a stub that exits
+      non-zero: given a stub `Runtime` whose claude subprocess
+      exits 137 (OOM killer shape) mid-iteration, the resulting
+      store state has (a) zero new `uat_signings` rows;
+      (b) exactly one `runs` row with `outcome: "crashed"`,
+      a non-empty `error` field on the final `iterations[]`
+      entry naming "subprocess exited with code 137" (or
+      equivalent), and `branch_state` reflecting whatever
+      commits the agent made before the crash (possibly empty).
+      The trace file is readable but truncated. Without this,
+      a subprocess crash produces either a misattributed
+      `inner_loop_exhausted` row (operator chases "agent ran
+      out of budget" when the real story is "agent crashed")
+      or no row at all (evidence of the attempt is lost).
+  - file: crates/agentic-story-build/tests/host_auto_merges_green_run_diff_as_squash_commit.rs
+    justification: |
+      Proves the host-side auto-merge contract on green: given
+      a completed sandbox run whose `runs` row is
+      `outcome: green` with `branch_state` carrying
+      `start_sha == main_tip_at_launch`, `end_sha`, and two
+      `commits[]` entries, `StoryBuild::merge_run_if_green`
+      applies the branch's diff to main as a SINGLE squash
+      commit (not `git merge --no-ff`, not cherry-pick of each
+      commit), whose author identity is `git config
+      user.email` resolved at host invocation time (NOT
+      `sandbox:<model>@<run-id>` — merge identity is dev's, per
+      note 14), whose subject line is `story <id>: <title>`
+      where `<title>` is the story YAML's `title` field, whose
+      body contains `run-id: <run-id>`, `signer:
+      sandbox:<model>@<run-id>`, `start-sha: <40-char-hex>`,
+      and `runs-path: runs/<run-id>/run.json`. After the
+      merge, the run row is updated: `branch_state.merged ==
+      true` and `branch_state.merge_shas` contains exactly one
+      sha (the squash commit's). Without this, green runs
+      either (a) don't land on main at all (the
+      reproducibility-from-story attestation is paper), or
+      (b) land as an unreadable cherry-pick sequence that
+      pollutes main's history.
+  - file: crates/agentic-story-build/tests/host_refuses_merge_on_start_sha_drift.rs
+    justification: |
+      Proves the drift-refusal contract at the merge step:
+      given a completed sandbox run whose `branch_state.
+      start_sha` no longer equals the current HEAD of `main`
+      (simulated by committing an unrelated change to main
+      between sandbox launch and completion),
+      `StoryBuild::merge_run_if_green` returns
+      `StoryBuildError::StartShaDrift` naming both shas,
+      performs NO merge (main's HEAD unchanged), updates the
+      run row so `branch_state.merged == false` and adds an
+      error note to the row's top-level `merge_error` field,
+      and exits the CLI with code 2 (could-not-verdict). The
+      sandbox's branch state and trace remain intact on disk
+      for later manual inspection. Without this, the host
+      might silently rebase or force-push the sandbox's
+      changes onto a main that has moved, producing either
+      (a) a merge commit that loses the concurrent work
+      (silent data loss), or (b) a rebase that reinterprets
+      the agent's commits against a base the agent never
+      saw (the attestation no longer means what it claimed).
+      Phase 0 deliberately has no rebase fallback — note 14
+      option (a).
+  - file: crates/agentic-story-build/tests/host_records_failed_run_without_merging.rs
+    justification: |
+      Proves the amend-same-story semantics: given three
+      sequential sandbox invocations for the same story id,
+      the first two returning `inner_loop_exhausted` and the
+      third returning `green`, the resulting main branch has
+      exactly ONE squash commit for the story (from the third
+      run) and the `runs` table has THREE rows (the two
+      exhausted, plus one green). Each failed run's
+      `branch_state.merged` is `false`; the winning run's is
+      `true`. `main`'s git log contains zero references to
+      the failed runs as commits, but the failed runs are
+      fully inspectable via their `runs` rows and trace
+      files. Without this, either (a) failed runs pollute
+      main's history (every attempt becomes a merge commit),
+      or (b) the history of WHICH runs succeeded becomes
+      irrecoverable (every run looks equivalent after the
+      fact). The run rows are the inspection surface; main's
+      history is winners only.
+  - file: crates/agentic-story-build/tests/docker_image_tag_is_commit_sha_with_latest_alias.rs
+    justification: |
+      Proves the image-tagging contract: the image built from
+      `infra/sandbox/Dockerfile` via the documented build
+      command (`docker build -t agentic-sandbox:<sha> -t
+      agentic-sandbox:latest -f infra/sandbox/Dockerfile .`)
+      produces exactly two tags that resolve to the same
+      image ID — `agentic-sandbox:<sha>` where `<sha>` is the
+      full 40-char lowercase hex of `git rev-parse HEAD`, and
+      `agentic-sandbox:latest`. `StoryBuild::resolve_image_tag`
+      defaults to `agentic-sandbox:<sha-at-host-invocation>`
+      and falls back to `agentic-sandbox:latest` only when the
+      per-sha tag is not locally present. A `docker image
+      inspect agentic-sandbox:<sha>` returns an image whose
+      labels include `agentic.commit=<sha>`. Without this,
+      the reproducibility receipt (ADR-0006 §1 — "image at
+      tag X + story YAML at commit Y + agent at model Z")
+      has no verifiable tag X; the `latest` alias alone would
+      make "which image ran this story" unrecoverable within
+      a week.
+  - file: crates/agentic-cli/tests/story_build_subcommand_wires_to_library.rs
+    justification: |
+      Proves the contract reaches the operator through the
+      binary: running `agentic story build <fixture-id>` on a
+      fixture store + fixture story (where docker is stubbed
+      via `DOCKER_BINARY` pointing at a small shell script
+      that records its argv to a file and exits with canned
+      stdout shaped like a green run) exits 0 on the happy
+      path, exit 2 on `DockerUnavailable`, `StartShaDrift`,
+      or `AncestorSnapshotInsufficient`, and exit 1 only when
+      the inner loop reports `Crashed`. The CLI shim does no
+      business logic: it parses argv, calls
+      `StoryBuild::run(cfg)`, and maps the typed result to
+      the exit code. The argv the stubbed docker received is
+      exactly the argv the library's
+      `compose_docker_argv` test pinned. Without this, the
+      library-level claims are library-level claims only —
+      the argv-to-subcommand wire could drop the
+      `--in-sandbox` flag, swap the story id position, or
+      mount the snapshot at the wrong path and the operator
+      would never notice until a sandbox silently misbehaved.
+  uat: |
+    Goal: convince yourself that `agentic story build <id>` is the
+    Phase 0 deliverable — a single command on the developer's
+    laptop that takes a proposed story, spawns a Docker sandbox,
+    drives an inner-loop agent to green (or to an
+    inspectable exhaustion / crash), and on green squash-merges
+    the sandbox's diff onto main under the dev's git identity.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. Install the CLI: `wsl bash -c "source ~/.cargo/env && cd
+         /home/code/Agentic && cargo install --path
+         crates/agentic-cli --locked"`. Confirm `command -v
+         agentic` resolves.
+      3. Build the sandbox image:
+         `docker build -t agentic-sandbox:$(git rev-parse HEAD)
+         -t agentic-sandbox:latest -f infra/sandbox/Dockerfile .`.
+         Confirm `docker images agentic-sandbox` lists both tags
+         against the same IMAGE ID. Confirm `docker image
+         inspect agentic-sandbox:$(git rev-parse HEAD)
+         --format '{{.Config.Labels.agentic_commit}}'`
+         echoes the same sha.
+      4. Confirm `~/.claude/.credentials.json` exists and is
+         readable — `jq -e '.sessionToken' <
+         ~/.claude/.credentials.json >/dev/null` should exit 0.
+         This is the credential the container mounts; without it
+         the inner loop can't spawn claude.
+      5. Choose a runs root: `export AGENTIC_RUNS_ROOT=$(mktemp
+         -d)`. Confirm it is empty.
+
+    Fixture construction (scratch branch):
+      6. Create a scratch branch. Author a minimal fixture
+         story at `stories/<fixture-id>.yml` with
+         `status: proposed`, `depends_on: []` (so no ancestor
+         snapshot work is needed for the first walkthrough),
+         one `acceptance.tests[]` entry pointing at a test
+         whose observable is trivially passable (e.g. "adding
+         zero to a number returns the number"), a
+         `build_config: { max_inner_loop_iterations: 3 }`, and
+         a small `crates/<fixture-crate>/` shell whose stub
+         does NOT yet satisfy the observable. Commit.
+
+    Green walkthrough:
+      7. Run `agentic story build <fixture-id>`.
+      8. Observe host-side output:
+           - A line naming the resolved image tag
+             (`agentic-sandbox:<sha>`).
+           - A line naming the allocated run id and the
+             `branch_state.start_sha` (the current main
+             tip sha).
+           - Docker's own container-run logs streaming the
+             inner loop's NDJSON trace as it happens.
+           - On green: a line `auto-merging run/<fixture-id>-
+             <short>` and the resulting squash commit sha.
+      9. Process exits 0. `git log --oneline -1 main` shows
+         a new commit whose subject is `story <fixture-id>:
+         <fixture-title>`.
+     10. `ls "$AGENTIC_RUNS_ROOT"`. Exactly one subdirectory
+         named for the run id.
+     11. `cat "$AGENTIC_RUNS_ROOT"/<run-id>/run.json`. Confirm
+         `outcome: "green"`, `signer:
+         "sandbox:<model>@<run-id>"`, `branch_state.merged
+         == true`, `branch_state.merge_shas` contains exactly
+         the squash commit's sha.
+     12. `git log -1 --format='%ae'` on main — the author
+         email matches your `git config user.email`, NOT the
+         sandbox signer. The two identities (git author,
+         sandbox signer) are distinct and both present in the
+         record (git log for the author, run row for the
+         signer).
+     13. Run `agentic uat <fixture-id>` against the post-merge
+         store (if the walkthrough's store is the host's
+         default). Confirm the signing row the sandbox wrote
+         is discoverable and `<fixture-id>`'s status in
+         `stories/<fixture-id>.yml` on main is now `healthy`.
+
+    Exhausted walkthrough:
+     14. Reset the scratch branch (`git reset --hard
+         <SHA-before-walkthrough>`). Edit the fixture story
+         to declare an observable the inner loop cannot
+         plausibly satisfy within 3 iterations (e.g. "the
+         binary implements a full-featured SAT solver"). Keep
+         `build_config.max_inner_loop_iterations: 3`.
+     15. Run `agentic story build <fixture-id>`.
+     16. Observe: process exits 1 (not 2 — exhaustion is a
+         real fail, not a could-not-verdict). `ls
+         "$AGENTIC_RUNS_ROOT"` — a second subdirectory
+         appears for the new run id.
+     17. `cat "$AGENTIC_RUNS_ROOT"/<run-id>/run.json`.
+         Confirm `outcome: "inner_loop_exhausted"`,
+         `iterations.length == 3`, `branch_state.merged ==
+         false`, no `merge_shas`.
+     18. `git log --oneline -3 main`. The main branch has NOT
+         advanced — no merge commit for this run. The only
+         new commits on main are the ones you made on the
+         scratch branch (and rewound in step 14, so possibly
+         zero).
+
+    Ancestor-gate walkthrough:
+     19. Construct a second fixture story
+         `<fixture2-id>` with `depends_on: [<non-existent-
+         ancestor>]` (or depends on an ancestor whose status
+         on disk is `proposed`). Commit.
+     20. Run `agentic story build <fixture2-id>`.
+     21. Observe: exit 2 (could-not-verdict). `run.json` has
+         `outcome: "crashed"` with an error naming the
+         ancestor that failed the gate BEFORE claude was
+         spawned. No docker run for the inner loop itself
+         occurred (verify with `docker ps -a | grep
+         agentic-sandbox` — only the seeding/gate-check
+         container exists, and it exited quickly). This is
+         the story-11 gate firing inside the sandbox against
+         the seeded snapshot.
+
+    Drift-refusal walkthrough:
+     22. Reset to a clean state. Launch a green-walkthrough
+         sandbox again (step 7) but do NOT wait for it to
+         exit — while the container is still running, in a
+         second terminal make a trivial commit to main
+         (`echo >> README.md && git commit -am
+         "concurrent edit"`).
+     23. Wait for the original sandbox to exit. Observe:
+         process exits 2. `run.json` has
+         `outcome: "green"` (the inner loop did reach green)
+         but `branch_state.merged == false` and a
+         `merge_error` field describes the start-sha drift.
+         `git log --oneline -3 main` shows the concurrent
+         edit but NOT a merge commit for the run. The run's
+         evidence is preserved and the merge can be manually
+         re-attempted once main is reconciled. Phase 0 has
+         no rebase fallback.
+
+    Cleanup:
+     24. Revert any scratch-branch fixture stories
+         (`git checkout stories/` and remove the scratch
+         branch).
+     25. `rm -rf "$AGENTIC_RUNS_ROOT"`.
+     26. Remove any squash commits the walkthrough added to
+         main if you want a truly clean post-UAT state
+         (`git reset --hard <SHA-before-UAT>`). Optional;
+         the walkthrough's merge commits are legitimate
+         history if you'd rather keep them.
+     27. If you want the binary gone: `cargo uninstall
+         agentic-cli`. If you want the image gone:
+         `docker image rm agentic-sandbox:<sha>
+         agentic-sandbox:latest`.
+guidance: |
+  This story is the Phase 0 deliverable. It integrates everything
+  the Phase 0 batch enables — story 11's ancestor gate (now
+  firing inside a container against a seeded snapshot), story 15's
+  plan/record primitive (driven by the inner-loop agent as an
+  ordinary user of the CLI), story 16's runs table (written both
+  during the run and after the host's auto-merge), story 17's
+  `build_config` (consumed here as the budget the runtime
+  enforces), story 18's signer chain (the sandbox convention
+  `sandbox:<model>@<run-id>` lands on every row the inner loop
+  writes), and story 19's `Runtime` trait + `ClaudeCodeRuntime`
+  (the inner loop's engine). This is the crown; nothing in Phase 0
+  is finished until this ships green.
+
+  What this story adds to the system.
+    1. A new crate `agentic-story-build` under `crates/`. Owns
+       the host-side composition of `docker run`, the
+       container-side seeding / gate-check / inner-loop driver,
+       and the post-run auto-merge. The `agentic-cli`
+       `story build` subcommand is a thin wrapper that parses
+       argv, calls `StoryBuild::run(cfg)`, and maps the typed
+       result to an exit code. See the
+       `standalone-resilient-library` pattern for the shape.
+    2. A Docker image at `infra/sandbox/Dockerfile`. Single
+       layer set, tagged per-commit sha plus `latest` alias.
+       Contents baked in (NOT mounted — these are the
+       constant, the story is the variable): the built
+       `agentic` binary, all `agents/`, all `patterns/`, all
+       `schemas/`, all `docs/decisions/`, all `docs/guides/`,
+       `CLAUDE.md`, `README.md`, the Rust toolchain (`rustup`,
+       `rustc`, `cargo` matching the workspace's
+       `rust-toolchain.toml`), and the `claude` CLI binary.
+       Mounted in at run time: the specific
+       `stories/<id>.yml`, `~/.claude/.credentials.json`
+       (read-only), the ancestor snapshot JSON (read-only),
+       and the `/output/runs/` host-side volume.
+    3. A new Store primitive — `snapshot_for_story(id) ->
+       StoreSnapshot` and `restore(snapshot) -> Result<()>`.
+       Lives on the `Store` trait (story 4 amendment;
+       `SurrealStore` mirror in story 5). The snapshot carries
+       the transitive-ancestor closure of `uat_signings` rows
+       needed to satisfy story 11's gate; nothing else. The
+       restore is one-shot — a destination Store that already
+       has rows in the target table refuses the seed to avoid
+       accidental merges of ancestries across distinct runs.
+    4. The auto-merge flow. On `outcome: green` AND
+       `branch_state.start_sha == current main tip`, the host
+       squash-merges the sandbox branch's diff onto main as a
+       single commit authored by the dev's git identity. On
+       any other outcome, nothing merges; the run row is the
+       full evidence surface.
+
+  Decision 1 — new crate `agentic-story-build`, not a
+  subcommand module inside `agentic-cli`.
+    Two consumers share the host-vs-sandbox logic: the `agentic
+    story build` subcommand (host mode) and the `agentic story
+    build --in-sandbox` entry inside the container (container
+    mode). Both modes are the SAME binary (the container's
+    image bakes the host-built binary; there's only one code
+    path), distinguished only by the `--in-sandbox` flag.
+    The logic is non-trivial (argv composition, volume
+    discipline, Store seeding, runtime wiring, merge
+    orchestration) and lives in a library so the `agentic-cli`
+    shim stays dumb per the standalone-resilient-library
+    pattern. The library is not standalone-resilient itself
+    (it depends on `agentic-runtime`, `docker`, `git2`); it's
+    an orchestration crate and sits on the
+    orchestrator-is-allowed-to-depend-on-the-world side of
+    that pattern's carve-out. The CLI shim is standalone-
+    resilient in the sense that it maps argv to library call
+    and exit code — nothing more.
+
+  Decision 2 — snapshot/restore lives on the `Store` trait,
+  not in a separate `agentic-store-snapshot` helper crate.
+    Three reasons, in descending weight:
+      - `MemStore` benefits from the same primitive in tests.
+        A helper crate would either duplicate the snapshot
+        logic against `MemStore` internals (fragile) or drag
+        the helper crate into every test that needs a seeded
+        gate (transitive clutter). A trait method lets tests
+        write `store.snapshot_for_story(id)` uniformly across
+        impls.
+      - The snapshot/restore is a first-class Store operation:
+        it's export/import of a bounded row slice, which is
+        exactly what a schemaless document Store's trait
+        should expose once a use case exists. The use case is
+        this story.
+      - Story 22's `CloudSurrealStore` inherits the trait
+        contract automatically. Phase 0.5's two-container
+        layout uses the same primitive; the snapshot becomes
+        the "handoff from host's cloud store to sandbox's
+        embedded store" mechanism. A helper crate would need
+        to grow to cover it anyway.
+    This triggers amendments to stories 4 (trait extension
+    + `MemStore` impl) and 5 (`SurrealStore` mirror). Both
+    amendments auto-revert their owning stories to
+    `under_construction` per the standard lifecycle. See note
+    13 for the impact sequencing; note that story 4 and 5's
+    amendments must land before this story can reach healthy,
+    which is reflected in `depends_on: [..., 4, 5]` —
+    transitively via dependents, and directly here by virtue
+    of the trait methods being called in this story's tests.
+
+  Decision 3 — per-commit SHA image tag with `latest` alias.
+    `agentic-sandbox:<40-char-sha>` is the authoritative tag;
+    `agentic-sandbox:latest` is a convenience alias that
+    always points at the last-built image. Three reasons:
+      - Reproducibility requires the sha. ADR-0006 §1 is
+        explicit: "The image at tag X + the story YAML at
+        commit Y + the agent at model Z is the reproducibility
+        receipt." Without a per-sha tag, X collapses to
+        "whatever was latest when you asked," and the receipt
+        has no anchor.
+      - `latest` alone produces silent drift — a run that
+        succeeded yesterday and fails today might have
+        succeeded against a now-overwritten image. We don't
+        want to chase that ghost.
+      - `latest` alone is still convenient — for the common
+        case of "build image, immediately run story build,"
+        the dev doesn't type the sha. We keep both.
+    `StoryBuild::resolve_image_tag` is deterministic: it
+    defaults to `agentic-sandbox:<git rev-parse HEAD>` at host
+    invocation time and falls back to
+    `agentic-sandbox:latest` only if the per-sha tag isn't
+    present locally. The fallback emits a warning on stderr;
+    it is not silent.
+
+  Decision 4 — auto-merge shape is `git merge --squash`
+  (one main commit per run), not `git am` or cherry-pick.
+    Three reasons, in descending weight:
+      - Main's history stays readable. One commit per story
+        build means `git log --oneline` on main renders as
+        "one line per landed story," which IS the value-
+        delivery cadence of the system. A cherry-picked
+        series would produce N lines per run, many of them
+        agent-iteration commits whose signal-to-noise on main
+        is poor.
+      - The squash commit is authored by the dev's git
+        identity (note 14 option (a) for merge identity),
+        carrying the run-id and sandbox signer in its body.
+        The full per-iteration history is NOT lost — it's
+        preserved in the run row's `branch_state.commits[]`
+        array and in the trace NDJSON. Nothing is thrown
+        away; the per-iteration granularity just lives
+        elsewhere than main's history.
+      - Cherry-pick of N agent commits risks conflicts with
+        main's current state mid-series (if start-sha drift
+        happens WITHIN a multi-commit replay); a squash
+        applies the cumulative diff atomically and either
+        lands clean or drifts as a single decision.
+    Revisit if granular history becomes valuable. Not a
+    Phase 0 concern.
+
+  Decision 5 — merge commit identity is `git config
+  user.email` at host invocation time.
+    The merging process is the host `agentic story build`
+    command; the dev is the one running it. Treating the
+    sandbox run as the dev's proxy keeps git's audit surface
+    matching "who ran the command." The sandbox signer
+    (`sandbox:<model>@<run-id>`) lives on the `uat_signings`
+    and `runs` rows (attestation layer), not on the git
+    commit author line (authorship layer). Three distinct
+    identities coexist in the corpus history — dev's git
+    identity (merge commit author), sandbox signer (Store
+    row signer), human UAT signer (Store row signer when a
+    human replays the UAT). All three have different
+    meanings; all three must stay queryable.
+
+    The dev's identity is resolved via `git config
+    user.email` at host launch — the same resolution git
+    itself uses for commits. If `user.email` is unset,
+    `StoryBuild::run` refuses at host launch with
+    `StoryBuildError::GitIdentityMissing` and exits 2.
+    This fires BEFORE the sandbox is launched; we don't
+    waste a claude budget on a run we couldn't merge if
+    green.
+
+  Decision 6 — start-sha drift refuses the merge; no
+  rebase attempt.
+    If `branch_state.start_sha` at sandbox exit does not
+    equal the current HEAD of `main` on the host at merge
+    time, the host refuses to merge, updates the run row
+    with `merged: false` and a `merge_error`, and exits 2.
+    The dev can then (a) revert the concurrent edit on
+    main, (b) re-run the sandbox against the new main tip,
+    or (c) manually apply the sandbox's diff with `git am`
+    if they're confident the concurrent edit doesn't
+    conflict.
+    Rebase fallback is NOT in Phase 0 — note 14 option
+    (a) over (b). Rebasing the sandbox's commits onto a
+    main the sandbox never saw changes the semantic content
+    of the attestation: the agent built against `<start-sha>`,
+    and we should only merge what the agent built.
+    Rebase-to-new-main invents a commit series the agent
+    did not produce. If the drift is small and non-
+    conflicting the dev can manually apply; if it's large,
+    re-running is the correct response.
+
+  Decision 7 — amend-same-story runs merge only on win.
+    Failed runs (exhausted, crashed, start-sha drift) stay
+    in the `runs` table with `branch_state.merged: false`
+    and do NOT produce merge commits on main. Only the
+    winning run's diff lands. This preserves main as a
+    "winners only" history while the `runs` table preserves
+    the full attempt history. Together they give the
+    operator everything: main tells them what the system IS,
+    the runs table tells them what the system HAS TRIED.
+
+  Decision 8 — commit message convention.
+    Subject: `story <id>: <title>` where `<title>` is the
+    story YAML's `title` field at sandbox launch (NOT an
+    agent-composed summary). The YAML title is the canonical
+    name; using it keeps `git log --oneline` searchable
+    against the corpus.
+    Body:
+      ```
+      run-id:    <uuid>
+      signer:    sandbox:<model>@<run-id>
+      start-sha: <40-char-hex>
+      end-sha:   <40-char-hex>
+      runs-path: runs/<run-id>/run.json
+
+      <first line of the trace's final iteration summary>
+      ```
+    The `runs-path` is a RELATIVE pointer to a path under the
+    host's runs root — it is NOT a URL, NOT a docker volume
+    path. A later reader looks up the full row by combining
+    their local runs root with this relative path.
+
+  Flow (normative — the one-picture summary).
+    ```
+    HOST: agentic story build <id>
+      → validate: story exists, is proposed, depends_on
+        ancestors are resolvable
+      → resolve: git user.email (refuse if unset), image tag
+        (sha then latest fallback), docker binary, runs root
+      → Store::snapshot_for_story(id) produces the ancestor-
+        closure bundle at <runs-root>/<run-id>/snapshot.json
+      → compose docker run argv (see the argv test for
+        exact shape); mounts:
+           /work/story.yml (the specific story YAML, :ro)
+           /work/.claude/.credentials.json (claude creds, :ro)
+           /work/snapshot.json (ancestor snapshot, :ro)
+           /output/runs/<run-id>/ (emitted runs, :rw)
+        env: AGENTIC_SIGNER=sandbox:<model>@<run-id>,
+             AGENTIC_RUN_ID=<run-id>,
+             AGENTIC_START_SHA=<main-tip-sha>
+      → docker run <image>:<tag> ... agentic story build
+        --in-sandbox <id>
+      → wait for container exit; stream container stdout/
+        stderr unchanged
+      → read back <runs-root>/<run-id>/run.json
+      → on outcome=green AND start_sha == current main tip:
+           git checkout main
+           git merge --squash <sandbox-branch-ref-captured-
+              from-branch_state.end_sha>
+           git commit --author "<dev git identity>" -m "<msg>"
+           update run row: branch_state.merged=true,
+              branch_state.merge_shas=[<new-sha>]
+           exit 0
+         on outcome=green AND start_sha != current main tip:
+           update run row: merge_error="start-sha drift"
+           exit 2
+         on outcome=inner_loop_exhausted: exit 1
+         on outcome=crashed: exit 1
+         on ancestor-seed failure (pre-container):
+           write a crashed run row; exit 2
+
+    CONTAINER (same binary, --in-sandbox flag):
+      → initialise embedded SurrealStore at a scratch path
+      → Store::restore(snapshot) seeds ancestor signings;
+        fail-closed AncestorSnapshotInsufficient if the
+        gate wouldn't be satisfied after restore
+      → create run row via agentic-runtime's RunRecorder
+        (story 16's primitive)
+      → git checkout -b run/<id>-<short> from current HEAD
+        in the container's view of the mounted repo (or, in
+        Phase 0, from a clone of the host-mounted repo — see
+        "Repo layout inside the container" below)
+      → agentic-runtime::spawn_claude_session with:
+          prompt: "execute story /work/story.yml to green
+                   using `agentic` commands; when green,
+                   invoke `agentic uat <id> --verdict pass`"
+          tools: Read/Edit/Write/Bash/Grep/Glob
+          budget: story.build_config.max_inner_loop_iterations
+                  (or DEFAULT_BUILD_CONFIG.max_inner_loop_
+                  iterations from story 17)
+          model: story.build_config.models[0] (or default)
+      → inner loop: claude iterates build → test → uat
+      → green criterion (normative): BOTH
+           cargo test --workspace exits 0
+           AND
+           agentic uat <id> --verdict pass exits 0
+        Either failing → the inner loop continues or
+        exhausts. Never a partial green.
+      → on green: agent invokes uat, which writes
+        uat_signings row with signer from $AGENTIC_SIGNER
+        (story 18's resolution chain picks this up)
+      → finish run row with outcome + branch_state
+        (start_sha from $AGENTIC_START_SHA,
+        end_sha + commits from the container's git repo)
+      → flush NDJSON trace
+      → exit 0 on green; exit 1 on exhausted; exit 137 or
+        other non-zero on crashed
+    ```
+
+  Green criterion — normative.
+    The inner loop reports GREEN only when BOTH of:
+      (a) `cargo test --workspace` (inside the container,
+          with the full Rust toolchain baked in) exits 0;
+      (b) `agentic uat <id> --verdict pass` (inside the
+          container, against the embedded Store seeded with
+          the snapshot) exits 0.
+    Either condition failing → the iteration counts against
+    the budget, the agent continues, and eventually either
+    greens or exhausts. A partial green is not a green; no
+    run row ever writes `outcome: green` unless both
+    conditions hold. The ancestor gate (story 11) fires
+    inside the container as part of (b) — if the gate
+    refuses, UAT exits 2 and the iteration is not green.
+    This preserves the story 11 invariant end-to-end: a
+    sandbox cannot sign a story whose ancestors are
+    unproven, even if the rest of its inner loop went
+    clean, because `agentic uat` refuses.
+
+  Green criterion enforcement is shared between
+  `agentic-runtime` (observes claude's claim of completion
+  and counts the iteration) and the inner agent's prompt
+  (told explicitly to invoke `agentic uat` before declaring
+  done). The runtime does NOT wrap or substitute for the
+  uat invocation — the standalone-resilient-library pattern
+  applies to `agentic-uat`, which the sandboxed agent
+  invokes as a user. `agentic-runtime` reads the uat's exit
+  code from the subprocess and only transitions to
+  `Outcome::Green { signing_run_id }` when that code is 0
+  AND a matching signing row is present in the embedded
+  Store.
+
+  Docker image — reproducible-build discipline.
+    The image at `infra/sandbox/Dockerfile` MUST be
+    byte-identical across rebuilds of the same git commit.
+    Practical constraints:
+      - Use pinned base image digests
+        (`FROM rust:1.X.Y@sha256:<digest>`), not `:latest`
+        or unpinned tags.
+      - Use a lockfile-respecting `cargo build
+        --locked --frozen` step.
+      - Copy in the agents/patterns/schemas/docs content in a
+        single deterministic `COPY` step (file order, mtime
+        normalisation via `--chmod` or a post-copy
+        `find -exec touch -d`).
+      - Pin `claude` CLI to a specific released version
+        (not a nightly or a streamed install script).
+      - Label the image with `agentic.commit=<sha>` and
+        `agentic.built_at=<rfc3339>` — only the commit label
+        is part of the reproducibility receipt, but
+        `built_at` lets operators distinguish rebuilds of the
+        same sha for observability.
+    The repo ships a `make image` (or equivalent) target
+    that performs the canonical build. CI builds this image
+    on every main commit and pushes both
+    `agentic-sandbox:<sha>` and `agentic-sandbox:latest` to
+    the registry (registry TBD — local-only in Phase 0,
+    Artifact Registry in Phase 1 per ADR-0006's ladder). The
+    Dockerfile and make target are shipped by this story;
+    registry push is a Phase 0.5+ concern.
+
+  Repo layout inside the container.
+    The host mounts the repo AS A SINGLE READ-ONLY bind at
+    `/mounted-repo`. The container entrypoint clones
+    `/mounted-repo` into `/work/repo` (scratch filesystem)
+    before cutting the `run/<id>-<short>` branch. This
+    keeps the mount read-only (the host's working tree is
+    never touched by the sandbox), while the container
+    still has a full writable git repo to operate in. The
+    cost is one `git clone --local` at container start —
+    fast enough (hardlinked object dirs when
+    `--local` applies) that the budget isn't meaningfully
+    eaten. `/work/story.yml`, `/work/snapshot.json`, and
+    `/work/.claude/.credentials.json` are separate
+    read-only mounts; the container reads them directly
+    without copying.
+
+  Sandbox signer — story 18's resolution chain composes
+  here.
+    The host sets `AGENTIC_SIGNER=sandbox:<model>@<run-id>`
+    in the container env. `<model>` is sourced from
+    `story.build_config.models[0]` if set, else from the
+    `Runtime` impl's default (story 19's default is
+    whichever model the `ClaudeCodeRuntime` picks when the
+    caller supplies no preference). Story 18's resolution
+    chain is CLI flag → env var → git config → refuse; the
+    env-var slot is where the sandbox convention lands.
+    Every row the inner loop writes — `runs` via
+    `RunRecorder`, `uat_signings` via `agentic-uat` — reads
+    `$AGENTIC_SIGNER` and stamps the row accordingly.
+    Nothing in this story modifies story 18's logic; it
+    only fills the env-var slot.
+
+  Ancestor snapshot — what goes in, what stays out.
+    The snapshot is the `uat_signings` closure of the story
+    being built, computed as follows:
+      closure = { signings for every transitive ancestor
+                  in depends_on (per story 11's DFS) }
+    Rows for the story itself (even prior signings of the
+    SAME story) are NOT included — a build is always a
+    fresh attestation. Rows for unrelated stories are NOT
+    included. The snapshot JSON is a `{"schema_version": 1,
+    "signings": [ ... ]}` object (room for future
+    additions); the container's restore rejects unknown
+    schema versions loudly. Any mismatch aborts the
+    container before claude spawns.
+
+    The snapshot ships as a read-only mount so a malicious
+    or mis-authored in-container agent cannot modify it.
+    The `restore` path is also one-shot — the container's
+    embedded Store refuses a second restore call even on
+    the same snapshot.
+
+  What this story explicitly does NOT do.
+    - Does NOT ship fanout. One `docker run` per invocation.
+      Phase 2 introduces parallel sandboxes; this story's
+      host flow is single-container.
+    - Does NOT ship cloud execution. Everything runs on
+      Docker Desktop on the dev's laptop. Phase 1 adds the
+      cloud path; this story is local-only.
+    - Does NOT ship an outer loop. On `inner_loop_exhausted`
+      or `crashed`, the command exits and the human decides
+      next steps. ADR-0006 §7: outer-loop amendment stays
+      human-in-the-loop through Phase 0 and Phase 1.
+    - Does NOT ship a dashboard UI for runs. The `runs`
+      table is machine-readable; a rendering pass is a
+      later story when run volume justifies it (per
+      ADR-0006 Scope).
+    - Does NOT ship rebase-on-drift. Start-sha drift
+      refuses the merge outright. Manual recovery is the
+      dev's.
+    - Does NOT extend the story schema. `build_config` is
+      story 17's scope; this story CONSUMES it but does
+      not pin its shape.
+    - Does NOT write `uat_signings` rows directly. The
+      inner-loop agent invokes `agentic uat` as a user;
+      that library (story 1's contract, amended by story
+      18) writes the signing. This story's code only
+      POINTS at the signing via `Outcome::Green {
+      signing_run_id }` on the run row.
+    - Does NOT push images to a registry. The Dockerfile
+      and local build are this story's scope; registry
+      push is Phase 0.5+.
+    - Does NOT handle concurrent sandboxes on the same
+      host. One sandbox at a time in Phase 0 is the
+      assumption; the `AGENTIC_RUN_ID` is unique per
+      invocation but the start-sha-drift refusal is the
+      only coordination point. Two simultaneous sandboxes
+      on the same main would both succeed in their inner
+      loops and then race at merge time — the second to
+      merge would see drift from the first's merge and
+      refuse. This is acceptable Phase 0 behaviour; fanout
+      coordination is Phase 2 scope.
+
+  Failure modes (typed errors, exit codes).
+    All fail-closed — no partial run rows, no half-merged
+    main. Exit codes:
+      - 0: success (green + merged, or the happy-path
+        user-facing outcome the caller invoked).
+      - 1: real fail — `InnerLoopExhausted`, `Crashed`
+        (inner-loop-level failures where the sandbox ran
+        but could not green).
+      - 2: could-not-verdict — host-level refusals where
+        the sandbox didn't even run or its result couldn't
+        be honoured: `DockerUnavailable`,
+        `GitIdentityMissing`, `StartShaDrift`,
+        `AncestorSnapshotInsufficient`, `ImageTagNotFound`,
+        `CredentialsMissing`, `RunsRootInvalid`.
+    The fail-closed-on-dirty-tree pattern applies at merge
+    time: if the host's working tree is dirty at merge
+    time, the merge refuses with exit 2 and the run row is
+    updated with `merged: false + merge_error="dirty
+    tree"`. The inner-loop container's own tree dirtiness
+    does not matter — the container's repo is scratch and
+    destroyed on exit; only the commits the agent makes on
+    the `run/<id>-<short>` branch survive as structured
+    data in the run row. The gate the dev sees is the
+    host's gate, at the point the host tries to merge.
+
+  Allowed dependencies for `agentic-story-build`.
+    `agentic-store`, `agentic-story`, `agentic-runtime`,
+    `agentic-uat` (for the ancestor-gate helper the seeding
+    step calls), `agentic-events`, `git2`, `serde`,
+    `serde_json`, `tempfile`, `uuid`. Docker invocation is
+    via `std::process::Command` — no `bollard` or other
+    Docker-API crate in Phase 0 (the argv-composition shape
+    stays easy to reason about and easy to stub in tests).
+    This crate is NOT standalone-resilient-library-shaped;
+    it IS an orchestration crate, and the pattern's
+    "Do NOT apply to crates whose entire purpose is
+    orchestration" carve-out fires.
+
+  Relationship to the patterns.
+    `standalone-resilient-library` applies to the CLI shim
+    and to the `agentic-uat` library the inner loop
+    invokes — NOT to `agentic-story-build` itself. The
+    shim is dumb (argv → library call → exit code); the
+    library it wraps is orchestrative by definition.
+    `fail-closed-on-dirty-tree` applies at the host's merge
+    step: the merge is an attestation (it says "this diff
+    is what achieved green for story X, signed by this
+    run"), and a dirty tree at merge time would corrupt
+    that attestation. The refusal maps to exit 2, same as
+    every other could-not-verdict in the corpus.
+
+  Relationship to stories 11, 15, 16, 17, 18, 19, 4, 5.
+    - Story 11 (ancestor gate) — hard dependency. The gate
+      fires inside the container against the seeded
+      snapshot. This story does NOT modify the gate's
+      logic; it only seeds the store the gate reads.
+    - Story 15 (`agentic test-build plan/record`) — hard
+      dependency. The inner-loop agent drives the plan/
+      record cycle as part of its iteration — the same
+      way a human user would. The build-rust subagent is
+      not invoked directly; the inner-loop agent IS the
+      build-rust agent (or a general-purpose agent
+      playing that role), reading plan output, authoring
+      scaffolds, recording red, then implementing.
+    - Story 16 (`runs` schema + `RunRecorder`) — hard
+      dependency. The container uses `RunRecorder` to
+      write run rows; the host reads them back to decide
+      whether to merge. This story extends `runs` usage
+      to include `branch_state.merged` and
+      `branch_state.merge_shas` (the fields story 16
+      declared but left for this story to populate).
+    - Story 17 (`build_config`) — hard dependency. The
+      runtime reads `story.build_config.max_inner_loop_
+      iterations` as the inner-loop budget and
+      `story.build_config.models` as the model preference.
+      This story does not re-pin build_config's shape.
+    - Story 18 (signer identity) — hard dependency. The
+      host sets `AGENTIC_SIGNER` in the container env
+      per the convention `sandbox:<model>@<run-id>`;
+      story 18's resolution chain picks it up for every
+      row the inner loop writes.
+    - Story 19 (`Runtime` trait + `ClaudeCodeRuntime`) —
+      hard dependency. The container's inner-loop driver
+      calls `Runtime::spawn_claude_session` to run the
+      inner loop. This story does not modify the runtime;
+      it consumes it.
+    - Stories 4 and 5 (Store trait + MemStore +
+      SurrealStore) — hard dependency, by way of the
+      snapshot/restore trait extension. Both stories'
+      amendments must land before this story can reach
+      healthy. The amendments auto-revert stories 4 and
+      5 to `under_construction` per the standard
+      lifecycle; their re-UAT unblocks this story's path
+      to green. See note 13.
+
+  Test file locations.
+    Library-level tests (eleven tests) live under
+    `crates/agentic-story-build/tests/`. Two supporting
+    tests for the snapshot primitive live under
+    `crates/agentic-store/tests/` (the story 4 amendment's
+    proof points, mirrored in story 5's amendment). One
+    binary-level test (`story_build_subcommand_wires_to_
+    library.rs`) lives under `crates/agentic-cli/tests/`
+    and exercises the argv-to-library wire using a stubbed
+    docker via `DOCKER_BINARY` env var pointing at a shell
+    script the test harness controls. Integration tests
+    that actually spawn docker are gated behind a
+    `#[ignore]` attribute and a `cargo test -- --ignored`
+    opt-in; the `acceptance.tests[]` entries above do NOT
+    require a running Docker daemon to execute — they stub
+    the runtime and the docker process.
+
+  Why this story is the crown of Phase 0.
+    Every other Phase 0 story ships a primitive; this one
+    integrates them into the user-facing command that
+    justifies the work. A Phase 0 declaration of "done"
+    against this story reads: a developer on their laptop,
+    on a fresh checkout, can pick any proposed story in
+    the corpus, run `agentic story build <id>`, and either
+    (a) receive a green run that auto-merges to main under
+    their identity, or (b) receive an inspectable failure
+    trace pinned to a specific iteration budget. No cloud
+    cost. No human-in-the-loop within the inner iteration.
+    No API-key-or-subprocess ambiguity. When this story
+    ships healthy, Phase 0 is done.
+depends_on:
+- 11
+- 15
+- 16
+- 17
+- 18
+- 19
+related_files:
+- crates/agentic-story-build/src/**
+- crates/agentic-cli/src/**
+- crates/agentic-store/src/**
+- crates/agentic-runtime/src/**
+- infra/sandbox/Dockerfile
+- docs/decisions/0006-sandboxed-story-hardening-loop.md

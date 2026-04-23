@@ -1,0 +1,438 @@
+id: 17
+title: Story YAML carries an optional build_config block the loader parses
+outcome: |
+  A story author declaring `build_config: { max_inner_loop_iterations,
+  models }` in the story YAML has those values round-trip through the
+  loader as a typed value, so any downstream consumer of a `Story`
+  reads the author's budget and model selection without re-parsing
+  the YAML.
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-story/tests/load_build_config_round_trips.rs
+    justification: |
+      Proves the happy path for the new optional field: a story
+      YAML carrying a valid `build_config: {max_inner_loop_iterations:
+      N, models: ["<string>", ...]}` loads through
+      `Story::load` (and `Story::load_dir`) into a typed `Story`
+      value whose `build_config` is `Some(BuildConfig { max_inner_
+      loop_iterations: N, models: vec!["<string>", ...] })`. The
+      int is preserved; the models vector preserves order and
+      content; no other story field is perturbed (title, outcome,
+      status, patterns, acceptance, guidance, depends_on,
+      related_files all parse unchanged alongside the new block).
+      Without this, the "author declares, system respects"
+      contract the outcome promises has no proof — every
+      downstream consumer would have to re-discover the field
+      shape by observation and we'd ship N slightly different
+      readers of the same YAML block.
+  - file: crates/agentic-story/tests/load_absent_build_config_is_none_not_default_error.rs
+    justification: |
+      Proves the optionality decision: a story YAML that does
+      NOT declare `build_config:` loads cleanly into a `Story`
+      whose `build_config` field is `None` — not a typed error,
+      not a silently-substituted default struct, not a panic.
+      This is the observable that pins the "optional, with
+      documented defaults applied downstream" design choice.
+      The loader does not synthesize a `BuildConfig` value when
+      the block is absent; consumers that need a concrete
+      budget consult `DEFAULT_BUILD_CONFIG` (see guidance) and
+      make the substitution themselves. Without this, the
+      optionality is prose-only: a later refactor could silently
+      auto-fill defaults at load time, hiding the author's
+      intent (or lack thereof) from every downstream reader
+      and making "did the author think about this?" un-
+      introspectable.
+  - file: crates/agentic-story/tests/load_build_config_rejects_non_positive_iterations.rs
+    justification: |
+      Proves the non-positive budget guard: a story whose
+      `build_config.max_inner_loop_iterations` is `0`, a
+      negative integer, or a non-integer (string, float, null)
+      is rejected by the loader with a typed error whose
+      payload names the `build_config.max_inner_loop_iterations`
+      field AND the offending value. The contract is "positive
+      integer"; `0` is nonsensical (budget of zero means "never
+      iterate, which is the inner loop's no-op state" — the
+      runtime must not be asked to start a zero-budget run)
+      and negatives are clearly malformed. Without this, a
+      typo in the story YAML (`-5` pasted as a budget) would
+      load as a signed int and the runtime (story 19's scope)
+      would either underflow its counter, enter an infinite
+      loop, or treat negative as "unbounded" — each of which is
+      worse than failing loud at load.
+  - file: crates/agentic-story/tests/load_build_config_empty_models_is_valid.rs
+    justification: |
+      Proves `models: []` is a valid author declaration, not a
+      schema violation: a story whose `build_config.models` is
+      an empty array (or omits the `models:` key, falling back
+      to `Vec::new()`) loads into a `Story` whose
+      `build_config.models` is `vec![]`. The semantic is
+      "author has no opinion on model; runtime picks a
+      default," and is distinct from `build_config` being
+      entirely absent (which is "author has no opinion on ANY
+      of this"). Runtime-defaulting at model-pick time is
+      story 19's concern, not this story's. Without this,
+      authors would be forced to either omit build_config
+      entirely (losing their budget opinion) or to invent a
+      sentinel model string, neither of which matches the
+      outcome's "declares their budget and model selection" —
+      the two are independently optional.
+  - file: crates/agentic-story/tests/default_build_config_constant_is_the_only_defaults_source.rs
+    justification: |
+      Proves the defaults-locus decision: a single public
+      constant `DEFAULT_BUILD_CONFIG: BuildConfig` (name
+      exact) is exported from `agentic-story`, carrying the
+      documented defaults (`max_inner_loop_iterations: 5`,
+      `models: vec![]`). No other crate re-declares these
+      values; `grep -r "max_inner_loop_iterations: 5"` across
+      the workspace returns exactly ONE match — the constant's
+      definition in `agentic-story` — and the test asserts
+      this by pinning the constant's value via `assert_eq!`
+      and by verifying no shadowing constant exists in the
+      `agentic-story` crate's public API. Without this, the
+      "single source of truth for defaults" decision degrades
+      into "several crates hard-code the same numbers and
+      they drift" — the exact duplicate-constant failure mode
+      CLAUDE.md's "reference, don't restate" rule names.
+  - file: crates/agentic-story/tests/load_build_config_standalone_resilience.rs
+    justification: |
+      Proves the loader's dependency floor did not widen when
+      the field landed: the `build_config` loading path is
+      exercised end-to-end from a test that links only against
+      `agentic-story`, `serde`, `serde_yaml`, and `tempfile`.
+      No `agentic-cli`, no `agentic-runtime`, no `agentic-
+      store`, no LLM subprocess. Story 6's loader is a
+      parse/validate step on the critical path; adding a new
+      optional field must not drag in orchestration or runtime
+      crates, because the first consumer to need the field
+      (the runtime, story 19) would then circularly depend on
+      its own configuration source. Without this, the
+      "schema field lands first, runtime consumes later"
+      split this story explicitly draws blurs at the
+      dependency-graph level and story 19 inherits an
+      architectural papercut.
+  uat: |
+    Goal: convince yourself that a story author declaring
+    `build_config: {max_inner_loop_iterations, models}` in the
+    story YAML is faithfully parsed by the loader into a typed
+    value; that omission yields `None` (not a silent default);
+    that `0`/negative iterations are rejected loud; and that
+    the sole defaults constant is `DEFAULT_BUILD_CONFIG` in
+    `agentic-story`.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. Confirm `crates/agentic-story/` builds as a library
+         (via WSL: `wsl bash -c "source ~/.cargo/env && cd
+         /home/code/Agentic && cargo build -p agentic-story"`).
+         The build must succeed; the `BuildConfig` type and
+         `DEFAULT_BUILD_CONFIG` constant must be publicly
+         re-exported from `agentic-story`.
+      3. Pick a scratch directory `<scratch>` for fixture
+         stories (e.g. `$(mktemp -d)`).
+
+    Present walkthrough:
+      4. Copy `stories/15.yml` to `<scratch>/15.yml`. Append
+         at the top level (after `status:` is a conventional
+         spot):
+           ```
+           build_config:
+             max_inner_loop_iterations: 7
+             models:
+               - claude-sonnet-4-6
+               - claude-opus-4-7
+           ```
+      5. Write a scratch example under `crates/agentic-story/
+         examples/build_config_smoke.rs` that loads
+         `<scratch>/15.yml` via `Story::load` and prints the
+         `build_config` field using `{:?}`. Run it. Observe:
+         process exits 0 and stdout shows `Some(BuildConfig
+         { max_inner_loop_iterations: 7, models: ["claude-
+         sonnet-4-6", "claude-opus-4-7"] })`.
+
+    Absent walkthrough:
+      6. Copy the original `stories/15.yml` (no `build_config:`
+         block) to `<scratch>/absent.yml` and change its `id:`
+         field to a unique value so the filename/id check
+         passes. Re-run the example against `<scratch>/absent
+         .yml`. Observe: process exits 0 and stdout shows
+         `None`.
+      7. Query `agentic-story::DEFAULT_BUILD_CONFIG` from the
+         same example (print it too). Observe: it shows
+         `BuildConfig { max_inner_loop_iterations: 5, models:
+         [] }`. Confirm this is the ONLY place these numbers
+         are declared (`grep -r "max_inner_loop_iterations: 5"
+         crates/` returns the constant's definition and
+         nothing else).
+
+    Rejection walkthrough:
+      8. Copy the fixture from step 4 to `<scratch>/zero.yml`
+         and change `max_inner_loop_iterations: 7` to
+         `max_inner_loop_iterations: 0`. Run the loader
+         against it. Observe: non-zero exit, a single-line
+         error naming `build_config.max_inner_loop_iterations`
+         AND the offending value `0`, no panic and no
+         backtrace.
+      9. Repeat step 8 with `-3` as the value. Observe the
+         same shape of failure, naming `-3`.
+     10. Repeat step 8 with `"five"` (a string). Observe a
+         typed error naming the field and the type mismatch.
+
+    Empty-models walkthrough:
+     11. Copy the fixture from step 4 to `<scratch>/empty-
+         models.yml` and change `models:` to the empty array
+         `[]`. Run the loader. Observe: process exits 0 and
+         stdout shows `Some(BuildConfig { max_inner_loop_
+         iterations: 7, models: [] })`. Distinct from step 6:
+         `Some(...)` with empty models, NOT `None`.
+
+    Cleanup:
+     12. Remove `<scratch>` and any scratch example files
+         you added under `crates/agentic-story/examples/`.
+     13. Confirm `git status` is clean.
+guidance: |
+  This story introduces a new optional field on the story
+  schema — `build_config` — and extends the story loader to
+  parse it. It does NOT introduce runtime consumption of the
+  field; a `build_config` declared today lands in a `Story`
+  value and stays there. Story 19 (`agentic-runtime` un-
+  deferred) is where `max_inner_loop_iterations` crosses into
+  actual budget enforcement at claude-subprocess launch time.
+  The two stories compose: 17 ships the contract shape;
+  19 ships the behaviour. Neither blocks on the other
+  reaching green first.
+
+  Decision 1 — build_config is OPTIONAL, not mandatory.
+    Note 10 flagged this as the first open question; the
+    answer is optional. Rationale:
+
+      - Mandatory forces a backfill of stories 1–15 with a
+        build_config block each. Fifteen healthy stories
+        would auto-revert to `under_construction` on the
+        schema edit, producing fifteen re-UAT cycles whose
+        only content is "author picked a budget they never
+        thought about." That's proof-theatre — the opposite
+        of what the prove-it gate (ADR-0005) is for.
+      - The inner loop (ADR-0006 §2) needs a budget to run,
+        but the runtime can consult `DEFAULT_BUILD_CONFIG`
+        when the story omits the block. Authors who DO have
+        an opinion declare it; authors who don't opt in to
+        the system's considered defaults.
+      - "Optional with documented defaults" is the same
+        shape the rest of the schema uses for `patterns: []`,
+        `depends_on: []`, and `related_files: []`. Precedent.
+
+    The alternative (mandatory) remains defensible on
+    forcing-function grounds — "make every author
+    consciously pick a budget" — and story-writer flags it
+    here for future reconsideration if the corpus drifts
+    toward "no one fills it in, and when they do it's
+    wrong." For now: optional.
+
+  Decision 2 — defaults live in ONE constant in agentic-story.
+    Note 10's second open question. The answer is: a single
+    `DEFAULT_BUILD_CONFIG: BuildConfig` public constant in
+    `crates/agentic-story/src/build_config.rs` (or wherever
+    the `BuildConfig` type lives), exported from the crate
+    root. No other crate declares these values; no YAML file
+    carries a "default" section; no CLI flag table embeds
+    them. Documentation references the constant by name.
+
+    Concrete values (this story pins them):
+      - `max_inner_loop_iterations: 5` — five iterations is
+        the note-10 lean and matches the informal ceiling
+        claude-managed-agents use in similar harnesses.
+      - `models: vec![]` — empty; the runtime picks a
+        default model when the author has no opinion.
+        Story 19 owns the default-model-pick policy; this
+        story just expresses "empty means the author
+        declined to pin."
+
+    The `default_build_config_constant_is_the_only_defaults_
+    source.rs` test pins the locus: a workspace grep for
+    the numeric value must return the constant's definition
+    and nothing else. When those numbers change, they change
+    in one place.
+
+  Decision 3 — schema edit is TRIGGERED by this story but
+  NOT performed unilaterally.
+    Per CLAUDE.md, the schema (`schemas/story.schema.json`)
+    is authoritative and story-writer does not edit it on
+    its own authority. This story DECLARES the dependency on
+    the schema edit; whichever curator owns schemas (or the
+    human) performs the edit synchronously with this story's
+    promotion from `proposed` to `under_construction` /
+    `healthy`.
+
+    The schema edit is a BUNDLED amendment to story 6 (the
+    loader/schema holder) that lands alongside story 21's
+    schema edit — retirement (`"retired"` added to the
+    status enum) and `superseded_by: <id>`. Story 6 amends
+    ONCE, re-UATs ONCE, auto-reverts ONCE. See research
+    folder note 13 for the bundling rationale and the full
+    amendment sequence. This story's `depends_on: [6]` edge
+    is the upstream prerequisite (story 6 must hold the
+    loader before this story can extend it); the schema
+    edit inside story 6 is the downstream amendment
+    triggered by this story's proposal, not its
+    completion.
+
+    What the schema edit adds:
+      ```jsonc
+      "build_config": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["max_inner_loop_iterations"],
+        "properties": {
+          "max_inner_loop_iterations": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Upper bound on inner-loop iterations the runtime will execute before declaring `inner_loop_exhausted`. Positive integer; 0 is rejected by the loader as 'never iterate' is the inner loop's no-op state."
+          },
+          "models": {
+            "type": "array",
+            "default": [],
+            "items": {"type": "string", "minLength": 1},
+            "description": "Ordered list of model identifiers the runtime may choose from. Empty array means the author declined to pin; runtime picks a default. Distinct from build_config being absent, which means the author declined to express any opinion on budget OR models."
+          }
+        }
+      }
+      ```
+    The field is added under `properties` at the story
+    root, with `"build_config"` NOT appearing in the root
+    `required` list (so the loader accepts its absence).
+
+  BuildConfig type shape (auditable).
+    ```
+    pub struct BuildConfig {
+      pub max_inner_loop_iterations: u32,   // > 0 enforced at load
+      pub models: Vec<String>,              // may be empty
+    }
+
+    pub const DEFAULT_BUILD_CONFIG: BuildConfig = BuildConfig {
+      max_inner_loop_iterations: 5,
+      models: Vec::new(),  // const-initialisable in current Rust
+    };
+    ```
+    Two fields, both public. `u32` (not `i32`) is the
+    declared integer type: the loader coerces from YAML ints
+    and rejects negatives as out-of-range BEFORE the typed
+    value exists, so the type system reinforces the
+    positive-integer contract. `Vec<String>` for models is
+    straightforward; the strings are opaque to this story
+    (runtime consumes them, story 19's scope).
+
+    Additional variants (a typed error enum arm) extend
+    story 6's existing error type:
+      - `BuildConfigInvalidIterations { value: i64 }` for
+        `0`, negatives, or out-of-`u32`-range inputs.
+      - `BuildConfigTypeMismatch { field: String,
+        expected: String, found: String }` for type
+        mismatches on either sub-field (e.g. a string where
+        an integer is expected).
+    Both follow the typed-error convention the loader
+    already uses; neither is `anyhow::Error` or a raw
+    serde failure.
+
+  Scope boundary — what this story explicitly does NOT do.
+    - Does NOT consume `max_inner_loop_iterations` in the
+      runtime. Story 19 owns the iteration-budget
+      enforcement; this story just makes the number
+      readable from a `Story`.
+    - Does NOT consume `models` anywhere. Story 19 (and
+      possibly a later story for model-selection policy)
+      owns that concern.
+    - Does NOT apply `DEFAULT_BUILD_CONFIG` at load time.
+      Absent `build_config:` → `story.build_config ==
+      None`. Consumers that need a concrete value call
+      `story.build_config.unwrap_or(DEFAULT_BUILD_CONFIG)`
+      (or a helper) at the point of consumption. This
+      preserves the author's original intent in the value;
+      the distinction between "author thought about it and
+      accepted the default" and "author never thought about
+      it" survives.
+    - Does NOT validate model strings beyond
+      "non-empty-string, if present." The set of valid
+      model identifiers is a runtime concern, not a story-
+      schema concern; a story that names `gemma-7b` is
+      well-formed even if no runtime can currently serve
+      that model.
+    - Does NOT edit `schemas/story.schema.json` from this
+      story's authoring agent. The schema edit is story 6's
+      amendment; see Decision 3.
+    - Does NOT backfill stories 1–15 with a build_config
+      block. They continue to load cleanly with
+      `build_config: None` per Decision 1.
+    - Does NOT ship a lint / audit rule for "stories above
+      complexity threshold X should declare build_config."
+      That's a future story if corpus experience argues for
+      it; arbitrary threshold picking now is premature.
+
+  Standalone-resilience posture.
+    The `agentic-story` crate is not standalone-resilient in
+    the pattern's sense (story 6 documents why — it's a
+    parse/validate step, not on the runtime prove-it path).
+    But the `build_config` loading path SHOULD not widen the
+    dependency floor: this story's tests run against
+    `agentic-story`, `serde`, `serde_yaml`, and `tempfile`
+    only. No `agentic-runtime`, no `agentic-store`, no LLM
+    subprocess. The `load_build_config_standalone_resilience
+    .rs` test pins it. Rationale: story 19's runtime is the
+    first consumer of build_config; if `agentic-story`'s
+    loader depended on `agentic-runtime` to parse the field,
+    story 19 would inherit a cycle the day it tries to use
+    its own configuration. Loader stays a leaf.
+
+  Relationship to stories 6, 16, 18, 19, 20, 21.
+    - Story 6 (story loader + schema + DAG) — hard
+      prerequisite (`depends_on: [6]`). The loader's typed
+      error enum extends to cover the new variants; the
+      `Story` struct grows a `build_config: Option<
+      BuildConfig>` field. Story 6's schema-edit
+      amendment bundles this story's `build_config`
+      addition with story 21's `retired` + `superseded_by`
+      additions — one amendment pass on story 6, one re-
+      UAT.
+    - Story 16 (runs observability) — sibling; story 16's
+      `RunRecorder` accepts `build_config: serde_json::
+      Value` as opaque passthrough. When this story
+      lands, the recorder's caller (story 19's runtime)
+      serialises the typed `BuildConfig` to JSON before
+      handing it to the recorder. Story 16's row shape is
+      unchanged by this story.
+    - Story 18 (signer identity) — unrelated data model;
+      signer is a Store-row field, build_config is a
+      story-YAML field. No cross-dependency.
+    - Story 19 (`agentic-runtime` un-deferred) — primary
+      downstream consumer. Story 19's `RunConfig` reads
+      `story.build_config.as_ref().unwrap_or(&DEFAULT_
+      BUILD_CONFIG)` at launch time and enforces the
+      resulting budget. Story 19 depends on this story's
+      shape, not vice versa.
+    - Story 20 (`agentic story build <id>`) — downstream;
+      the host command passes the resolved BuildConfig
+      through to the in-sandbox runtime invocation.
+    - Story 21 (retirement lifecycle) — bundled schema
+      sibling on story 6; see Decision 3. No direct
+      data-model overlap.
+
+  What to re-read before implementing.
+    - ADR-0006 §7 — human-in-the-loop outer loop; the
+      build_config is the budget the human seeds when
+      proposing a story, estimating complexity by picking
+      a number.
+    - Research folder note 10, section "Story 17" — the
+      original directive.
+    - Research folder note 13, section "Story 6 — schema
+      additions" — the bundling plan for the story-6
+      amendment.
+    - Story 6's guidance — the existing loader contract
+      this story extends, without breaking.
+depends_on:
+- 6
+related_files:
+- crates/agentic-story/src/**
+- schemas/story.schema.json
+- docs/decisions/0006-sandboxed-story-hardening-loop.md

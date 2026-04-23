@@ -1,0 +1,985 @@
+id: 19
+title: agentic-runtime un-deferred — Runtime trait and ClaudeCodeRuntime impl
+outcome: |
+  A downstream caller holding an `Arc<dyn Runtime>` can invoke
+  `spawn_claude_session(RunConfig)` and receive a structured
+  `RunOutcome` backed by a tee'd NDJSON trace, a budget-enforced
+  inner-loop count, and a `runs` row written via story 16's recorder
+  — so `agentic story build` and future orchestrators have one
+  typed surface for "spawn an agent against a story and get a
+  replayable run."
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-runtime/tests/runtime_trait_is_object_safe_behind_arc.rs
+    justification: |
+      Proves the `Runtime` trait is object-safe and addressable as
+      `Arc<dyn Runtime>`: a function with the signature
+      `fn take(_: Arc<dyn Runtime>)` compiles against both
+      `Arc::new(ClaudeCodeRuntime::new(...)?)` and
+      `Arc::new(MockRuntime::from_fixture(...))` without any
+      `where Self: Sized` escape hatches. A second function
+      holding `Arc<dyn Runtime>` in a struct field calls
+      `spawn_claude_session` through the trait object and
+      receives a `RunOutcome`. Without this, callers degrade to
+      `impl Runtime` generics everywhere — viral generics turn
+      every caller (the host CLI, the sandbox entrypoint, a
+      future scheduler) into a monomorphised copy of the
+      runtime surface, which is exactly the problem the `Store`
+      trait's `Arc<dyn Store>` discipline solved. Symmetry with
+      `Store` is deliberate.
+  - file: crates/agentic-runtime/tests/claude_code_runtime_argv_never_contains_bare.rs
+    justification: |
+      Proves the ADR-0003 prohibition is enforced in code, not
+      just in prose: `ClaudeCodeRuntime::compose_argv(&config)`
+      (a pure function the spawn path routes through) returns
+      an argv vector whose elements never contain the literal
+      `--bare`, never contain a key-value-style
+      `"--bare=..."`, and whose first non-program argument is
+      `-p`. The same vector contains `--output-format`
+      `stream-json` and `--verbose` as adjacent tokens. The
+      test asserts the positive and negative shapes over a
+      matrix of `RunConfig` inputs (with and without models
+      declared, with and without budget). Without this, the
+      prohibition lives only in the ADR and the first
+      well-meaning refactor that "adds an API-key fallback
+      for CI" removes it silently; this test makes that
+      refactor compile-green then test-red.
+  - file: crates/agentic-runtime/tests/claude_code_runtime_refuses_api_key_fallback.rs
+    justification: |
+      Proves ADR-0003's amendment clause survives a concrete
+      attack surface: constructing a `ClaudeCodeRuntime` on a
+      host where `ANTHROPIC_API_KEY` is set (but `claude` is
+      not on PATH) returns a typed
+      `RuntimeError::ClaudeSpawn { reason: ClaudeNotFound }`
+      and NOT a fallback to any direct-API code path. There
+      is no `reqwest` client in the runtime's dependency
+      graph (a second assertion in this test reads
+      `Cargo.toml` and asserts the absence of
+      `anthropic-sdk-rust`, `rusty-anthropic`, and
+      `reqwest` as direct dependencies of the runtime
+      crate). Without this, the "never talk to
+      api.anthropic.com directly" invariant relies on
+      nobody adding a crate later and nobody adding an
+      `if env::var("ANTHROPIC_API_KEY").is_ok()` branch
+      later — both cheap edits that look reasonable to a
+      well-meaning contributor.
+  - file: crates/agentic-runtime/tests/claude_code_runtime_new_returns_typed_error_when_claude_missing.rs
+    justification: |
+      Proves `ClaudeCodeRuntime::new(cfg)` fail-closes with a
+      typed `RuntimeError::ClaudeSpawn` naming the binary
+      lookup failure when the `claude` binary is absent from
+      the configured PATH — not a panic, not a `String`
+      error, not a silent success deferred to first
+      `spawn_claude_session` call. The test sets `PATH=""`
+      (empty) for the constructor call and asserts the error
+      variant. Without this, a missing `claude` produces a
+      late panic deep in the spawn path with a process-level
+      "No such file or directory" from `std::process`, and
+      operators diagnose a corrupt-install problem as a
+      runtime bug in whatever library called spawn.
+  - file: crates/agentic-runtime/tests/mock_runtime_emits_canned_ndjson_from_fixture.rs
+    justification: |
+      Proves the `MockRuntime` used for CI without real
+      claude: `MockRuntime::from_fixture(path)` wrapping a
+      small NDJSON file (three tool_call / tool_result
+      pairs + a final assistant turn) behaves as a `Runtime`:
+      calling `spawn_claude_session(cfg)` reads those lines,
+      feeds them to the recorder's `trace_tee`, yields them
+      in order to the caller's event consumer, calls
+      `record_iteration` once per tool-call/tool-result
+      pair (matching the iteration-counting convention this
+      story pins in guidance), and returns a `RunOutcome`
+      whose `outcome` is `green` and whose `iterations.len()`
+      equals the number of tool_use/tool_result pairs in the
+      fixture. Without this, there is no deterministic CI
+      path: every acceptance test of every downstream
+      consumer would need real claude, and the Phase 0
+      proof would be untestable on hardware without
+      Anthropic subscription auth.
+  - file: crates/agentic-runtime/tests/runtime_enforces_iteration_budget_stops_at_max.rs
+    justification: |
+      Proves the budget gate: given a `RunConfig` whose
+      `build_config.max_inner_loop_iterations == 2` and a
+      `MockRuntime` fixture carrying five tool-use turns,
+      `spawn_claude_session` stops feeding events after the
+      second tool_use/tool_result pair, signals the session
+      to terminate (the mock records that it received a
+      `BudgetExhausted` stop signal), and returns a
+      `RunOutcome` whose `outcome` is
+      `inner_loop_exhausted` with exactly two iterations in
+      the `runs` row. The remaining three fixture events do
+      NOT appear in the trace file. Without this, a
+      run-away agent can consume an entire 5-hour
+      subscription window on a single story; the budget
+      field from story 17 becomes decorative; and ADR-0006
+      section 7's "human picks budget as complexity
+      estimate" loses its load-bearing primitive.
+  - file: crates/agentic-runtime/tests/runtime_maps_spawn_failure_to_run_outcome_crashed.rs
+    justification: |
+      Proves the error model's `Crashed` wiring: a
+      `MockRuntime` configured to inject a mid-stream pipe
+      break (a simulated broken subprocess stdout) produces
+      a `RunOutcome` whose `outcome` is `crashed`, whose
+      recorder-written `runs` row has an `error` field on
+      the last iteration naming the pipe-break cause, and
+      whose `trace_ndjson_path` still points at a
+      readable-but-possibly-truncated trace file containing
+      whatever was captured before the break. The spawn
+      path returns `Ok(RunOutcome)` (the crash is captured
+      IN the outcome, not as a top-level Err); a failure
+      BEFORE the subprocess started (e.g. `ClaudeSpawn`)
+      does return `Err`. Without this, a subprocess crash
+      is indistinguishable from exhaustion (the signal
+      ADR-0006 §7 depends on to trigger human amendment)
+      and from a runtime library bug (the signal operators
+      need to report upstream).
+  - file: crates/agentic-runtime/tests/runtime_injects_sandbox_signer_into_recorder.rs
+    justification: |
+      Proves the signer composition with story 18: given a
+      `RunConfig` whose `signer` resolves to
+      `sandbox:claude-sonnet-4-6@run-abc123`, the `runs` row
+      the runtime writes via `RunRecorder::start(...)`
+      carries that exact string in its `signer` field. The
+      runtime does NOT generate the signer itself — it
+      accepts it in `RunConfig` and passes it through — so
+      story 18's resolution chain (CLI flag → env var →
+      fallback) remains the sole authority. A nil or
+      whitespace-only signer passed to
+      `spawn_claude_session` returns
+      `RuntimeError::InvalidConfig` before any subprocess
+      is spawned. Without this, either the runtime forges
+      its own signer (breaking story 18's resolution
+      contract) or downstream `runs` rows carry empty
+      signers (breaking story 16's non-empty-signer
+      invariant).
+  - file: crates/agentic-runtime/tests/runtime_records_branch_state_without_merging.rs
+    justification: |
+      Proves the git-coordination delineation per research
+      note 14: given a tempdir git repo with a baseline
+      commit on `main` and a `RunConfig` that names
+      `repo_path` and `branch_name = "run/19-deadbee"`,
+      `spawn_claude_session` (driven by a `MockRuntime`
+      fixture whose canned events include two synthetic
+      commits to the branch) populates the recorder's
+      `branch_state` with `start_sha`, `end_sha`,
+      `commits: [...]`, `merged: false`, and
+      `merge_shas: []`. The runtime does NOT call
+      `git merge`, `git am`, or any write operation on
+      `main`. `main`'s HEAD is byte-identical before and
+      after the call. Without this, the runtime silently
+      absorbs story 20's host-side auto-merge
+      responsibility — the exact split note 14 named to
+      preserve: "runtime records the branch_state in the
+      run row; merge is story 20's host command."
+  - file: crates/agentic-runtime/tests/runtime_integration_with_real_claude.rs
+    justification: |
+      Proves the end-to-end path against real `claude`
+      subscription auth when available: a `#[ignore]`-gated
+      integration test constructs a real
+      `ClaudeCodeRuntime`, calls
+      `spawn_claude_session` with a trivial one-turn
+      prompt and a budget of 1, and asserts a non-empty
+      NDJSON trace file plus a `runs` row with
+      `outcome: green`. The test is
+      `#[ignore]`d so it does not run in default
+      `cargo test` — invoking it requires
+      `cargo test -- --ignored`. It exists so the
+      real-claude path has a pinnable artefact, not as a
+      CI gate; the mock path covers CI. Without this, the
+      claim "the runtime works against real claude" has no
+      repeatable ceremony and every manual operator has to
+      reinvent one.
+  uat: |
+    Goal: convince yourself that `agentic-runtime` now exposes a
+    `Runtime` trait behind `Arc<dyn Runtime>`, that
+    `ClaudeCodeRuntime` spawns `claude` per ADR-0003, that the
+    budget from `RunConfig.build_config.max_inner_loop_iterations`
+    stops the session when exceeded, that the error model is
+    typed and non-panicking across the four named failure modes,
+    that `MockRuntime` gives CI a real runtime without real
+    claude, and that the runtime composes with story 16's
+    `RunRecorder` rather than reimplementing any of it.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. Confirm stories 16, 17, 18 are healthy:
+         `grep -H "^status:" stories/16.yml stories/17.yml
+         stories/18.yml`. Each should read `status: healthy`.
+         If any is not healthy, stop — this story's integration
+         surface rests on their contracts and cannot be UAT-ed
+         against drafts.
+      3. Confirm the `_deferred/agentic-runtime/` directory no
+         longer exists at the top of `crates/` (the un-defer
+         step is complete):
+         `test ! -d crates/_deferred/agentic-runtime && echo
+         un-deferred || echo still-deferred`. Expect
+         `un-deferred`.
+      4. Build the crate via WSL:
+         `wsl bash -c "source ~/.cargo/env && cd /home/code/
+         Agentic && cargo build -p agentic-runtime"`. Build
+         must succeed clean.
+
+    MockRuntime walkthrough (no real claude needed):
+      5. Author a fixture NDJSON file at
+         `/tmp/mock-green.ndjson` with three lines:
+           {"kind":"tool_call","i":0,"tool":"Read"}
+           {"kind":"tool_result","i":0,"ok":true}
+           {"kind":"assistant_final","text":"green"}
+      6. Write (or reuse) a small example at
+         `crates/agentic-runtime/examples/mock_runtime_smoke.
+         rs` that:
+           a. Opens a `MemStore` from `agentic-store`.
+           b. Constructs a `MockRuntime::from_fixture(
+              "/tmp/mock-green.ndjson")`.
+           c. Wraps it as `let rt: Arc<dyn Runtime> =
+              Arc::new(...)`.
+           d. Builds a `RunConfig` with story_id=15,
+              signer="sandbox:mock@run-uat-001",
+              build_config.max_inner_loop_iterations=3,
+              runs_root=<tempdir>, repo_path=None.
+           e. Calls `rt.spawn_claude_session(cfg).await?`.
+           f. Prints the returned `RunOutcome`.
+      7. Run it:
+         `wsl bash -c "source ~/.cargo/env && cd /home/code/
+         Agentic && cargo run -p agentic-runtime --example
+         mock_runtime_smoke"`.
+      8. Observe:
+           - Process exits 0.
+           - stdout prints an outcome with `outcome: green`
+             and a run_id.
+           - `<tempdir>/<run-id>/trace.ndjson` contains
+             exactly the three canned lines in order.
+           - Query the MemStore for `table="runs"`: exactly
+             one row, with `signer == "sandbox:mock@run-uat-
+             001"`, `outcome == "green"`, `iterations` of
+             length 1 (the tool_call/tool_result pair; the
+             final assistant turn is not counted as an
+             iteration per this story's counting
+             convention).
+
+    Budget walkthrough:
+      9. Author `/tmp/mock-exhaust.ndjson` with five
+         tool_call/tool_result pairs (ten lines total) and
+         no terminating assistant_final.
+     10. Adapt the example to use
+         max_inner_loop_iterations=2 and point at the new
+         fixture. Run.
+     11. Observe:
+           - Process exits 0.
+           - Outcome is `inner_loop_exhausted`.
+           - The trace file contains the first four lines
+             (two tool_call/tool_result pairs), NOT all
+             ten. The two dropped pairs are not smuggled
+             in.
+           - The runs row's `iterations.length == 2`.
+
+    Crashed walkthrough:
+     12. Author `/tmp/mock-pipe-break.ndjson` with one
+         well-formed tool_call line followed by a
+         truncated half-line no newline. Adapt the example
+         to feed this fixture with a
+         `MockRuntime::from_fixture_with_pipe_break(...)`
+         variant that panics-out the fixture reader on
+         the truncated line.
+     13. Run. Observe:
+           - Process exits 0 (not a panic; the runtime
+             captured the failure).
+           - Outcome is `crashed`.
+           - The runs row's last iteration carries a
+             non-empty `error` field naming the pipe
+             break.
+           - The trace file contains the one well-formed
+             line and no partial second line.
+
+    ClaudeSpawn (no binary) walkthrough:
+     14. Temporarily rename the `claude` binary so it is
+         not on PATH, or run with `PATH=""`:
+         `wsl bash -c 'source ~/.cargo/env && cd /home/
+         code/Agentic && PATH="" cargo run -p
+         agentic-runtime --example real_runtime_smoke'`.
+         (The example constructs a `ClaudeCodeRuntime`,
+         not a `MockRuntime`.)
+     15. Observe:
+           - The example exits non-zero (typed error
+             propagates).
+           - stderr names `RuntimeError::ClaudeSpawn` and
+             a specific reason (`ClaudeNotFound` or
+             equivalent).
+           - No partial `runs` row is written; no trace
+             directory is created; `ls <tempdir>` is
+             empty.
+
+    InvalidConfig walkthrough:
+     16. Adapt the example to pass `signer: ""` (empty) or
+         `signer: "   "` (whitespace). Run.
+     17. Observe:
+           - Exit non-zero.
+           - Error is `RuntimeError::InvalidConfig`
+             naming the `signer` field.
+           - No subprocess was ever spawned; no
+             directory created.
+
+    Git-branch-state walkthrough (no merge):
+     18. Create a tempdir git repo: `mkdir /tmp/uat-repo &&
+         cd /tmp/uat-repo && git init && git -c user.name=
+         UAT -c user.email=uat@example.invalid commit --
+         allow-empty -m baseline`. Note the baseline SHA.
+     19. Extend `mock_runtime_smoke` to pass
+         `repo_path=/tmp/uat-repo, branch_name="run/19-
+         uat-001"`. Run.
+     20. Observe:
+           - The runs row has `branch_state.start_sha`
+             equal to the baseline SHA.
+           - `branch_state.merged == false` and
+             `branch_state.merge_shas == []`.
+           - `git -C /tmp/uat-repo log main` shows only
+             the baseline commit. The runtime did NOT
+             merge anything onto main.
+
+    Real claude walkthrough (subscription-auth path,
+    optional — requires `claude` on PATH and prior
+    `claude login`):
+     21. Run the ignored integration test:
+         `wsl bash -c "source ~/.cargo/env && cd /home/
+         code/Agentic && cargo test -p agentic-runtime --
+         --ignored runtime_integration_with_real_claude"`.
+     22. Observe the test passes (exit 0), a `runs` row
+         appears with `outcome: green`, and the trace
+         file contains real NDJSON events from a real
+         claude subprocess.
+
+    Cleanup:
+     23. Remove `/tmp/mock-*.ndjson`, `/tmp/uat-repo`, and
+         any tempdirs the example created.
+     24. `git restore` or delete any scratch example files
+         under `crates/agentic-runtime/examples/`.
+     25. Confirm `git status --porcelain` is empty.
+guidance: |
+  This story un-defers `crates/_deferred/agentic-runtime/` into
+  `crates/agentic-runtime/` and ships the `Runtime` trait plus
+  the `ClaudeCodeRuntime` implementation ADR-0003 promised on
+  day one but deferred pending observability, budget, and
+  signer-identity primitives. Those primitives now exist
+  (story 16 in flight, stories 17 and 18 in flight in the
+  Phase 0 batch), and the runtime composes over them rather
+  than reinventing any.
+
+  Relationship to the Phase 0 batch.
+    Stories 16, 17, 18, 19, 20, and 21 were proposed as a
+    single eventual-consistency batch (research folder note
+    10, 2026-04-23). This story has one hard dependency
+    edge: `depends_on: [16]`. Stories 17 and 18 are NOT
+    formally depended on because this story's acceptance
+    surface tolerates their contracts as passthrough
+    opaque values (`RunConfig.build_config` is a JSON
+    object the runtime forwards to the recorder;
+    `RunConfig.signer` is a non-empty string). When 17 and
+    18 land, the runtime's callers populate those fields
+    with more-structured values; the runtime's contract
+    does not change. Story 20 (`agentic story build
+    <id>`) depends on this story, not the other way
+    around. Sibling amendments to existing healthy
+    stories (the Phase 0 batch triggers several — see
+    research note 13) fire in parallel on their own
+    timelines.
+
+  The three open questions from research note 10.
+
+    Question 1 — Trait object-safe?
+      Decision: YES, `Arc<dyn Runtime>`. The trait is
+      object-safe by construction: one async method
+      (`spawn_claude_session`) returning a `Result<
+      RunOutcome, RuntimeError>` by value, no generic
+      type parameters on the trait itself, no associated
+      types that would bind at the caller. This matches
+      the `Store` trait's discipline — callers hold
+      `Arc<dyn Store>`; they hold `Arc<dyn Runtime>`.
+      Symmetry is a contract, not an incidental
+      similarity: any future code path that wants to hold
+      "a Store and a Runtime" gets two identically-shaped
+      trait objects. The
+      `runtime_trait_is_object_safe_behind_arc.rs` test
+      pins this.
+
+      `async fn` in traits is stable as of Rust 1.75;
+      we use it directly rather than the `async-trait`
+      macro. If the async-method-in-trait compatibility
+      story regresses (e.g. an MSRV rollback), the
+      fallback is `async-trait`, not generic
+      monomorphisation.
+
+    Question 2 — Where does `RunConfig` live?
+      Decision: `agentic-runtime`, with re-exports from
+      the crate root for callers. No shared
+      `agentic-types` crate. The reason: a shared types
+      crate becomes a dumping ground at exactly the
+      corpus size we are now — one trait, one
+      implementation, one config struct — and the
+      cross-crate-type fragility (two callers holding
+      different versions during refactor) costs more
+      than the single-definition-with-re-exports costs.
+      If a second runtime impl later (say
+      `OllamaRuntime` in a sibling crate) needs
+      `RunConfig`, that crate re-exports from
+      `agentic_runtime::RunConfig`. Extract to a shared
+      crate when a third caller arrives, not before.
+
+    Question 3 — Testing without real `claude` in CI.
+      Decision: `MockRuntime` + `#[ignore]` integration
+      tests against real claude. Specifically:
+        (a) `MockRuntime::from_fixture(path)` reads an
+            NDJSON file of canned events and implements
+            the `Runtime` trait. It honours the budget,
+            writes the `runs` row via story 16's
+            `RunRecorder`, and tees the fixture into
+            the configured trace path. The fixture is
+            a real file committed to
+            `crates/agentic-runtime/tests/fixtures/
+            *.ndjson`; new fixtures get added as new
+            scenarios arise. This mock is NOT a
+            stub-that-returns-hard-coded-Values — it
+            exercises the same recorder + trace-tee +
+            budget-counter code paths the real
+            runtime exercises. The only difference is
+            the event source.
+        (b) `runtime_integration_with_real_claude.rs`
+            is `#[ignore]`d, runs against real
+            subscription auth, and is invoked
+            explicitly with `cargo test -- --ignored`.
+            It is a pinnable ceremony, not a default
+            CI gate; default CI runs only the mock
+            path.
+      The two together cover the breadth of scenarios
+      (happy path, exhaustion, crash, spawn failure,
+      invalid config, branch-state observation) on the
+      mock path and prove real-claude compatibility via
+      the ignored suite. A regression in either path
+      surfaces at the next human-invoked
+      `--ignored` run; the mock path surfaces in CI.
+
+  `RunConfig` shape (auditable).
+    The call boundary is:
+    ```
+    pub struct RunConfig {
+        pub run_id: String,              // uuid v4, validated
+        pub story_id: i64,
+        pub story_yaml_bytes: Vec<u8>,   // for recorder's sha256 snapshot
+        pub signer: String,              // story 18's resolution
+        pub build_config: serde_json::Value,  // story 17's opaque passthrough
+        pub runs_root: PathBuf,
+        pub repo_path: Option<PathBuf>,  // Some: populate branch_state
+        pub branch_name: Option<String>, // Some iff repo_path is Some
+        pub prompt: String,              // the claude -p argument
+        pub event_sink: Box<dyn EventSink>, // caller's consumer
+    }
+
+    pub struct RunOutcome {
+        pub run_id: String,
+        pub outcome: Outcome,             // re-export of story 16's Outcome
+        pub runs_row_id: String,          // the id of the written runs row
+    }
+    ```
+
+    Absent required fields (empty `run_id`, empty
+    `signer`, negative `story_id`, `branch_name`
+    without `repo_path`) are rejected by
+    `RunConfig::validate()` — returning
+    `RuntimeError::InvalidConfig`. Validation fires
+    before any subprocess is spawned.
+
+    `build_config` is passed through to the recorder
+    verbatim; the runtime reads only
+    `build_config.max_inner_loop_iterations` (as an
+    optional integer; default 5 per story 17's
+    `DEFAULT_BUILD_CONFIG`) and ignores everything
+    else. `models` from story 17 eventually flows into
+    claude's argv (as `--model <name>`) when story 17
+    is healthy and the caller populates it; until
+    then, the runtime invokes claude with no `--model`
+    flag and claude selects its default.
+
+  Iteration counting convention (the load-bearing
+  definition).
+    One iteration = one **tool_use-and-observe turn**,
+    defined as the arrival in the NDJSON stream of:
+      - a tool_use event (claude requests a tool call)
+      - followed by the matching tool_result event (the
+        tool's output flows back to claude).
+    An assistant-final (no-tool-call) turn is NOT an
+    iteration — it is a terminal marker on a green
+    path. An assistant-narration turn mid-stream that
+    emits no tool_use is NOT an iteration. A tool_use
+    with a failed tool_result (tool errored) IS still
+    one iteration.
+
+    Counting increments when the `tool_result` event
+    arrives, not when the `tool_use` is sent. A
+    tool_use that never observes a tool_result (because
+    claude crashed mid-turn) does NOT count toward the
+    budget — it contributes to `Outcome::Crashed`
+    diagnostics instead.
+
+    `max_inner_loop_iterations == 0` is rejected at
+    `RunConfig::validate()` (story 17's concern, but
+    the runtime re-asserts because
+    ClaudeCodeRuntime would otherwise spawn a
+    subprocess that can make no progress). A budget
+    of 1 allows exactly one tool_use/tool_result pair
+    and then signals stop.
+
+    This convention is load-bearing because downstream
+    readers (the dashboard, UAT replay tooling, the
+    human setting a budget as a complexity estimate
+    per ADR-0006 §7) all interpret "iteration" the
+    same way. Changing this definition later is
+    a corpus-wide change, not a refactor.
+
+  Error model (auditable).
+    Four typed variants, all non-panic:
+
+      - `RuntimeError::ClaudeSpawn { reason }` — the
+        `claude` binary could not be invoked. `reason`
+        is a sub-enum: `ClaudeNotFound`,
+        `PermissionDenied`, `PathEmpty`,
+        `OtherIoError(String)`. Fires from
+        `ClaudeCodeRuntime::new` OR from the first
+        spawn attempt if PATH is mutated between
+        construction and spawn. NEVER fires for
+        `MockRuntime`.
+
+      - `RuntimeError::BudgetExhausted` — INTERNAL
+        signalling variant. The runtime does NOT
+        return this to the caller as `Err`; instead,
+        it maps this internal state to a
+        `RunOutcome { outcome: Outcome::
+        InnerLoopExhausted, ... }` and returns `Ok`.
+        This variant exists in the enum so internal
+        code paths (budget counter, signal handler)
+        have a typed sentinel; the boundary
+        transformation from `BudgetExhausted` to
+        `Outcome::InnerLoopExhausted` happens in
+        `spawn_claude_session` before return.
+
+      - `RuntimeError::TraceWrite { io_error }` —
+        the recorder's trace tee failed to write
+        (disk full, permission denied,
+        filesystem-level failure). This DOES
+        propagate as `Err` — a trace-write failure
+        destroys the observability promise of the
+        whole run, and the caller must see it. The
+        partial trace file, if any, is left on disk
+        (not deleted) for forensic inspection.
+
+      - `RuntimeError::StoreWrite { store_error }` —
+        the recorder's final `Store::append` call
+        failed. Also propagates as `Err`. Same
+        rationale.
+
+      - `RuntimeError::InvalidConfig { field }` — a
+        `RunConfig` validation failure. Fires before
+        any spawn or trace work. Propagates as `Err`.
+
+    Subprocess-level failures (claude exits
+    non-zero, broken pipe from claude's stdout)
+    produce `RunOutcome { outcome: Outcome::Crashed
+    { error }, ... }` — NOT `Err`. The rule: the
+    session ran (we got far enough to write a
+    run row); the session crashed (the outcome
+    reflects it). A failure BEFORE the session
+    started is `Err`; a failure DURING a started
+    session is `Ok(RunOutcome { Crashed })`. The
+    `runtime_maps_spawn_failure_to_run_outcome_
+    crashed.rs` test pins this boundary.
+
+  Composition with story 16's RunRecorder.
+    The runtime does not reimplement any of the
+    recorder's surface. Inside
+    `spawn_claude_session`:
+
+      1. `RunRecorder::start(RunRecorderConfig {
+         store, runs_root, run_id, story_id,
+         story_yaml_bytes, signer, build_config })`
+         — the config is populated from the
+         incoming `RunConfig`. Failure at this step
+         is an early `Err(RuntimeError::StoreWrite
+         | ::TraceWrite | ::InvalidConfig)`
+         depending on what recorder returned.
+
+      2. `let tee = recorder.trace_tee()` — the
+         runtime holds this tee for the duration of
+         the session and writes every line of the
+         claude NDJSON stream through it. The tee
+         forwards to the caller's `event_sink`.
+
+      3. For each tool_use/tool_result pair the
+         runtime observes: `recorder.
+         record_iteration(IterationSummary {...})`,
+         then increments its budget counter. If
+         the counter hits
+         `max_inner_loop_iterations`, the runtime
+         sends a stop signal to the subprocess and
+         the loop exits with internal
+         `BudgetExhausted`.
+
+      4. `recorder.finish(outcome)` — the runtime
+         determines the outcome variant from the
+         internal state:
+           - session exited 0 AND an
+             assistant-final declared green →
+             `Outcome::Green { signing_run_id }`.
+             The `signing_run_id` comes from a
+             `uat_signings` row the caller (story
+             20) writes BEFORE the recorder's
+             `finish` is called. In Phase 0 the
+             runtime does not write signings; the
+             host command does, and passes the id
+             back through
+             `RunConfig`. If the caller did not
+             provide a signing id but the session
+             claims green, the runtime returns
+             `Outcome::Green { signing_run_id:
+             "<pending>" }` with a TODO note —
+             story 20's
+             integration test pins the real id
+             flow.
+           - budget counter hit max →
+             `Outcome::InnerLoopExhausted`.
+           - session exited non-zero or pipe
+             break →
+             `Outcome::Crashed { error: <one-
+             line cause> }`.
+
+      5. If `repo_path` and `branch_name` are set,
+         the runtime calls the recorder's
+         `start_branch(repo_path, branch_name)`
+         before step 2 and `finish_branch(merged:
+         false)` before step 4. The runtime
+         NEVER passes `merged: true`; auto-merge
+         is story 20's host-side responsibility
+         per research folder note 14.
+
+    The runtime adds the subprocess-driving and
+    budget-enforcing logic; the recorder owns
+    everything the `runs` table and on-disk trace
+    promise. If the recorder's surface changes
+    (new IterationSummary fields, new outcome
+    variants), this story's integration points
+    shift with it and the acceptance tests catch
+    the drift.
+
+  Git-coordination boundary (per research folder
+  note 14).
+    The runtime observes branch state but does
+    not merge. Specifically:
+      - Cuts `branch_name` from `repo_path`'s
+        current HEAD when the session starts
+        (if `repo_path`/`branch_name` set).
+      - Commits on that branch happen INSIDE the
+        session — either by the agent's edits
+        (in the real path) or by the mock's
+        fixture (in the test path). The runtime
+        does not author commits itself; it
+        observes them via git plumbing at
+        finish time.
+      - On session end, the runtime populates
+        the recorder's branch_state with
+        `start_sha`, `end_sha`, `commits`,
+        `merged: false`, `merge_shas: []`.
+      - The runtime NEVER calls `git merge`,
+        `git am`, `git cherry-pick`, `git
+        push`, or any write operation on `main`
+        or any other branch. `main`'s HEAD is
+        invariant across any `spawn_claude_
+        session` call.
+      - Auto-merge-on-green is story 20's
+        host-side command. The runtime's job
+        stops at "record what the branch
+        looks like."
+
+    This split is load-bearing: an auto-merge
+    buried in the runtime would make every
+    caller (tests, the host CLI, future
+    orchestrators) a potential main-branch
+    mutator. Confining merge to the host
+    command gives operators one place to
+    audit the merge logic and one surface to
+    disable for dry runs.
+
+  ClaudeCodeRuntime argv composition.
+    ```
+    claude -p <prompt> --output-format stream-json --verbose [--model <name>]
+    ```
+    Fixed tokens: `-p`, `--output-format`,
+    `stream-json`, `--verbose`. `<prompt>` is
+    `RunConfig.prompt`. `--model` is appended
+    only if `build_config.models` is a
+    non-empty array (story 17's contract); the
+    first element is used. Forbidden tokens:
+    `--bare`, `--api-key`, any token starting
+    with `--bare` or containing an API-key
+    hint. The `claude_code_runtime_argv_never_
+    contains_bare.rs` test enforces the
+    forbidden set; any future addition to the
+    argv composer must keep the test passing.
+
+    The subprocess inherits the current
+    environment. `~/.claude/.credentials.json`
+    resolution happens inside claude itself;
+    the runtime does not read or touch
+    credentials. This is what makes
+    subscription auth "just work" per
+    ADR-0003.
+
+  Dependency floor and standalone-resilience
+  posture.
+    The crate's `Cargo.toml` lists:
+      - `agentic-store` (for `dyn Store` /
+        `MemStore` access via the recorder).
+      - `agentic-events` (for the EventSink
+        trait; existing crate).
+      - `serde`, `serde_json` (for NDJSON
+        + RunConfig).
+      - `tokio` (for async runtime).
+      - `uuid` (for run_id generation).
+      - `git2` (for branch_state observation;
+        same dep story 16's recorder already
+        uses).
+      - A claude subprocess driver: either
+        `claude-code-rs` (prefer depend) or
+        a narrow inline `tokio::process::
+        Command` wrapper if the upstream
+        crate's surface doesn't fit. The
+        choice is build-rust's call during
+        implementation; this story does not
+        pre-commit.
+
+    Forbidden:
+      - `reqwest`, `anthropic-sdk-rust`,
+        `rusty-anthropic`, any direct HTTP
+        client to api.anthropic.com. Pinned
+        by `claude_code_runtime_refuses_api_
+        key_fallback.rs`.
+      - `agentic-cli`, `agentic-
+        orchestrator`, `agentic-sandbox`
+        (prevents dependency cycles through
+        the orchestrator crate that
+        `agentic-runtime` is).
+
+    `agentic-runtime` is an orchestration
+    crate per the standalone-resilient-
+    library pattern's carve-out ("Do NOT
+    apply to crates whose entire purpose is
+    orchestration") — it is allowed to
+    depend on the world in ways
+    `agentic-uat` and `agentic-test-
+    builder` are not. The recorder
+    sub-module (story 16) keeps its own
+    narrower floor; this story does not
+    widen it.
+
+  What this story explicitly does NOT do.
+
+    - Does NOT ship auto-merge on green.
+      That is story 20's host-side `agentic
+      story build` command per research
+      note 14. The runtime records
+      `branch_state.merged = false` and
+      `merge_shas = []` for every run.
+
+    - Does NOT write `uat_signings` rows.
+      Story 1 owns that path. The
+      runtime's `Outcome::Green` carries a
+      `signing_run_id` pointer populated
+      by the caller (story 20) AFTER the
+      inner-loop agent triggers
+      `agentic uat --verdict pass`.
+      Phase 0 accepts a "<pending>"
+      placeholder when the caller did not
+      wire story 20's signing flow yet;
+      story 20's own acceptance tests
+      pin the real id flow.
+
+    - Does NOT resolve the signer
+      identity. Story 18 owns the three-
+      tier resolution chain (CLI flag →
+      env var → git config or sandbox
+      default). The runtime accepts the
+      resolved signer as an opaque
+      non-empty string via
+      `RunConfig.signer` and passes it
+      through to the recorder.
+
+    - Does NOT validate `build_config`
+      beyond extracting
+      `max_inner_loop_iterations`.
+      Story 17 owns the shape; this
+      story treats it as opaque JSON
+      and reads one field.
+
+    - Does NOT implement a second
+      `Runtime` impl (OllamaRuntime,
+      E2BRuntime, etc.). The trait's
+      shape preserves option value per
+      ADR-0006 §6 but the
+      implementation surface is
+      `ClaudeCodeRuntime` + `MockRuntime`
+      only.
+
+    - Does NOT pin retry/backoff policy
+      for 429s from claude. ADR-0003
+      names `system/api_retry` events
+      as the signal; the runtime
+      observes them and forwards them
+      to the event_sink, but does not
+      implement retry logic in this
+      story. Retry policy is a future
+      scope (the deferred
+      `agentic-budget` crate will own
+      wall-clock/retry caps).
+
+    - Does NOT implement PTY or
+      streaming-UI concerns. The
+      deferred `agentic-stream` crate
+      is the home for that surface.
+      This story's NDJSON events are
+      consumed by a simple
+      `event_sink: Box<dyn EventSink>`
+      the caller provides.
+
+    - Does NOT seed ancestor signings
+      into a fresh embedded Store.
+      That is story 20's pre-inner-
+      loop snapshot/restore step
+      (which in turn depends on
+      stories 4+5 amendments for the
+      Store snapshot primitive).
+
+    - Does NOT pin OpenTelemetry
+      semantic-convention compliance.
+      Story 16's shape
+      permissiveness on
+      `iterations[].probes[]` is
+      inherited; the runtime does
+      not add OTel conformance.
+
+  Relationship to stories 1, 2, 4, 5, 16,
+  17, 18, 20, 21.
+    - Story 16 (runs observability) —
+      hard prerequisite, declared in
+      `depends_on`. The runtime
+      composes over
+      `RunRecorder` + `TraceTee` from
+      story 16 rather than
+      reimplementing. Tests in this
+      story assume story 16's API
+      shape is stable.
+    - Story 17 (build_config) — soft
+      prerequisite, sibling in the
+      Phase 0 batch. Runtime reads
+      `max_inner_loop_iterations`
+      from the opaque passthrough;
+      story 17's full contract is not
+      needed to prove this story.
+    - Story 18 (signer identity) —
+      soft prerequisite, sibling.
+      Runtime accepts a resolved
+      signer string; story 18's
+      resolution chain lives upstream.
+    - Story 20 (agentic story build)
+      — downstream. Story 20 holds
+      the `Arc<dyn Runtime>`, drives
+      the inner loop, performs the
+      auto-merge on green, and wires
+      the signing flow. Story 20's
+      `depends_on` includes 19.
+    - Stories 4, 5 (Store trait +
+      SurrealStore) — transitive
+      prerequisite via story 16.
+      Not declared here because
+      the dep is already carried by
+      16.
+    - Story 1 (uat_signings writer)
+      — unchanged; the runtime
+      never touches the signings
+      writer. The pointer in
+      `Outcome::Green` is
+      established by the caller
+      after `agentic uat --verdict
+      pass`.
+    - Story 2 (test_runs) —
+      unrelated at the data-model
+      level. `runs` and
+      `test_runs` coexist.
+    - Story 21 (retirement
+      lifecycle) — unrelated to
+      this story's runtime
+      surface; the retirement
+      lifecycle affects story
+      loader and gate behaviour,
+      not the runtime trait.
+
+  Un-defer mechanics (file-level
+  operations the implementing agent
+  will perform).
+    1. Move `crates/_deferred/
+       agentic-runtime/` to
+       `crates/agentic-runtime/`.
+       If the current
+       `crates/agentic-runtime/`
+       (with its README pointing
+       at the deferred content)
+       already exists, merge the
+       deferred content in,
+       preserving the README's
+       public API sketch as
+       guidance.
+    2. Register the crate in the
+       workspace `Cargo.toml`
+       (remove any
+       `_deferred/agentic-
+       runtime` exclude if
+       present; add
+       `crates/agentic-runtime`
+       to workspace.members if
+       absent).
+    3. Implement the `Runtime`
+       trait, `RunConfig`,
+       `RunOutcome`, `RuntimeError`,
+       `ClaudeCodeRuntime`, and
+       `MockRuntime` per the
+       contracts in this story's
+       `acceptance.tests[]` and
+       `guidance`.
+    4. Wire `agentic-orchestrator`
+       (and any other downstream
+       crate that imports
+       `agentic-runtime`) to
+       continue to build — the
+       un-defer should not
+       break the workspace build.
+       Story 20's `agentic story
+       build` command wires in
+       later as its own story.
+    5. Add `crates/agentic-runtime
+       /tests/fixtures/*.ndjson`
+       files used by the mock-
+       path tests.
+
+    No `bootstrap generator` and no
+    agent-spec regeneration is
+    involved — per ADR-0004, the
+    `.claude/agents/*.md` pointer
+    layer is hand-written and does
+    not change when a crate un-
+    defers.
+depends_on:
+- 16
+related_files:
+- crates/agentic-runtime/src/**
+- crates/agentic-runtime/tests/**
+- crates/agentic-runtime/tests/fixtures/**
+- docs/decisions/0003-claude-code-subscription-subprocess.md
+- docs/decisions/0006-sandboxed-story-hardening-loop.md

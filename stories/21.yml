@@ -1,0 +1,684 @@
+id: 21
+title: Retired status + superseded_by chain let the tree prune without deletion
+outcome: |
+  A developer authoring the corpus can mark a story as `status: retired`
+  with `superseded_by: <id>`, and every downstream consumer — loader,
+  dashboard, ancestor gate — treats the retired story as a transparent
+  redirection to its successor so the story tree can grow new eras
+  without destructive deletion.
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-story/tests/load_retired_status_is_accepted.rs
+    justification: |
+      Proves the schema extension at the loader boundary: a
+      story file whose `status` is `retired` and which carries
+      an optional `superseded_by: <int>` pointing at an existing
+      sibling story loads cleanly into a typed `Story` value
+      whose `status` field reads back as `Retired` and whose
+      `superseded_by` reads back as `Some(<id>)`. A retired
+      story that omits `superseded_by` also loads cleanly
+      (the field is optional — a terminal retirement with no
+      successor is a legitimate shape). A retired story may
+      carry an optional `retired_reason: String` prose field;
+      when present it round-trips verbatim, when absent it
+      reads back as `None`. Without this, the vocabulary
+      introduced by this story (retired, supersession, era)
+      has no parser to stand on and every downstream
+      consumer would have to re-invent the YAML shape.
+  - file: crates/agentic-story/tests/load_superseded_by_pointing_at_unknown_id_is_rejected.rs
+    justification: |
+      Proves referential integrity on supersession edges at
+      directory-load time: a `stories/` directory where one
+      story declares `superseded_by: 999` but no
+      `stories/999.yml` exists is rejected with a typed
+      `StoryError::SupersededByUnknown { source_id, target_id
+      }` naming both ids. The check runs in the directory
+      path (not the single-file path, which cannot
+      meaningfully validate cross-file edges — same rule
+      story 6 applies to `depends_on`). Without this, a
+      retired story whose successor was itself retired-and-
+      deleted (or mistyped) would silently bind to nothing,
+      and the dashboard's canopy rendering plus the ancestor
+      gate's chain walk would follow a dangling pointer.
+  - file: crates/agentic-story/tests/load_superseded_by_cycle_is_rejected.rs
+    justification: |
+      Proves cycle defence on supersession edges: a `stories/`
+      directory where `A.superseded_by = B`,
+      `B.superseded_by = C`, and `C.superseded_by = A` (or the
+      degenerate self-loop `A.superseded_by = A`) is rejected
+      with a typed `StoryError::SupersededByCycle` naming at
+      least one participating id. Supersession cycles are
+      structurally distinct from `depends_on` cycles (same
+      graph, different edge label) and the loader rejects
+      both independently. Without this, the ancestor gate's
+      chain-walk (see tests below) would loop forever when
+      evaluating health on a descendant whose retired
+      ancestor pointed at a cyclically-linked successor —
+      strictly worse than a loud load-time refusal.
+  - file: crates/agentic-dashboard/tests/health_frontier_hides_retired.rs
+    justification: |
+      Proves the frontier lens excludes retired stories: given
+      a corpus containing one story with `status: retired` and
+      one with `status: healthy`, the default `agentic stories
+      health` rendering (no mode flag) emits a table containing
+      exactly the healthy story's row and no row for the
+      retired story. The summary counts at the table's foot
+      also exclude retired from their denominators (retired
+      is neither healthy nor unhealthy — it is off-tree).
+      Without this, the dashboard's frontier discipline
+      (established by story 10) degrades as the corpus
+      accumulates retired eras: the frontier view becomes
+      cluttered with stories that have been explicitly
+      pruned, defeating the lens's purpose.
+  - file: crates/agentic-dashboard/tests/health_canopy_shows_retired_grouped_by_chain.rs
+    justification: |
+      Proves the canopy lens surfaces retired stories grouped
+      by supersession chain: given a corpus where `A` is
+      `retired (superseded_by: B)`, `B` is `retired
+      (superseded_by: C)`, and `C` is `healthy`, invoking
+      `agentic stories health --canopy` renders one group
+      whose members are (in chain order) A, B, C — and each
+      row in that group carries a cell naming its chain
+      position (e.g. "era 1 of 3", or the successor's short
+      id). A story with `status: retired` and no
+      `superseded_by` renders as a terminal single-member
+      group. Without this, the canopy promise — "honest
+      history of the tree's prior eras" — is a prose claim
+      with no observable, and retired stories reappear as an
+      un-grouped flat list indistinguishable from a broken
+      frontier filter.
+  - file: crates/agentic-uat/tests/uat_permits_retired_ancestor_when_successor_healthy.rs
+    justification: |
+      Proves the gate walks the supersession chain past a
+      retired ancestor: given a descendant `<id>` whose
+      `depends_on` names `<A>`, where `<A>` is `retired
+      (superseded_by: <B>)` and `<B>` is `healthy` with a
+      valid `uat_signings.verdict=pass` row, `Uat::run` with
+      a Pass verdict on `<id>` proceeds through its usual
+      path, writes exactly one `uat_signings.verdict=pass`
+      row, and rewrites `<id>`'s YAML to `status: healthy`.
+      The retired ancestor `<A>` does NOT appear in any
+      refusal — its health responsibility has transferred
+      to `<B>`. Without this, every retirement would break
+      every downstream descendant until the descendants'
+      `depends_on` edges were hand-migrated from `<A>` to
+      `<B>`, which is precisely the destructive-surgery
+      shape this story eliminates.
+  - file: crates/agentic-uat/tests/uat_refuses_when_retired_chain_points_at_unhealthy_successor.rs
+    justification: |
+      Proves the gate surfaces the SUCCESSOR's failure, not
+      the retired intermediary's: given a descendant `<id>`
+      whose `depends_on` names `<A>`, where `<A>` is `retired
+      (superseded_by: <B>)` and `<B>` is `under_construction`
+      (or any non-healthy state), `Uat::run` with a Pass
+      verdict on `<id>` returns `UatError::AncestorNotHealthy
+      { ancestor_id: <B>, reason: ... }` — naming `<B>`, NOT
+      `<A>`. The stderr message reaching the operator points
+      at the successor so the fix instruction ("promote
+      `<B>`") is actionable. Without this, the operator is
+      directed to a retired ancestor they cannot promote
+      (retired is a terminal lifecycle from the gate's
+      perspective) and the error message is a dead end.
+  - file: crates/agentic-uat/tests/uat_permits_retired_ancestor_with_no_successor.rs
+    justification: |
+      Proves the terminal-retirement case: given a descendant
+      `<id>` whose `depends_on` names `<A>`, where `<A>` is
+      `retired` with NO `superseded_by` field, `Uat::run` with
+      a Pass verdict on `<id>` proceeds through its usual path
+      and signs. A retired ancestor with no successor is
+      transparent — the dependency edge is satisfied by the
+      fact of retirement alone. Without this, retired stories
+      with no successor (legitimate for experiments that were
+      tried and abandoned with no replacement) would
+      permanently block every descendant, and the only escape
+      would be hand-editing `depends_on` across the subtree.
+  - file: crates/agentic-uat/tests/uat_refuses_transitive_unhealthy_through_retirement_chain.rs
+    justification: |
+      Proves the chain-walk is transitive in both axes at
+      once — retirement AND depends_on: given a descendant
+      `<id>` whose `depends_on` names `<A>`, where `<A>` is
+      `retired (superseded_by: <B>)`, `<B>` is `healthy` with
+      a valid signing, but `<B>` itself depends_on `<C>`
+      which is `under_construction`, `Uat::run` with a Pass
+      verdict on `<id>` returns `UatError::AncestorNotHealthy`
+      naming `<C>` (the first non-healthy link in the
+      combined walk). The gate composes retirement-
+      transparency with transitive `depends_on` traversal —
+      not two separate passes. Without this, a retired
+      ancestor sitting above a broken foundation would let a
+      descendant promote on an unproven base, which is
+      precisely the loophole story 11's transitive check
+      closed for non-retired chains.
+  - file: stories/7.yml
+    justification: |
+      Proves the retroactive backfill for hard-deleted story
+      7: the file exists on disk with `id: 7`,
+      `status: retired`, `superseded_by: 15`, and a
+      non-empty `retired_reason` naming why 7 was folded
+      into 15 (the 2026-04-20 consolidate-over-fragment pass
+      documented in story 15's guidance). The file passes
+      schema validation via the loader, is included in
+      `agentic stories health --canopy` output grouped with
+      story 15, is excluded from the default frontier view,
+      and the ancestor gate treats any descendant that once
+      depended on 7 as redirected to 15. Without this, the
+      reproducibility story for the deleted-stories fossils
+      has no anchor on disk: the commits recording story 7's
+      retirement (see `e051fea`, `2e100f7`) remain in git
+      history but the corpus pretends the id was never used,
+      and future readers cannot see what 15 supersedes without
+      spelunking git log.
+  - file: stories/8.yml
+    justification: |
+      Proves the retroactive backfill for hard-deleted story
+      8: the file exists on disk with `id: 8`,
+      `status: retired`, `superseded_by: 1`, and a non-empty
+      `retired_reason` naming the 2026 fold into story 1 (the
+      consolidation captured by commit `e051fea`,
+      "Consolidate corpus: fold story 8 into 1+3"). The user
+      direction for this story picks `1` as the single
+      successor id; the `1+3` note in research folder note 13
+      is acknowledged in `retired_reason` prose but does not
+      manifest as a multi-successor edge (the schema does not
+      support multi-successor, by design — see guidance).
+      Without this backfill, story 8's retirement is a
+      fossil with no story to attribute to, and the
+      claim "8 was folded into 1" lives only in a commit
+      subject line.
+  - file: stories/14.yml
+    justification: |
+      Proves the retroactive backfill for hard-deleted story
+      14: the file exists on disk with `id: 14`,
+      `status: retired`, `superseded_by: 15`, and a non-empty
+      `retired_reason` naming the 2026-04-20 claude-as-user
+      vs claude-as-component decision (documented in
+      `docs/reviews/claude-as-user-audit.md` and in story
+      15's guidance under "Story 14 (retired 2026-04-20)").
+      The file passes schema validation, groups with 15 and
+      7 in the canopy view, and the ancestor gate redirects
+      any descendant edge pointing at 14 through to 15.
+      Without this, the rationale for story 14's retirement
+      — the single most instructive retirement in the
+      corpus's history — has no on-disk anchor; the reader
+      sees the winning story 15 but not the losing contract
+      that taught the system to draw the library/runtime
+      boundary.
+  uat: |
+    Goal: convince yourself that the retired lifecycle is end-to-end
+    — a story can be marked retired, the loader accepts it, the
+    dashboard's frontier hides it, the canopy mode shows it grouped
+    by supersession chain, the UAT ancestor gate walks past retired
+    ancestors to evaluate their successors, and the three hard-
+    deleted stories (7, 8, 14) are back on disk as retired fossils
+    with working supersession pointers.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. `cargo build -p agentic-story -p agentic-dashboard
+         -p agentic-uat -p agentic-cli` (via WSL:
+         `wsl bash -c "source ~/.cargo/env && cd /home/code/
+         Agentic && cargo build -p agentic-story -p agentic-
+         dashboard -p agentic-uat -p agentic-cli"`). All four
+         crates must build clean.
+      3. Install the binary: `cargo install --path
+         crates/agentic-cli --locked`. Confirm
+         `command -v agentic` resolves.
+      4. Choose an ephemeral store: `export
+         AGENTIC_STORE=$(mktemp -d)`. Confirm the directory
+         is empty.
+
+    Loader walkthrough (valid retired):
+      5. `cat stories/7.yml`. Confirm the file exists,
+         `id: 7`, `status: retired`, `superseded_by: 15`,
+         `retired_reason:` is a non-empty prose block
+         naming the 2026-04-20 fold into story 15. Repeat
+         for `stories/8.yml` (superseded_by: 1) and
+         `stories/14.yml` (superseded_by: 15).
+      6. Run `agentic stories health --json | jq '.stories
+         | map(select(.status == "retired")) | length'`.
+         Observe: at least 3 (7, 8, 14 minimum — possibly
+         more if later eras retire cleanly).
+
+    Loader walkthrough (rejects):
+      7. On a scratch branch, edit `stories/7.yml` so
+         `superseded_by: 999` (a non-existent id). Run
+         `agentic stories health`. Observe: non-zero exit,
+         stderr names the `SupersededByUnknown` error,
+         source_id=7, target_id=999. Revert.
+      8. Edit `stories/7.yml` so `superseded_by: 7` (a
+         self-loop). Run the dashboard again. Observe:
+         non-zero exit, `SupersededByCycle` error naming
+         id 7. Revert.
+      9. `git status --porcelain` — confirm clean after
+         reverts.
+
+    Frontier walkthrough:
+     10. Run `agentic stories health` (default, no
+         `--canopy`). Observe: no rows with status
+         `retired`. Summary counts do not include retired
+         in any denominator. Only stories currently on the
+         frontier (proposed | under_construction | healthy
+         | unhealthy) render.
+
+    Canopy walkthrough:
+     11. Run `agentic stories health --canopy`. Observe:
+         retired stories now appear. Stories 7 and 14 are
+         grouped with 15 (their successor); story 8 is
+         grouped with 1. Each retired row carries a cell
+         indicating its chain position or pointing at its
+         successor's id. A retired story with no
+         successor (if any exist in the corpus) renders
+         as a single-member group.
+     12. `agentic stories health --canopy --json | jq
+         '.stories | group_by(.era_head_id)'`. Observe:
+         the JSON mode renders the grouping explicitly so
+         downstream tooling can reconstruct era shape
+         without reading table output.
+
+    Ancestor-gate walkthrough (successor healthy):
+     13. On a scratch branch, author a fixture story
+         `<fixture-id>` with `depends_on: [7]` (i.e.
+         depends on a retired ancestor). Commit.
+     14. Drive it: `agentic uat <fixture-id> --verdict
+         pass --store "$AGENTIC_STORE"`. The gate should
+         NOT refuse because of ancestor 7 (7 is retired
+         with superseded_by: 15). Since story 15 is
+         `healthy` with a valid signing, the gate walks
+         through 7's retirement to 15 and finds 15
+         healthy. Observe: exit 0, signing row written,
+         fixture YAML rewritten to `status: healthy`.
+
+    Ancestor-gate walkthrough (successor NOT healthy):
+     15. On the same scratch branch, author a second
+         fixture story `<fixture-id-2>` depending on a
+         retired ancestor whose successor is NOT healthy.
+         The simplest setup: add a new fixture pair —
+         `<old>` with `status: retired, superseded_by:
+         <new>` and `<new>` with `status:
+         under_construction`. Then `<fixture-id-2>` with
+         `depends_on: [<old>]`. Commit.
+     16. Run `agentic uat <fixture-id-2> --verdict pass
+         --store "$AGENTIC_STORE"`. Observe: exit 2,
+         stderr names `<new>` (the SUCCESSOR) as the
+         offending ancestor, NOT `<old>`. Fixture YAML
+         unchanged; no signing row written.
+
+    Ancestor-gate walkthrough (terminal retirement):
+     17. Author a third fixture: `<old-2>` with `status:
+         retired` and NO `superseded_by` field (terminal).
+         Then `<fixture-id-3>` with `depends_on:
+         [<old-2>]`. Commit. Run `agentic uat
+         <fixture-id-3> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe: exit 0, signing
+         written — the dependency edge is satisfied by
+         the fact of retirement alone.
+
+    Cleanup:
+     18. `git checkout -- stories/` and
+         `git clean -fd` to discard all scratch-branch
+         fixtures.
+     19. `git checkout main` and delete the scratch
+         branch.
+     20. `rm -rf "$AGENTIC_STORE"`.
+     21. If you want the installed binary gone:
+         `cargo uninstall agentic-cli`.
+     22. Confirm `git status --porcelain` is empty.
+guidance: |
+  This story introduces the retirement lifecycle to the story
+  tree: a `retired` status that sits off-frontier, an optional
+  `superseded_by` edge that forms a parallel DAG of era
+  succession, and the chain-walk semantics that let the
+  ancestor gate and the dashboard treat retirement as
+  transparent redirection rather than destructive pruning.
+  It is the story the tree-metaphor work (research folder note
+  03) has been building toward.
+
+  Why this story exists (the destructive-deletion cost).
+    Three times in the corpus's history (stories 7, 8, 14) we
+    resolved a contract conflict by `git rm`-ing the loser.
+    The commits survive; the `stories/` directory pretends the
+    ids were never used. The cost is visible in two places:
+      - Story 15's guidance carries 2000+ words explaining
+        what 7 and 14 were and why they are gone, because
+        those stories have no on-disk anchor from which the
+        reader can read forward.
+      - The `uat_signings` row for story 14 at commit
+        `cb163e2` is orphan data: a fossil with no story to
+        attribute to, un-queryable by the dashboard because
+        story id 14 has no YAML.
+    Retirement replaces this with a first-class lifecycle:
+    the retired YAML stays on disk with a reason and a
+    pointer, the signing row remains attributable, and future
+    readers walk the supersession chain to understand "what
+    replaced what, and why."
+
+  What this story ships directly (the core contract).
+    1. The schema edit (delegated to story 6's amendment pass
+       — see "Schema edit coordination" below): `status`
+       enum gains `"retired"` as a fifth value, story objects
+       gain optional `superseded_by: integer` and optional
+       `retired_reason: string` fields.
+    2. The loader's supersession-edge validation
+       (`agentic-story`): reject unknown-target
+       `superseded_by`, reject supersession cycles
+       (self-loop AND multi-hop). Both are directory-load
+       checks, mirroring story 6's `depends_on` cycle
+       defence.
+    3. The ancestor gate's chain-walk
+       (`agentic-uat` amendment of story 11): when
+       traversing `depends_on`, a retired ancestor is
+       transparent — the gate walks through it via
+       `superseded_by` to the successor, recursively. A
+       terminal retirement (no successor) is treated as
+       satisfied. Non-terminal retirement pointing at a
+       non-healthy successor surfaces THAT successor in the
+       refusal, never the retired intermediary.
+    4. The dashboard's frontier-vs-canopy lens
+       (`agentic-dashboard` amendment of story 3): default
+       `agentic stories health` excludes retired; `--canopy`
+       (equivalently `--all-eras`) includes them grouped by
+       supersession chain. JSON mode exposes the grouping
+       structurally so downstream tooling can reconstruct
+       eras without parsing table output.
+    5. The retroactive backfill: three new on-disk YAMLs
+       (`stories/7.yml`, `stories/8.yml`, `stories/14.yml`)
+       reconstituting the hard-deleted stories as
+       `status: retired` fossils with `superseded_by` and
+       `retired_reason`. Successor assignments: 7 → 15,
+       8 → 1, 14 → 15 (see "Backfill successor choices"
+       below).
+
+  Schema edit coordination (bundled with story 17).
+    Per CLAUDE.md's `schemas/` ownership rule, this story
+    does NOT edit `schemas/story.schema.json` unilaterally.
+    The schema edits this story depends on — the `retired`
+    enum value plus the optional `superseded_by` and
+    `retired_reason` fields — bundle with story 17's
+    `build_config` addition into a single story-6 amendment
+    pass. Research folder note 13 documents this bundling:
+    story 6 auto-reverts once, re-UATs once, and all three
+    schema additions (build_config from 17,
+    retired+superseded_by+retired_reason from 21) land on
+    the same re-promotion. The bundling is the user's
+    explicit posture ("single UAT preference — eventual
+    consistency replaces strict ordering"). If story 17 is
+    abandoned or restructured, this story's schema
+    dependency survives independently on story 6.
+
+    This is why `depends_on: [6, 11]` and not the full
+    closure — story 6 carries the schema edit; story 11
+    carries the gate semantics this story extends via
+    amendment. The dashboard amendment (story 3) is a
+    consequence, not a prerequisite: story 3 auto-reverts
+    when this story ships proposed, and re-UATs once its
+    own new tests pin the frontier/canopy behaviour.
+
+  Why `superseded_by` is single-id, not multi-id.
+    Research folder note 13's successor table notes story 8's
+    retirement as "8 → 1+3" — the content was folded into
+    both stories 1 and 3. The user direction for THIS story
+    picks a single successor (8 → 1) for the schema shape.
+    Reasons:
+      - A single-id edge is a DAG; a multi-successor field
+        is a hyperedge and the chain-walk algorithm becomes
+        materially harder (which successor's health counts
+        for the gate? If any one is healthy, or all?).
+      - The secondary successor can always be named in
+        `retired_reason` prose (story 8's backfill does
+        exactly this).
+      - If a future era genuinely needs multi-successor
+        semantics, the schema can grow a `superseded_by_also:
+        [integer]` audit-only field without breaking the
+        primary chain-walk contract.
+    Future schema-curator pass may revisit if the
+    corpus-experience argues for it; the primary chain-walk
+    algorithm will remain keyed on the single-id
+    `superseded_by` edge.
+
+  Why `retired_reason` is optional, not mandatory.
+    The retroactive backfill is the forcing function: we do
+    not fully remember why stories 7 and 8 were retired
+    (the commits describe the action, not always the
+    reasoning). Mandatory `retired_reason` would force
+    fabrication on the backfill YAMLs, which would be worse
+    than an absent field — a fabricated reason is a
+    first-class lie that a future reader treats as
+    authoritative. Optional keeps the field honest: present
+    when the author has real prose to write, absent when
+    they do not. Going-forward stories retired in full view
+    of their author SHOULD populate it; the enforcement is
+    social, not schematic.
+
+  The chain-walk algorithm (authoritative).
+    Pseudocode for the ancestor gate's evaluation of a
+    direct ancestor `A` of a story under UAT:
+
+    ```
+    fn is_ancestor_satisfied(A) -> Result<(), AncestorNotHealthy> {
+        let mut cursor = A;
+        let mut visited = HashSet::new();
+        loop {
+            if !visited.insert(cursor.id) {
+                // Cycle — defended at load time, defended in depth
+                // here. Return Cycle error.
+                return Err(Cycle);
+            }
+            match cursor.status {
+                Healthy if has_valid_signing(cursor) => return Ok(()),
+                Healthy => return Err(NoSigningRow(cursor.id)),
+                Retired => {
+                    match cursor.superseded_by {
+                        Some(successor_id) => {
+                            cursor = load(successor_id);
+                            continue; // walk the chain
+                        }
+                        None => return Ok(()), // terminal retirement
+                    }
+                }
+                Proposed | UnderConstruction | Unhealthy => {
+                    return Err(NotHealthy(cursor.id));
+                }
+            }
+        }
+    }
+    ```
+
+    Then the existing transitive-depends_on walk (story 11)
+    composes on top: the outer walk traverses `depends_on`
+    edges; for each ancestor encountered it calls
+    `is_ancestor_satisfied` as above. The two walks are
+    orthogonal and compose cleanly — retirement-transparency
+    and depends_on-transitivity are both "follow an edge
+    type recursively" with different edge labels.
+
+    The refusal's `ancestor_id` field always names the
+    TERMINAL link — the first id in the walk that is
+    neither healthy-with-signing nor transparent. For
+    retired ancestors this is by construction the successor
+    (or the successor's non-healthy ancestor, transitively).
+    The retired intermediary never surfaces in the operator-
+    visible refusal because it is not actionable — retired
+    is terminal from the gate's perspective; the operator
+    cannot un-retire or re-UAT a retired story, they can
+    only push its successor to healthy.
+
+  Rollback branches are NOT in this story's scope.
+    The user direction for this story names a future-work
+    item (research folder note 14): git branches that pin
+    main at a prior stable state before a disruptive
+    successor shipped, usable as escape hatches when the
+    successor introduces regressions the operator needs to
+    back out of. This story does NOT build those branches.
+    The primitives it ships (retirement as first-class
+    state, supersession chains as queryable data) are the
+    substrate that rollback branches will build on; the
+    branch-creation / branch-management ceremony is a
+    separate concern and a separate story when the need
+    surfaces. The chain-walk algorithm above is rollback-
+    friendly by construction: a rollback branch that
+    "uses the predecessor instead" flips the chain-walk's
+    starting cursor and everything else composes
+    unchanged.
+
+  Frontier vs canopy (dashboard amendment semantics).
+    The dashboard's `--canopy` mode (also spellable
+    `--all-eras`; both aliases) broadens the default
+    frontier lens. Three render obligations it imposes:
+      - Include retired stories in the output.
+      - Group rows by supersession chain. Chains are
+        identified by their "era head" — the terminal
+        successor (a story that no other story supersedes,
+        i.e. the current live story in that era). Each
+        group's rows render in chain order from oldest
+        retired → successor → ... → era head.
+      - For each retired row, render a cell naming the
+        successor's short id (or "terminal" for retired
+        stories with no `superseded_by`). Default (frontier)
+        mode does not render this cell — retired rows do
+        not appear there.
+    JSON mode (`agentic stories health --canopy --json`)
+    renders grouping structurally, e.g. by including an
+    `era_head_id` field on each story that points at the
+    era's current live story. Downstream tooling
+    reconstructs the grouping by `group_by(.era_head_id)`.
+
+  Backfill successor choices (auditable for the reader).
+    - Story 7 → 15. Story 7 owned the evidence-atomicity
+      contract for `agentic test-build`; story 15 folded
+      its substantive contracts in whole and supersedes it
+      directly. `retired_reason` cites the 2026-04-20
+      consolidate-over-fragment pass and references story
+      15's guidance section titled "Story 7 (retired,
+      folded into this story 2026-04-20)."
+    - Story 8 → 1. Story 8 was the early `agentic` CLI
+      shell covering `agentic stories health` and
+      `agentic uat` wiring. Its dashboard half moved into
+      story 3 and its UAT half into story 1; for a
+      single-id successor, story 1 (UAT binary contract)
+      is the more substantive inheritance. `retired_reason`
+      names commit `e051fea` and the story-1-plus-3 fold
+      in prose.
+    - Story 14 → 15. Story 14 was the claude-as-component
+      scaffold-authoring contract that story 15 replaced
+      with claude-as-user. `retired_reason` cites
+      `docs/reviews/claude-as-user-audit.md` and story 15's
+      guidance section "Story 14 (retired 2026-04-20)".
+    These assignments are authoritative for this story's
+    acceptance tests (the three `stories/N.yml` test
+    entries above). Future stories may retire themselves
+    and set their own `superseded_by`; the three backfills
+    are a one-time historical anchor, not a template.
+
+  Proof-hash implications (documented, not re-pinned).
+    Marking a story `status: retired` is a `status` edit.
+    `status` is part of the proof hash per story 6's
+    canonical form (documented in docs/guides/story-
+    authoring.md). Retirement therefore invalidates a
+    previously-healthy story's proof and the auto-revert
+    machinery would fire — except that `retired` is a
+    terminal state from which re-UAT is not applicable.
+    Story 6's loader and story 1's UAT gate both treat
+    `retired` as a valid terminal state without attempting
+    to re-probe it. The dashboard's frontier lens filters
+    retired stories before the proof-hash-vs-evidence
+    classifier runs, so "retired story whose hash no longer
+    matches its historical signing" does not produce a
+    spurious "unhealthy" classification.
+
+    Editing a retired story's `retired_reason` or
+    `superseded_by` field does NOT re-probe the story; it
+    is metadata maintenance, not a new era. If a retired
+    story's successor changes (rare — typically indicates
+    the original supersession was wrong), the chain-walk
+    simply resolves against the new successor on the next
+    query; no re-UAT cascade fires on the retired story
+    itself.
+
+  Relationship to stories 3, 6, 11 (the amendment set).
+    Research folder note 13 catalogues the amendments this
+    story triggers. Three auto-revert to `under_construction`
+    when this story reaches `proposed` or healthy:
+      - Story 6 (loader + schema) — bundles this story's
+        schema edits with story 17's `build_config`
+        addition. One story-6 amendment pass, one re-UAT.
+      - Story 11 (ancestor gate) — amended to implement the
+        chain-walk algorithm documented above. The story
+        11 amendment adds two acceptance tests mirroring
+        the two `uat_permits_retired_ancestor_*` tests
+        and `uat_refuses_when_retired_chain_*` test from
+        this story (the amendment may bundle or
+        reference-by-file, at story-writer discretion).
+      - Story 3 (dashboard) — amended for the frontier-vs-
+        canopy lens. The two dashboard tests from this
+        story's acceptance set (`health_frontier_hides_
+        retired.rs` and `health_canopy_shows_retired_
+        grouped_by_chain.rs`) can be moved into story 3's
+        acceptance set when that amendment is authored —
+        this story's acceptance tests are the PRIMARY
+        pinnings; story 3's amendment references them.
+    Four touch-up (guidance-only, no status change):
+    stories 9, 10, 13, 15 — research folder note 13
+    details each. Story-writer handles those in a
+    subsequent pass after this story reaches healthy.
+
+  What this story explicitly does NOT do.
+    - Does NOT edit `schemas/story.schema.json` directly.
+      The schema edit flows through story 6's amendment
+      pass per CLAUDE.md; this story names the dependency
+      and the schema curator makes the edit synchronously
+      with story 6's re-UAT.
+    - Does NOT ship `alternatives_to` / competition
+      cohorts. Research folder note 03 names that as a
+      future extension; the chain-walk shape here is
+      strictly linear (one predecessor, one successor per
+      edge). Multi-way branch selection is built on real
+      need, not speculation.
+    - Does NOT ship auto-retirement (stories
+      auto-transitioning to retired after N stagnant
+      sessions). Research folder note 03 flags that as
+      speculative; this story keeps retirement an explicit
+      author action.
+    - Does NOT ship rollback branches. See "Rollback
+      branches are NOT in this story's scope" above.
+    - Does NOT modify `uat_signings` row shape or alter
+      story 1's signing contract. The fossil row for
+      retired story 14 (commit `cb163e2`) becomes
+      attributable again purely by virtue of the
+      corresponding `stories/14.yml` reappearing — the
+      signing row itself is unchanged.
+    - Does NOT re-open the hard-delete decisions. Stories
+      7, 8, 14 stay retired forever; the backfill is
+      historical reconstruction, not revival. Their
+      successor assignments are authoritative for this
+      story's tests and should not be renegotiated absent
+      a separate story making the case.
+
+  Relationship to ADR-0006 and the tree metaphor.
+    ADR-0006 names retirement + supersession as Phase 0
+    requirements, bundled with the schema edit from story
+    17. Research folder note 03 frames the metaphor: trees
+    let branches die without destroying the trunk's
+    structural history. This story is how that metaphor
+    manifests in the corpus — retired stays on disk, the
+    canopy shows prior eras, the gate walks past retired
+    ancestors as transparent redirections. The tree-
+    metaphor's two unshipped behaviours (competing
+    branches, coexistence of eras) are deferred per note
+    03's "do now vs defer" table: this story ships the
+    pruning discipline that makes competition and
+    coexistence safe to add later, not the competition
+    and coexistence themselves.
+depends_on:
+- 6
+- 11
+related_files:
+- crates/agentic-story/src/**
+- crates/agentic-dashboard/src/**
+- crates/agentic-uat/src/**
+- schemas/story.schema.json
+- docs/decisions/0006-sandboxed-story-hardening-loop.md
+- docs/research/story_tree/03-tree-metaphor.md
+- docs/research/story_tree/13-existing-stories-impact.md

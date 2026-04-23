@@ -1,0 +1,733 @@
+id: 18
+title: Resolve a signer identity and stamp it on every signing and run row
+outcome: |
+  A caller invoking any evidence-writing path — `agentic uat`, the CI
+  recorder, or a runtime-driven sandbox run — emits a row whose
+  `signer` field is a non-empty identity string resolved from an
+  explicit four-tier chain, so every piece of attestable evidence is
+  attributable to a source without re-deriving it from context.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-signer/tests/resolve_prefers_cli_flag_over_env_and_git.rs
+    justification: |
+      Proves tier 1 of the resolution chain: given all three
+      lower-tier sources populated with different values
+      (`AGENTIC_SIGNER=env-person@example.com`,
+      `git config user.email=git-person@example.com`) and a
+      caller passing `Signer::resolve(Resolver::with_flag(
+      "flag-person@example.com"))`, the returned `Signer`
+      carries the flag value byte-identical. The env var and
+      git config are NOT consulted (observable by swapping
+      both to invalid values partway through the test — the
+      resolver still returns the flag value). Without this,
+      the documented precedence order collapses into "whatever
+      the implementation reads first that day," and an
+      operator passing `--signer` cannot be confident their
+      override landed.
+  - file: crates/agentic-signer/tests/resolve_prefers_env_over_git_when_no_flag.rs
+    justification: |
+      Proves tier 2: with no `--signer` flag but
+      `AGENTIC_SIGNER=env-person@example.com` set AND
+      `git config user.email=git-person@example.com` set,
+      `Signer::resolve` returns `env-person@example.com`.
+      Clearing the env var on a subsequent call and leaving
+      git config set returns the git value — proving the env
+      tier is consulted strictly between the absent flag and
+      the git fallback. Without this, the sandbox convention
+      (`AGENTIC_SIGNER=sandbox:<model>@<run_id>` injected by
+      the runtime) cannot override a human's `git config
+      user.email` that happens to be set in the same
+      environment, and every agent run would sign as the
+      human running the container.
+  - file: crates/agentic-signer/tests/resolve_falls_back_to_git_config_user_email.rs
+    justification: |
+      Proves tier 3: with no flag and no env var, but a git
+      repository at the working directory whose `git config
+      user.email` is `dev@example.com`,
+      `Signer::resolve` returns `dev@example.com`. Reading
+      goes through `git2::Config::open_default()` or a
+      repo-scoped `Repository::config()` — whichever the
+      implementation picks, the acceptance is that the same
+      value `git config --get user.email` prints is the
+      value the resolver returns. Without this, the human
+      path (the most common one for a dev running `agentic
+      uat` locally) requires `--signer` on every invocation,
+      and the ergonomic default the outcome promises does
+      not exist.
+  - file: crates/agentic-signer/tests/resolve_fails_typed_when_all_sources_empty.rs
+    justification: |
+      Proves the strict floor: with no flag, no env var, and
+      either no git config or a git config whose
+      `user.email` is unset, `Signer::resolve` returns
+      `SignerError::SignerMissing` naming which sources it
+      consulted and found empty. The function does NOT panic,
+      does NOT fall back to the current unix user, hostname,
+      or any other guess, and does NOT return an empty
+      `Signer`. Without this, the exit-2-and-no-store-write
+      contract at the CLI boundary has no library-level
+      proof, and a regression that quietly defaulted the
+      signer to `""` or `"unknown"` would pass every other
+      test in this file.
+  - file: crates/agentic-signer/tests/resolve_rejects_empty_and_whitespace_only_values.rs
+    justification: |
+      Proves the validation decision (the one open question
+      note 10 asked story-writer to commit on): a signer
+      value that is the empty string, or consists entirely
+      of whitespace (` `, `\t`, `\n`, `\r`, or any mixture),
+      is rejected at resolve time with
+      `SignerError::SignerInvalid` naming the offending
+      source (`flag`, `env`, or `git`). Non-whitespace
+      strings of any shape — `"a"`, `"not-an-email"`,
+      `"sandbox:claude-sonnet-4-6@run-a1b2c3"`,
+      `"operator-17"` — are accepted verbatim.
+      Specifically, no email-shape regex is applied: a
+      signer is a free-form non-empty identity string. This
+      pins the decision so a future contributor does not
+      tighten the validator into an RFC-5321 gate that
+      rejects the `sandbox:<model>@<run_id>` convention.
+      Without this, either the validator is silently
+      permissive (empty signers land in evidence rows) or
+      silently restrictive (the sandbox convention fails
+      validation the first time it's exercised).
+  - file: crates/agentic-uat/tests/uat_pass_writes_resolved_signer_onto_signing_row.rs
+    justification: |
+      Proves the wire from resolver to `uat_signings` at the
+      library boundary: given a clean tempdir repo whose
+      `git config user.email` is `dev@example.com`, a
+      fixture proposed story, and no `AGENTIC_SIGNER` env
+      var, a `Uat::run(..., SignerSource::Resolve)` call
+      issuing a Pass verdict writes exactly one row to
+      `uat_signings` whose `signer` field equals
+      `dev@example.com`. The same test, re-run with the
+      env var set to `env-person@example.com`, produces a
+      row whose `signer` is `env-person@example.com`. Both
+      rows also carry the commit hash per story 1's
+      existing contract — the signer field is ADDITIVE, not
+      replacing any existing field. Without this, the
+      resolver is proven in isolation but story 1's row
+      shape does not actually gain the field, and the
+      outcome's "written onto the row it emits" clause is
+      unproven for the signing path.
+  - file: crates/agentic-uat/tests/uat_pass_refuses_when_signer_unresolvable.rs
+    justification: |
+      Proves the fail-closed floor at the library boundary:
+      given a clean tempdir repo whose git config has no
+      `user.email`, no `AGENTIC_SIGNER` env var, and a
+      `Uat::run(..., SignerSource::Resolve)` call with no
+      flag override, the library returns
+      `UatError::SignerMissing`, writes ZERO rows to
+      `uat_signings`, does NOT mutate the story YAML's
+      status, and leaves the working tree byte-identical.
+      Without this, story 1's promotion path could quietly
+      write a row with `signer: ""` when git config is
+      incomplete, and the whole "every verdict is
+      attributable" promise collapses at the first
+      misconfigured dev machine.
+  - file: crates/agentic-ci-record/tests/record_writes_resolved_signer_onto_test_runs_row.rs
+    justification: |
+      Proves the symmetry decision (the second open
+      question note 10 asked story-writer to commit on):
+      `test_runs` rows carry the same `signer` field as
+      `uat_signings`. Given the same resolution scaffold
+      as the uat-pass test above, a `Recorder::record(...,
+      SignerSource::Resolve)` call for a story with
+      passing tests writes a `test_runs` row whose
+      `signer` equals the resolved value. A Fail variant
+      of the same test writes a `signer` on the Fail row
+      too — symmetry is unconditional, not outcome-gated.
+      Story 2's existing fields (`story_id`, `verdict`,
+      `failing_tests`, `commit`, `ran_at`) remain on the
+      row unchanged; `signer` is additive. Without this,
+      only UAT signings gain attribution and the dashboard
+      (story 3) can tell who signed a verdict but not who
+      ran the CI that reddened a row — a cross-table
+      asymmetry the dashboard join would surface as a
+      permanent lint.
+  - file: crates/agentic-ci-record/tests/record_refuses_when_signer_unresolvable.rs
+    justification: |
+      Proves the same fail-closed floor on the CI path:
+      `Recorder::record` with `SignerSource::Resolve`
+      against an environment with no flag, no env, no git
+      `user.email` returns `RecordError::SignerMissing`,
+      writes zero rows to `test_runs` (the existing row,
+      if any, is untouched per story 2's malformed-input
+      contract shape), and does not propagate the test
+      runner's verdict to the store. The error is distinct
+      from `RecordError::MalformedInput` so the CI wrapper
+      can distinguish "fix your git config" from "fix your
+      test output." Without this, a misconfigured CI
+      runner silently writes `test_runs` rows with empty
+      signer fields and the symmetry-with-uat claim is
+      only aspirational.
+  - file: crates/agentic-runtime/tests/runtime_injects_sandbox_signer_env_into_claude_subprocess.rs
+    justification: |
+      Proves the sandbox convention at the runtime
+      boundary: when `ClaudeCodeRuntime` (story 19) spawns
+      a claude subprocess for a run with `run_id =
+      "a1b2c3"` against a configured model
+      `"claude-sonnet-4-6"`, the child process's
+      environment contains `AGENTIC_SIGNER=sandbox:claude-
+      sonnet-4-6@run-a1b2c3` exactly. The value is
+      composed by the runtime from its own inputs (model,
+      run id); the caller does NOT pass it in as a flag.
+      Inside the sandbox, any `agentic uat` or `agentic
+      ci record` invocation resolves the signer from this
+      env var via tier 2 — no special-case code path for
+      agents. Without this, the compositional story the
+      outcome promises (one resolver, one chain, one
+      convention) degrades into two parallel paths (human
+      path + agent-special path), and the sandbox
+      convention is a comment rather than a behaviour.
+  - file: crates/agentic-runtime/tests/runtime_writes_resolved_signer_onto_run_row.rs
+    justification: |
+      Proves the third evidence table gains the field: a
+      `RunRecorder::start` driven through the runtime
+      against a stub NDJSON stream writes a `runs` row
+      whose `signer` equals the sandbox convention
+      `sandbox:<model>@<run_id>` for that run. Story 16
+      already requires `signer` as a non-empty string on
+      the run row; this test proves the runtime populates
+      it from the same composition the env-var injection
+      test pins, rather than (say) reading the outer
+      environment's `AGENTIC_SIGNER` and passing through
+      whatever a dev happens to have exported. Without
+      this, a run launched by a dev who exported their
+      own `AGENTIC_SIGNER` would attribute the run to
+      them rather than to the model-and-run-id, and the
+      run row's signer would no longer identify which
+      agent produced it.
+  - file: crates/agentic-cli/tests/uat_signer_flag_lands_on_signing_row.rs
+    justification: |
+      Proves the contract reaches the operator through the
+      binary: `agentic uat <id> --verdict pass --signer
+      "operator-17"` on a clean fixture repo with a
+      resolvable git config (which the flag must override)
+      exits 0 and writes a `uat_signings` row whose
+      `signer` is exactly `"operator-17"`. Running the
+      same binary with `--signer ""` exits 2
+      (`SignerInvalid`, whitespace-rejection reaches the
+      argv path) and writes zero rows. Running with no
+      flag, `AGENTIC_SIGNER=env-person@example.com`
+      exported, and a git config set, exits 0 and writes
+      a row whose `signer` is `env-person@example.com`.
+      Without this the library-level claims above are
+      library-level claims only; the argv-to-resolver
+      wire could drop `--signer`, mis-order the chain, or
+      silently convert an empty flag value to "unset"
+      (which would bypass the rejection) and the operator
+      would never notice.
+  - file: crates/agentic-cli/tests/uat_missing_signer_exits_two.rs
+    justification: |
+      Proves the no-source-exits-2 contract at the binary
+      boundary: on a fixture repo whose git config has
+      no `user.email`, with no `AGENTIC_SIGNER` exported
+      and no `--signer` flag, `agentic uat <id> --verdict
+      pass` exits 2 (could-not-verdict, consistent with
+      story 1's dirty-tree/bad-id mapping), emits a human-
+      readable message naming `SignerMissing` on stderr,
+      writes zero rows, and leaves the story YAML
+      unchanged. Exit 2 is load-bearing: story 1 already
+      distinguishes 1 (real Fail verdict) from 2 (could-
+      not-run); a missing signer is the latter. Without
+      this, a misconfigured dev machine produces exit 1
+      that CI treats as a real verdict failure, and the
+      crate's exit-code contract degrades.
+  - file: crates/agentic-signer/tests/signer_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim for
+      the new crate: `agentic-signer`'s `Resolver` +
+      `Signer` can be constructed and driven end-to-end
+      by a test that links against only `agentic-signer`,
+      `git2`, and the standard library — no `agentic-
+      cli`, no `agentic-uat`, no `agentic-ci-record`, no
+      `agentic-runtime`, no `agentic-store`. The test
+      constructs a tempdir repo, sets a git config, flips
+      env vars, and asserts the resolved value for each
+      tier. Without this, the resolver quietly grows a
+      dependency on the UAT crate (because "it's
+      convenient" to share an error type) or on the
+      runtime (because "the sandbox convention lives
+      there") and the first downstream crate that wants
+      to call it end-to-end drags half the workspace in
+      with it.
+  uat: |
+    Goal: convince yourself that a single four-tier resolution
+    chain (flag → env → git config → typed error) produces one
+    non-empty signer string on every evidence row written by
+    `agentic uat`, `agentic ci record`, and a runtime-driven
+    run, and that the sandbox convention `sandbox:<model>@
+    <run_id>` lands on agent-produced rows while human rows
+    carry the dev's email.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run
+         `git status --porcelain` and confirm it is empty.
+      2. `cargo build -p agentic-signer -p agentic-uat -p
+         agentic-ci-record -p agentic-runtime -p agentic-cli`
+         via WSL: `wsl bash -c "source ~/.cargo/env && cd
+         /home/code/Agentic && cargo build -p agentic-signer
+         -p agentic-uat -p agentic-ci-record -p agentic-
+         runtime -p agentic-cli"`. All crates build clean.
+      3. Install the CLI:
+         `wsl bash -c "source ~/.cargo/env && cargo install
+         --path crates/agentic-cli --locked"`. Confirm
+         `command -v agentic` resolves.
+      4. Choose a tempdir `<repo>` and a tempdir `<store>`:
+         `REPO=$(mktemp -d); STORE=$(mktemp -d)`. In
+         `<repo>`, `git init`, commit an empty `baseline.txt`
+         so there is a HEAD, and mkdir `stories/`. Copy
+         `stories/1.yml` into `<repo>/stories/1.yml` (or
+         author a small fixture story; story 1's shape
+         works). Export `AGENTIC_STORE="$STORE"`.
+      5. Unset any pre-existing env contamination:
+         `unset AGENTIC_SIGNER`. Record the state of
+         `git -C "$REPO" config --get user.email` — if it
+         is set (e.g. inherited from global config), unset
+         it for this UAT: `git -C "$REPO" config --unset-all
+         user.email` (you will re-set it in the git-tier
+         walkthrough).
+
+    Flag-tier walkthrough (tier 1):
+      6. With env and git-email both unset:
+         `cd "$REPO" && agentic uat 1 --verdict pass
+         --signer "flag-person@example.com"`. Observe:
+           - Process exits 0.
+           - Query `uat_signings` (via `agentic stories
+             health --json --store "$STORE"` once story 3
+             is available, or a small `surreal sql`
+             session) for the one new row. Confirm
+             `signer == "flag-person@example.com"`,
+             `verdict == "pass"`, and the commit hash
+             matches `git -C "$REPO" rev-parse HEAD`.
+
+    Env-tier walkthrough (tier 2):
+      7. Still inside `<repo>`, with git-email still unset:
+         `export AGENTIC_SIGNER="env-person@example.com"`.
+         Pick a different fixture story id (or reset the
+         first via `git -C "$REPO" restore stories/1.yml`).
+         Run `agentic uat <id> --verdict pass` with NO
+         `--signer` flag. Observe:
+           - Process exits 0.
+           - The new row has `signer == "env-person@
+             example.com"`. The env var wins over the
+             (still-absent) git value.
+
+    Git-tier walkthrough (tier 3):
+      8. `unset AGENTIC_SIGNER`. Set git email:
+         `git -C "$REPO" config user.email
+         "git-person@example.com"`. Reset the story (or
+         pick another). Run `agentic uat <id> --verdict
+         pass` with no flag and no env. Observe:
+           - Process exits 0.
+           - The new row has `signer == "git-person@
+             example.com"`.
+
+    Fail-closed walkthrough (tier 4):
+      9. `unset AGENTIC_SIGNER; git -C "$REPO" config
+         --unset-all user.email`. Run `agentic uat <id>
+         --verdict pass` with no flag. Observe:
+           - Process exits 2 (not 0, not 1).
+           - stderr names `SignerMissing` and lists the
+             three sources consulted.
+           - No new row appears in `uat_signings` for
+             `<id>`.
+           - The story YAML's `status:` is unchanged.
+
+    Whitespace-rejection walkthrough:
+     10. With git-email set again, run
+         `agentic uat <id> --verdict pass --signer "   "`.
+         Observe:
+           - Process exits 2.
+           - stderr names `SignerInvalid` and `flag`
+             as the offending source.
+           - No new row appears.
+
+    Symmetry walkthrough (test_runs + runs):
+     11. Still inside `<repo>`, with `AGENTIC_SIGNER=
+         "env-person@example.com"` exported and a
+         fixture story whose acceptance tests exist:
+         run the CI recorder `agentic ci record <id>`
+         (argv per story 2; the exact invocation may
+         require a piped test-runner output — follow
+         story 2's UAT as the template). Observe:
+           - The new row in `test_runs` for `<id>` has
+             `signer == "env-person@example.com"`,
+             alongside `verdict`, `failing_tests`,
+             `commit`, `ran_at`.
+     12. Run a runtime-driven stub session via the
+         `agentic-runtime` smoke example (story 16's
+         `run_recorder_smoke_green.rs`-shaped harness,
+         extended here to drive through
+         `ClaudeCodeRuntime` with a stub NDJSON
+         source). Pass `model = "claude-sonnet-4-6"`
+         and `run_id = "a1b2c3"`. Observe:
+           - The new row in `runs` has `signer ==
+             "sandbox:claude-sonnet-4-6@run-a1b2c3"`
+             — NOT `env-person@example.com`, even
+             though that env var is exported in the
+             outer shell. The runtime composes the
+             sandbox signer from its own inputs and
+             injects `AGENTIC_SIGNER` into the child
+             process, overriding the outer env for
+             any nested `agentic uat` or `agentic ci
+             record` calls the child might make.
+
+    Cleanup:
+     13. `rm -rf "$REPO" "$STORE"`. `unset
+         AGENTIC_SIGNER`. If you want the installed
+         binary gone: `cargo uninstall agentic-cli`.
+     14. Confirm `git status --porcelain` (in the
+         workspace, not `<repo>`) is empty.
+guidance: |
+  This story introduces a single crate, `agentic-signer`,
+  whose sole job is resolving an identity string and handing
+  it to the three evidence-writing paths (`agentic-uat`,
+  `agentic-ci-record`, `agentic-runtime`'s `RunRecorder`).
+  It does NOT define what "signing" means cryptographically
+  — story 1's existing "signed by a commit" semantics stay
+  unchanged. The word "signer" here is attribution, not
+  cryptography.
+
+  Why a new crate, not a helper inside agentic-uat.
+    Three callers (`agentic-uat`, `agentic-ci-record`,
+    `agentic-runtime`) need the same resolution logic. Two
+    of them (`agentic-uat`, `agentic-ci-record`) are
+    standalone-resilient libraries whose dependency floor
+    forbids depending on each other. The third
+    (`agentic-runtime`) is an orchestration crate that can
+    depend on the world but whose `RunRecorder` sub-module
+    specifically holds to the narrow floor (per story 16's
+    standalone-resilience posture). A shared helper module
+    inside any one of them would either force a circular
+    dependency or replicate itself in the other two. A
+    fourth crate with a two-type public API
+    (`Resolver`, `Signer`) + one typed error enum is the
+    minimal shape.
+
+    Dependency floor for `agentic-signer`: `git2`, stdlib,
+    `serde` (if `Signer` needs to serialise into the
+    evidence row writers' JSON; otherwise not required).
+    Forbidden: `agentic-cli`, `agentic-uat`, `agentic-ci-
+    record`, `agentic-runtime`, `agentic-store`, `agentic-
+    orchestrator`, `agentic-sandbox`. The standalone-
+    resilience test enforces this.
+
+  The four-tier resolution chain (normative).
+    `Signer::resolve(Resolver)` consults sources in this
+    strict order and returns the first non-empty,
+    non-whitespace-only value:
+
+      1. CLI flag / explicit value — `Resolver::
+         with_flag(s)` or the underlying struct field
+         populated by the CLI's argv parsing. Takes
+         priority over every other source. Accepts any
+         non-whitespace string.
+      2. Environment variable `AGENTIC_SIGNER`. Consulted
+         only when tier 1 is absent. The name is
+         intentional: `AGENTIC_SIGNER`, uppercase, no
+         prefix variations. The runtime injects this into
+         the claude subprocess's environment (see below);
+         humans may also export it manually as a
+         per-shell override.
+      3. `git config user.email` at the working directory.
+         Consulted only when tiers 1 and 2 are absent.
+         Reading goes through `git2` — `Repository::
+         config()` for repo-local scope falling through
+         to global / system scope via libgit2's default
+         chain. The resolver does NOT invoke `git
+         config` as a subprocess; it reads via the
+         library to avoid shelling out on the critical
+         path.
+      4. `SignerError::SignerMissing` — typed error
+         naming the three sources consulted. No further
+         fallback (no unix user, no hostname, no
+         `"unknown"`). Exit code 2 at every CLI
+         boundary.
+
+    Validation applies at every tier: a tier-1 value of
+    `""` or `"   "` is rejected with `SignerError::
+    SignerInvalid { source: Source::Flag }` rather than
+    falling through to tier 2. The failure is "this
+    source was present but unusable" — the resolver
+    does not assume the operator meant for an empty flag
+    to delegate to the next tier. Same discipline applies
+    to empty env and empty git values: whitespace-only
+    is a validation error, not a "try the next source"
+    signal.
+
+  Validation rule (open-question resolution).
+    Note 10 asked: "Validation on the signer string? My
+    lean: reject empty / whitespace-only; accept
+    everything else. Don't pin email format." This story
+    commits to that decision. The validation rule is
+    EXACTLY: trimmed length > 0. No email-shape regex,
+    no maximum-length cap beyond what the Store's JSON
+    column naturally allows, no domain whitelist, no
+    rejection of unicode, control characters, colons,
+    at-signs, or `@run-` patterns. The sandbox
+    convention `"sandbox:<model>@<run_id>"` MUST pass
+    validation; an email-shape validator would reject it.
+
+    The acceptance test
+    `resolve_rejects_empty_and_whitespace_only_values
+    .rs` pins the minimum rejection set:
+    `""`, `" "`, `"\t"`, `"\n"`, `"\r\n"`,
+    `" \t \n "`. The test
+    `resolve_prefers_cli_flag_over_env_and_git.rs`
+    implicitly pins the acceptance set by exercising a
+    non-email flag value. Future contributors
+    considering tightening the validator should first
+    amend this story's acceptance with a test pinning
+    the new rejection, because loosening a validator is
+    a contract change every evidence-writing crate
+    reads.
+
+  Sandbox convention (normative composition).
+    When `ClaudeCodeRuntime` (story 19's scope) spawns
+    a claude subprocess on behalf of a run, it composes
+    the child's `AGENTIC_SIGNER` env var from its own
+    inputs:
+
+      AGENTIC_SIGNER = "sandbox:" + <model> + "@" + <run_id>
+
+    where `<model>` is the claude model string from
+    `RunConfig.models[0]` (or a single `model` field if
+    the runtime pins one per spawn) and `<run_id>` is
+    the run id generated for this invocation. Example:
+    `sandbox:claude-sonnet-4-6@run-a1b2c3`.
+
+    The composition happens in the runtime, NOT in
+    `agentic-signer`. `agentic-signer` has no opinion
+    on what shape the signer takes — it only resolves
+    and validates. The convention is a runtime-side
+    string format that the resolver's tier 2 reads
+    back unchanged. This preserves the "one resolver,
+    one chain" story: humans invoking `agentic uat`
+    directly and agents invoking it through a spawned
+    claude session take the same code path; only tier
+    2's value differs.
+
+    A consequence: if a human exports
+    `AGENTIC_SIGNER=alice@example.com` in their shell
+    and then runs `agentic story build <id>` (story
+    20), the runtime OVERRIDES that export for the
+    child process — the runtime sets
+    `AGENTIC_SIGNER=sandbox:<model>@<run_id>` on the
+    child's environment before spawning. The outer
+    shell's export does not leak into the sandbox's
+    signer. This is the `runtime_injects_sandbox_
+    signer_env_into_claude_subprocess.rs` test's job
+    to pin.
+
+  Three identities coexist (composition with git).
+    Per research note 14 and ADR-0006 §8, three
+    distinct identities land in the corpus history for
+    a green sandbox run:
+
+      - `signer` on the `uat_signings` row (written
+        inside the sandbox by `agentic uat --verdict
+        pass`): the sandbox convention
+        `sandbox:<model>@<run_id>`.
+      - `signer` on the `runs` row (written by the
+        runtime's `RunRecorder::finish`): the SAME
+        sandbox convention for that run. Both rows
+        attribute the attestation to the agent
+        identity.
+      - Git commit author on the main-branch merge
+        commit produced by `agentic story build`'s
+        auto-merge on green (story 20's scope): the
+        dev's `git config user.email` from the host
+        machine where the command was invoked. This
+        is a git-level identity, NOT a signer field
+        — git commits carry their own author
+        metadata and the host's git does not consult
+        `AGENTIC_SIGNER`.
+
+    These three identities are INDEPENDENT. A single
+    run produces evidence rows attributed to the
+    sandbox convention AND a git commit authored by
+    the dev. Downstream readers (the dashboard, `git
+    log`, `agentic story build`'s post-merge UI) must
+    not conflate them. This story's acceptance does
+    not cover the git-author identity — that lives in
+    story 20 — but the guidance names the boundary so
+    a future contributor does not try to unify all
+    three under one "signer" knob.
+
+  Symmetry decision: test_runs carries signer too.
+    Note 10 asked: "Should `agentic-ci-record`
+    test_runs also carry signer? My lean: yes, for
+    symmetry." This story commits to that decision.
+    The `test_runs` row shape gains a `signer: String`
+    field alongside its existing `story_id`,
+    `verdict`, `commit`, `ran_at`, `failing_tests`.
+    Pass AND Fail rows both carry it — symmetry is
+    unconditional, not outcome-gated. The malformed-
+    input contract from story 2 is unchanged: a row
+    whose signer cannot be resolved returns
+    `RecordError::SignerMissing` and writes zero
+    rows, leaving any existing row untouched.
+
+    The acceptance test
+    `record_writes_resolved_signer_onto_test_runs_
+    row.rs` authored in THIS story pins the test_runs
+    symmetry. Story 2's subsequent amendment pass
+    (per research note 13) will satisfy this test by
+    wiring the resolver into `Recorder::record` and
+    adding the field to `test_runs` rows. Until that
+    amendment lands, this test is red — which is the
+    expected shape of the eventual-consistency
+    posture (note 13): Phase 0 stories propose
+    acceptance that triggers existing-story
+    amendments, and the whole corpus converges over
+    wall-clock time.
+
+    The same eventual-consistency note applies to
+    the `uat_pass_writes_resolved_signer_onto_
+    signing_row.rs` test vs story 1: this story
+    introduces the test; story 1's amendment adds
+    the field to the signing-row writer.
+
+  Error enum shape (auditable, terse).
+    ```
+    enum SignerError {
+        SignerMissing { consulted: Vec<Source> },
+        SignerInvalid { source: Source,
+                        reason: InvalidReason },
+        GitConfigRead { source: git2::Error },
+    }
+    enum Source  { Flag, Env, Git }
+    enum InvalidReason { Empty, WhitespaceOnly }
+    ```
+    `GitConfigRead` is for the rare case where libgit2
+    itself errors while reading config (not "user.email
+    is unset" — that is `SignerMissing` — but "the
+    config file is corrupt"). Downstream crates map
+    their own error enums to include these variants
+    (`UatError::SignerMissing`,
+    `RecordError::SignerMissing`,
+    `RuntimeError::SignerMissing` — exact shape is
+    each downstream crate's concern; the requirement
+    is that the distinction survives).
+
+  Exit-code contract at every CLI boundary (shared with
+  story 1).
+    - `SignerMissing` → exit 2. Same bucket as dirty-
+      tree / bad-id / store-unavailable: could-not-
+      verdict.
+    - `SignerInvalid` → exit 2. Same reason.
+    - `GitConfigRead` → exit 2.
+    - A resolved signer that passes validation and
+      lands on a row → exit follows the existing
+      contract (0 for Pass, 1 for Fail at `agentic
+      uat`, 0 / non-zero for `agentic ci record` per
+      story 2).
+
+  What this story explicitly does NOT do.
+    - Does NOT edit stories 1, 2, 16 to wire the
+      resolver into their writers. Those amendments
+      are separate passes per research note 13's
+      impact table; this story creates the acceptance
+      tests that will drive them.
+    - Does NOT change the `uat_signings` or
+      `test_runs` or `runs` table schemas at a Store
+      level — the tables are schemaless (ADR-0002),
+      so adding a field is a writer-side change, not
+      a migration.
+    - Does NOT introduce cryptographic signing, a
+      signing key, a keyring, or any provenance beyond
+      "record the identity string." Stronger
+      provenance is a later story.
+    - Does NOT add a `--no-signer` escape hatch, an
+      `AGENTIC_ALLOW_ANONYMOUS` env var, or any
+      bypass that writes an empty or `"unknown"`
+      signer. The gate is strict at the resolver
+      floor.
+    - Does NOT consult the git commit author of HEAD
+      (`git log -1 --format=%ae`) as a fallback.
+      Commit author and signer are deliberately
+      distinct identities (see "three identities"
+      section above). Conflating them would make the
+      signer dependent on who last committed, which
+      is rarely who is running the command.
+    - Does NOT pre-empt story 20's auto-merge git
+      identity decision. The dev's `git config
+      user.email` used by the host for auto-merged
+      commits is story 20's concern.
+
+  Relationship to stories 1, 2, 16, 19, 20.
+    - Story 1 (UAT signing): THIS story introduces the
+      acceptance test `uat_pass_writes_resolved_
+      signer_onto_signing_row.rs` and
+      `uat_pass_refuses_when_signer_unresolvable.rs`.
+      Story 1's subsequent amendment wires the
+      resolver into `Uat::run` and adds the field to
+      the signing-row writer. `depends_on` here
+      includes 1 because the test fixtures assume
+      story 1's row-writing shape exists.
+    - Story 2 (CI record): mirror of story 1. This
+      story introduces the acceptance tests; story
+      2's amendment wires in the resolver.
+    - Story 16 (runs schema): story 16 ALREADY
+      requires `signer` as a non-empty string on the
+      run row (see story 16's `runs_table_round_
+      trips_structured_run_row.rs`). This story
+      formalises the resolution chain and the
+      sandbox convention; story 16's guidance
+      already anticipates this story's formalisation
+      ("Story 18 formalises resolution and the
+      `sandbox:<model>@<run_id>` convention"). The
+      `runtime_writes_resolved_signer_onto_run_
+      row.rs` test pins that the runtime composes
+      the sandbox value rather than passing through
+      an outer env. `depends_on` here includes 16
+      because the run row's field exists by its
+      contract.
+    - Story 19 (agentic-runtime): immediate
+      downstream. Story 19's `ClaudeCodeRuntime`
+      must consume `agentic-signer` and inject the
+      composed `AGENTIC_SIGNER` into the child
+      process. This story does NOT block on 19
+      reaching green; the env-injection acceptance
+      test exercises the behaviour against the
+      runtime crate directly, which may require
+      story 19 to have landed its spawn path. If
+      story 19 is still red when this story is
+      test-built, the env-injection test sits red
+      alongside it — eventual consistency per note
+      13.
+    - Story 20 (agentic story build): downstream.
+      The host command composes `AGENTIC_SIGNER`
+      into the `docker run` env from the same
+      sandbox convention. Story 20's acceptance
+      will include a round-trip test proving the
+      signer written inside the sandbox matches
+      the convention the host composed — that is
+      story 20's concern, not this story's.
+
+  Proposal context.
+    This story is part of the Phase 0 batch (stories
+    16–21) proposed together per research note 10.
+    Stories 16 is already written; 17, 19, 20, 21 are
+    being authored in parallel with this one.
+    Amendments to existing stories (1, 2) triggered
+    by this story fire in parallel rather than
+    strictly after (note 13's "eventual consistency
+    replaces strict ordering"). Nothing is strictly
+    sequenced behind anything else; stories can sit
+    red across the corpus while the pipeline
+    converges.
+depends_on:
+- 1
+- 16
+related_files:
+- crates/agentic-signer/src/**
+- crates/agentic-uat/src/**
+- crates/agentic-ci-record/src/**
+- crates/agentic-runtime/src/**
+- crates/agentic-cli/src/**
+- docs/decisions/0006-sandboxed-story-hardening-loop.md
