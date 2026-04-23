@@ -8,7 +8,6 @@ outcome: |
   inner loop stopped.
 status: proposed
 patterns:
-- standalone-resilient-library
 - fail-closed-on-dirty-tree
 acceptance:
   tests:
@@ -26,7 +25,7 @@ acceptance:
       `<creds-path>:/work/.claude/.credentials.json:ro`,
       `<snapshot-path>:/work/snapshot.json:ro`, and
       `<runs-root>:/output/runs` (read-write), whose `-e` env
-      vars include `AGENTIC_SIGNER=sandbox:<model>@<run-id>` and
+      vars include `AGENTIC_SIGNER=sandbox:<model>@<run_id>` and
       `AGENTIC_RUN_ID=<run-id>`, whose image argument is
       `agentic-sandbox:<sha>`, and whose command tail is
       `agentic story build --in-sandbox <id>`. The order of
@@ -53,26 +52,6 @@ acceptance:
       agent "tried" when nothing ever ran. The typed refusal
       makes the failure machine-distinguishable from
       `InnerLoopExhausted` and `Crashed`.
-  - file: crates/agentic-store/tests/snapshot_for_story_returns_ancestor_closure.rs
-    justification: |
-      Proves the snapshot primitive's closure property: given a
-      `MemStore` seeded with `uat_signings` rows for a three-story
-      fixture chain (`leaf` depends_on `mid`, `mid` depends_on
-      `root`), each ancestor carrying a valid
-      `verdict=pass` row, `Store::snapshot_for_story(leaf_id)`
-      returns a `StoreSnapshot` containing exactly the two
-      ancestor signings (`root` and `mid`) and does NOT contain
-      the leaf's own signing (even if one exists) nor signings
-      for unrelated stories present in the same store. The
-      snapshot is deterministic: two calls against the same
-      store state return byte-identical JSON when serialised
-      with sorted keys. Without this, the sandbox's embedded
-      Store is seeded with either too little (ancestor gate
-      spuriously refuses inside the container) or too much (the
-      sandbox appears to know things about unrelated corpus
-      state, muddying the reproducibility receipt). This test
-      is the story 4 amendment's first proof point; story 5
-      mirrors it against `SurrealStore`.
   - file: crates/agentic-store/tests/restore_roundtrips_snapshot_into_embedded_store.rs
     justification: |
       Proves the restore primitive's idempotence and
@@ -122,7 +101,7 @@ acceptance:
       `agentic uat <id> --verdict pass`" and exiting cleanly,
       `StoryBuild::run_in_sandbox` writes (a) exactly one
       `uat_signings` row with `verdict: pass`, `signer:
-      "sandbox:<model>@<run-id>"`, `story_id: <id>`, and a
+      "sandbox:<model>@<run_id>"`, `story_id: <id>`, and a
       commit hash matching the branch tip; (b) exactly one
       `runs` row with `outcome: "green"`, `signer` matching
       the signing row, and `branch_state.commits` non-empty;
@@ -179,11 +158,11 @@ acceptance:
       commit (not `git merge --no-ff`, not cherry-pick of each
       commit), whose author identity is `git config
       user.email` resolved at host invocation time (NOT
-      `sandbox:<model>@<run-id>` — merge identity is dev's, per
+      `sandbox:<model>@<run_id>` — merge identity is dev's, per
       note 14), whose subject line is `story <id>: <title>`
       where `<title>` is the story YAML's `title` field, whose
       body contains `run-id: <run-id>`, `signer:
-      sandbox:<model>@<run-id>`, `start-sha: <40-char-hex>`,
+      sandbox:<model>@<run_id>`, `start-sha: <40-char-hex>`,
       and `runs-path: runs/<run-id>/run.json`. After the
       merge, the run row is updated: `branch_state.merged ==
       true` and `branch_state.merge_shas` contains exactly one
@@ -337,7 +316,7 @@ acceptance:
          named for the run id.
      11. `cat "$AGENTIC_RUNS_ROOT"/<run-id>/run.json`. Confirm
          `outcome: "green"`, `signer:
-         "sandbox:<model>@<run-id>"`, `branch_state.merged
+         "sandbox:<model>@<run_id>"`, `branch_state.merged
          == true`, `branch_state.merge_shas` contains exactly
          the squash commit's sha.
      12. `git log -1 --format='%ae'` on main — the author
@@ -431,7 +410,7 @@ guidance: |
   during the run and after the host's auto-merge), story 17's
   `build_config` (consumed here as the budget the runtime
   enforces), story 18's signer chain (the sandbox convention
-  `sandbox:<model>@<run-id>` lands on every row the inner loop
+  `sandbox:<model>@<run_id>` lands on every row the inner loop
   writes), and story 19's `Runtime` trait + `ClaudeCodeRuntime`
   (the inner loop's engine). This is the crown; nothing in Phase 0
   is finished until this ships green.
@@ -581,7 +560,7 @@ guidance: |
     command; the dev is the one running it. Treating the
     sandbox run as the dev's proxy keeps git's audit surface
     matching "who ran the command." The sandbox signer
-    (`sandbox:<model>@<run-id>`) lives on the `uat_signings`
+    (`sandbox:<model>@<run_id>`) lives on the `uat_signings`
     and `runs` rows (attestation layer), not on the git
     commit author line (authorship layer). Three distinct
     identities coexist in the corpus history — dev's git
@@ -639,7 +618,7 @@ guidance: |
     Body:
       ```
       run-id:    <uuid>
-      signer:    sandbox:<model>@<run-id>
+      signer:    sandbox:<model>@<run_id>
       start-sha: <40-char-hex>
       end-sha:   <40-char-hex>
       runs-path: runs/<run-id>/run.json
@@ -666,7 +645,7 @@ guidance: |
            /work/.claude/.credentials.json (claude creds, :ro)
            /work/snapshot.json (ancestor snapshot, :ro)
            /output/runs/<run-id>/ (emitted runs, :rw)
-        env: AGENTIC_SIGNER=sandbox:<model>@<run-id>,
+        env: AGENTIC_SIGNER=sandbox:<model>@<run_id>,
              AGENTIC_RUN_ID=<run-id>,
              AGENTIC_START_SHA=<main-tip-sha>
       → docker run <image>:<tag> ... agentic story build
@@ -807,7 +786,7 @@ guidance: |
 
   Sandbox signer — story 18's resolution chain composes
   here.
-    The host sets `AGENTIC_SIGNER=sandbox:<model>@<run-id>`
+    The host sets `AGENTIC_SIGNER=sandbox:<model>@<run_id>`
     in the container env. `<model>` is sourced from
     `story.build_config.models[0]` if set, else from the
     `Runtime` impl's default (story 19's default is
@@ -834,6 +813,14 @@ guidance: |
     additions); the container's restore rejects unknown
     schema versions loudly. Any mismatch aborts the
     container before claude spawns.
+
+    Host Store resolution — where `snapshot_for_story` reads
+    from. The host Store is resolved per story 1's rules:
+    `--store` flag → `AGENTIC_STORE` env var → default path
+    (`$XDG_DATA_HOME/agentic/store`). `StoryBuild::run`
+    composes the host Store via that resolution before
+    calling `Store::snapshot_for_story`; no new store-
+    resolution surface is introduced by this story.
 
     The snapshot ships as a read-only mount so a malicious
     or mis-authored in-container agent cannot modify it.
@@ -960,7 +947,7 @@ guidance: |
       This story does not re-pin build_config's shape.
     - Story 18 (signer identity) — hard dependency. The
       host sets `AGENTIC_SIGNER` in the container env
-      per the convention `sandbox:<model>@<run-id>`;
+      per the convention `sandbox:<model>@<run_id>`;
       story 18's resolution chain picks it up for every
       row the inner loop writes.
     - Story 19 (`Runtime` trait + `ClaudeCodeRuntime`) —
@@ -978,21 +965,31 @@ guidance: |
       to green. See note 13.
 
   Test file locations.
-    Library-level tests (eleven tests) live under
-    `crates/agentic-story-build/tests/`. Two supporting
-    tests for the snapshot primitive live under
-    `crates/agentic-store/tests/` (the story 4 amendment's
-    proof points, mirrored in story 5's amendment). One
-    binary-level test (`story_build_subcommand_wires_to_
-    library.rs`) lives under `crates/agentic-cli/tests/`
-    and exercises the argv-to-library wire using a stubbed
-    docker via `DOCKER_BINARY` env var pointing at a shell
-    script the test harness controls. Integration tests
-    that actually spawn docker are gated behind a
-    `#[ignore]` attribute and a `cargo test -- --ignored`
-    opt-in; the `acceptance.tests[]` entries above do NOT
-    require a running Docker daemon to execute — they stub
-    the runtime and the docker process.
+    Library-level tests live under
+    `crates/agentic-story-build/tests/`. The restore
+    supporting test
+    (`restore_roundtrips_snapshot_into_embedded_store.rs`)
+    lives under `crates/agentic-store/tests/` — it is
+    distinct from story 4's own
+    `restore_roundtrips_snapshot.rs` trait-level test and
+    exercises the embedded-store path this story needs.
+    The closure-property test for `snapshot_for_story`
+    itself (`snapshot_for_story_returns_ancestor_closure.rs`)
+    is NOT listed in this story's `acceptance.tests[]` —
+    it is owned by story 4 (the trait owner) under the
+    test-file-1-to-1-binding rule, and this story consumes
+    that primitive as a library-level dependency proven by
+    story 4's amendment. One binary-level test
+    (`story_build_subcommand_wires_to_library.rs`) lives
+    under `crates/agentic-cli/tests/` and exercises the
+    argv-to-library wire using a stubbed docker via
+    `DOCKER_BINARY` env var pointing at a shell script
+    the test harness controls. Integration tests that
+    actually spawn docker are gated behind a `#[ignore]`
+    attribute and a `cargo test -- --ignored` opt-in; the
+    `acceptance.tests[]` entries above do NOT require a
+    running Docker daemon to execute — they stub the
+    runtime and the docker process.
 
   Why this story is the crown of Phase 0.
     Every other Phase 0 story ships a primitive; this one

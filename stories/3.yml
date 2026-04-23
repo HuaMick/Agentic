@@ -558,7 +558,6 @@ guidance: |
 depends_on:
 - 1
 - 2
-- 21
 related_files:
 - crates/agentic-dashboard/src/**
 - crates/agentic-cli/src/**

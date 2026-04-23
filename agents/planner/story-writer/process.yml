@@ -48,6 +48,24 @@ workflow:
             Against schema (required fields non-empty, correct types). Against
             anti-patterns. Against splitting rule. Confirm every referenced
             pattern exists.
+
+            Cross-corpus invariants — run on EVERY write or amend, not just
+            when a reviewer asks. Each has a named rule under `guidance.rules`:
+              1. Test-file 1-to-1 binding: every `acceptance.tests[].file`
+                 value appears in exactly one story across `stories/*.yml`.
+                 See `test-file-one-to-one`.
+              2. Test-file path shape: every `acceptance.tests[].file` matches
+                 `crates/<crate>/tests/<name>.rs` OR `scripts/verify/<name>.sh`.
+                 No YAML, markdown, or other shape. See `test-file-path-shape`.
+              3. `depends_on` DAG acyclicity: after the edit, the graph formed
+                 by all `depends_on` edges across the corpus is acyclic.
+                 See `depends-on-acyclic`.
+              4. `patterns` / guidance coherence: a pattern listed in
+                 `patterns:` must not be explicitly carved out as
+                 non-applicable in the story's own `guidance`, and
+                 vice-versa. See `patterns-guidance-coherence`.
+
+            Any failure here stops the write. Fix the story, then re-validate.
         - step: Write or edit the file(s). Stop.
           detail: Do not run tests, modify code, or touch anything outside stories/ and patterns/.
 
@@ -67,6 +85,19 @@ workflow:
             - Stale proof: healthy stories whose content diverges from evidence.
             - Guidance restating a pattern: extract to pattern.
             - Guidance restating another story: merge or dedupe.
+            - Test-file duplication across stories: any `acceptance.tests[].file`
+              value that appears in 2+ stories. See `test-file-one-to-one`.
+            - Test-file path-shape violations: any `acceptance.tests[].file`
+              not matching `crates/<crate>/tests/*.rs` or `scripts/verify/*.sh`.
+              See `test-file-path-shape`.
+            - `depends_on` cycles: build the directed graph from every story's
+              `depends_on` edges and run a DFS; any cycle is a corpus-level
+              defect. See `depends-on-acyclic`.
+            - Pattern / guidance contradictions: for every story whose
+              `patterns:` names a pattern X, grep its `guidance` for language
+              that carves X out ("does not apply", "not X-shaped", "not a X");
+              and conversely, a guidance carve-out whose pattern appears in
+              `patterns:`. See `patterns-guidance-coherence`.
         - step: Produce a plan.
           detail: See agents/assets/definitions/audit-mode-protocol.yml.
         - step: Confirm with user.
@@ -160,6 +191,93 @@ guidance:
         that patch each other; the DAG turns into a briar patch. With
         it, each story stays the single owner of its domain and
         defect-history lives inside the story that owns the behaviour.
+    - name: test-file-one-to-one
+      detail: |
+        Every `acceptance.tests[].file` value must appear in exactly ONE
+        story across `stories/*.yml`. Before writing or amending any
+        story's `acceptance.tests[]`, enumerate all `file:` values across
+        the current corpus (glob `stories/*.yml`, grep `file:`) and refuse
+        to introduce a file that already exists in another story.
+
+        Why: the schema and `stories/README.md` both pin 1-to-1 binding.
+        A shared test file means two stories compete for ownership of
+        the same red->green evidence — test-builder cannot scaffold it
+        without collision, and `agentic uat` cannot attribute the result
+        to a single story.
+
+        Prior failure: Phase 0 batch wrote
+        `snapshot_for_story_returns_ancestor_closure.rs` into both
+        story 4 and story 20, and the three `load_*_retired_*` tests
+        into both story 6 and story 21.
+    - name: test-file-path-shape
+      detail: |
+        Every `acceptance.tests[].file` must match one of:
+          - `crates/<crate>/tests/<name>.rs`
+          - `scripts/verify/<name>.sh`
+
+        YAML files, markdown, fixtures, data files, and any other path
+        shape are rejected. `stories/README.md` pins these two locations
+        as canonical; test-builder has no way to author a scaffold for
+        anything else, and `agentic story audit` has no way to verify a
+        fixture the way it verifies a test run.
+
+        If a story needs to pin a data-migration artefact or a fixture,
+        the story's acceptance test is a `scripts/verify/<name>.sh` or a
+        `crates/<crate>/tests/<name>.rs` that LOADS the fixture and
+        asserts its shape — not the fixture path itself.
+
+        Prior failure: Phase 0's story 21 listed `stories/7.yml`,
+        `stories/8.yml`, `stories/14.yml` as acceptance tests for its
+        retirement-backfill contract. Those are fixture YAMLs, not tests.
+    - name: depends-on-acyclic
+      detail: |
+        After every proposed edit to any story's `depends_on`, the
+        directed graph formed by all `depends_on` edges in the current
+        corpus must be acyclic. Run a DFS (or equivalent) across
+        `stories/*.yml` before committing the edit. Reject cycles.
+
+        Story 6 itself pins
+        `load_cycle_in_depends_on_is_rejected.rs` as an acceptance test
+        — the loader refuses to load a corpus containing a cycle. An
+        edit that adds a cycle is an edit that makes the corpus
+        unloadable once story 6's contract ships.
+
+        Amendment sequencing — eventual consistency. When an amendment
+        is authored because an upstream story's contract shifted, the
+        amendment's test set and guidance capture the new contract; the
+        amendment's `depends_on` stays AS-IT-WAS. Amended stories do
+        NOT declare `depends_on` on their triggering new story — both
+        sides sit red until the pipeline converges. Back-edges encode
+        a strict ordering that contradicts the eventual-consistency
+        posture established in
+        `docs/research/story_tree/13-existing-stories-impact.md`
+        (section "Amendment sequencing — eventual consistency").
+
+        Prior failure: Phase 0 amendments added back-edges
+        (story 1 -> 18, story 4 -> 20, story 6 -> 17 + 21, ...)
+        producing a 14-node strongly-connected component.
+    - name: patterns-guidance-coherence
+      detail: |
+        If a story's `patterns:` list includes pattern X, the story's
+        `guidance` must NOT say "this story does not apply pattern X"
+        or equivalent carve-out. Conversely, if the guidance takes the
+        time to explain a named pattern is inapplicable, that pattern's
+        ID must NOT appear in `patterns:`.
+
+        Before committing a story with a `patterns:` field, read each
+        referenced pattern's own `when_to_use` (in `patterns/<id>.yml`)
+        AND search the story's own guidance for language that
+        explicitly carves out non-application of that pattern ("does
+        not apply", "not X-shaped", "is not a X story", "unlike X").
+        If the guidance says "does not apply" for a pattern the field
+        claims, refuse the write.
+
+        Prior failure: Phase 0's story 20 declared
+        `patterns: [standalone-resilient-library]` while its own
+        guidance (around lines 488–495) said the crate is NOT
+        standalone-resilient-library-shaped because it's orchestration.
+        A self-contradiction a close read catches but a field-filling
+        pass does not.
     - name: uat-first-fence
       detail: |
         Before finalising any story, draft its `acceptance.uat` FIRST. If
@@ -243,6 +361,9 @@ guidance:
     - Guidance restates a pattern that exists in patterns/.
     - Guidance restates another story's guidance.
     - Near-duplicate story or pattern creation (search step failed or was skipped).
+    - "Writing `acceptance.tests[].file` values without enumerating existing `file:` values across the corpus first — the failure mode behind duplicated test files (see `test-file-one-to-one`) and fixture-paths-as-tests (see `test-file-path-shape`)."
+    - "Adding a `depends_on` back-edge from an amended story onto the new story that triggered its amendment. The amendment captures the new contract; the edge stays as-it-was. See `depends-on-acyclic` and the eventual-consistency posture in docs/research/story_tree/13-existing-stories-impact.md."
+    - "Filling `patterns:` from pattern titles alone without reading the pattern's `when_to_use` AND the story's own guidance for explicit non-application language. See `patterns-guidance-coherence`."
     - "Vague acceptance (\"the system works correctly\")."
     - Optimistic UAT without observable checks.
     - Single aggregate justification for multiple tests — each test gets its own.

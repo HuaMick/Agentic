@@ -11,6 +11,8 @@ required_reading:
     reason: Copy-paste skeleton for new stories.
   - path: docs/guides/pattern-template.yml
     reason: Copy-paste skeleton for new patterns.
+  - path: stories/README.md
+    reason: Corpus conventions — test-file 1-to-1 binding and the two canonical test-file locations (`crates/<crate>/tests/*.rs`, `scripts/verify/*.sh`). Load-bearing for cross-corpus invariant checks.
   - path: CLAUDE.md
     reason: See agents/assets/guidelines/reference-claude-md.yml.
 

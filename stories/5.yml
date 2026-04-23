@@ -320,10 +320,15 @@ guidance: |
     `snapshot_for_story` / `restore` on the production backend,
     so `SurrealStore` must implement them at parity with
     `MemStore` (which story 4's amendment pins for the in-
-    memory impl).
+    memory impl). This story is UPSTREAM of story 20; per the
+    eventual-consistency posture documented in
+    `docs/research/story_tree/13-existing-stories-impact.md`,
+    this story's `depends_on` stays as-it-was (story 4 only)
+    and both sides sit red in parallel until the pipeline
+    converges. No back-edge is added from this story onto
+    story 20.
 depends_on:
 - 4
-- 20
 related_files:
 - crates/agentic-store/src/surrealstore.rs
 - crates/agentic-store/src/lib.rs

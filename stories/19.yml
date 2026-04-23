@@ -803,14 +803,15 @@ guidance: |
       pin the real id flow.
 
     - Does NOT resolve the signer
-      identity. Story 18 owns the three-
+      identity. Story 18 owns the four-
       tier resolution chain (CLI flag →
-      env var → git config or sandbox
-      default). The runtime accepts the
-      resolved signer as an opaque
-      non-empty string via
-      `RunConfig.signer` and passes it
-      through to the recorder.
+      `AGENTIC_SIGNER` env var → `git
+      config user.email` → typed
+      `SignerMissing` error). The
+      runtime accepts the resolved
+      signer as an opaque non-empty
+      string via `RunConfig.signer` and
+      passes it through to the recorder.
 
     - Does NOT validate `build_config`
       beyond extracting

@@ -339,10 +339,14 @@ guidance: |
     shape is a behavioural invariant). Story 20 is the primary
     consumer: its sandbox calls `snapshot_for_story` on the
     host Store and `restore` on the embedded in-container
-    Store. This story's `depends_on: [20]` reflects that the
-    snapshot/restore contract shape is driven by story 20's
-    needs; the trait extension exists to serve that consumer.
-depends_on:
-- 20
+    Store. This story is UPSTREAM of story 20; story 20
+    triggered this amendment (the snapshot/restore contract
+    shape is driven by story 20's needs). Per the eventual-
+    consistency posture documented in
+    `docs/research/story_tree/13-existing-stories-impact.md`,
+    this story's `depends_on` stays as-it-was; both sides sit
+    red in parallel until the pipeline converges. No back-edge
+    is added from this story onto story 20.
+depends_on: []
 related_files:
 - crates/agentic-store/src/lib.rs

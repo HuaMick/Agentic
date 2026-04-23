@@ -673,12 +673,20 @@ guidance: |
     supersession semantics (the dashboard canopy
     view and the ancestor gate do).
 
+    This story is UPSTREAM of both 17 and 21; both
+    triggered this loader + schema amendment. Per
+    the eventual-consistency posture documented in
+    `docs/research/story_tree/13-existing-stories-impact.md`,
+    this story's `depends_on` stays as-it-was (empty
+    — the loader depends on nothing) and all three
+    sides sit red in parallel until the pipeline
+    converges. No back-edge is added from this story
+    onto story 17 or story 21.
+
     Stories 4 and 5 are unrelated at runtime (the
     loader does not persist anything) but share
     Phase 2 acceptance context.
-depends_on:
-- 17
-- 21
+depends_on: []
 related_files:
 - crates/agentic-story/src/**
 - schemas/story.schema.json

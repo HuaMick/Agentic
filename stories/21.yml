@@ -10,53 +10,6 @@ status: proposed
 patterns: []
 acceptance:
   tests:
-  - file: crates/agentic-story/tests/load_retired_status_is_accepted.rs
-    justification: |
-      Proves the schema extension at the loader boundary: a
-      story file whose `status` is `retired` and which carries
-      an optional `superseded_by: <int>` pointing at an existing
-      sibling story loads cleanly into a typed `Story` value
-      whose `status` field reads back as `Retired` and whose
-      `superseded_by` reads back as `Some(<id>)`. A retired
-      story that omits `superseded_by` also loads cleanly
-      (the field is optional — a terminal retirement with no
-      successor is a legitimate shape). A retired story may
-      carry an optional `retired_reason: String` prose field;
-      when present it round-trips verbatim, when absent it
-      reads back as `None`. Without this, the vocabulary
-      introduced by this story (retired, supersession, era)
-      has no parser to stand on and every downstream
-      consumer would have to re-invent the YAML shape.
-  - file: crates/agentic-story/tests/load_superseded_by_pointing_at_unknown_id_is_rejected.rs
-    justification: |
-      Proves referential integrity on supersession edges at
-      directory-load time: a `stories/` directory where one
-      story declares `superseded_by: 999` but no
-      `stories/999.yml` exists is rejected with a typed
-      `StoryError::SupersededByUnknown { source_id, target_id
-      }` naming both ids. The check runs in the directory
-      path (not the single-file path, which cannot
-      meaningfully validate cross-file edges — same rule
-      story 6 applies to `depends_on`). Without this, a
-      retired story whose successor was itself retired-and-
-      deleted (or mistyped) would silently bind to nothing,
-      and the dashboard's canopy rendering plus the ancestor
-      gate's chain walk would follow a dangling pointer.
-  - file: crates/agentic-story/tests/load_superseded_by_cycle_is_rejected.rs
-    justification: |
-      Proves cycle defence on supersession edges: a `stories/`
-      directory where `A.superseded_by = B`,
-      `B.superseded_by = C`, and `C.superseded_by = A` (or the
-      degenerate self-loop `A.superseded_by = A`) is rejected
-      with a typed `StoryError::SupersededByCycle` naming at
-      least one participating id. Supersession cycles are
-      structurally distinct from `depends_on` cycles (same
-      graph, different edge label) and the loader rejects
-      both independently. Without this, the ancestor gate's
-      chain-walk (see tests below) would loop forever when
-      evaluating health on a descendant whose retired
-      ancestor pointed at a cyclically-linked successor —
-      strictly worse than a loud load-time refusal.
   - file: crates/agentic-dashboard/tests/health_frontier_hides_retired.rs
     justification: |
       Proves the frontier lens excludes retired stories: given
@@ -151,60 +104,33 @@ acceptance:
       descendant promote on an unproven base, which is
       precisely the loophole story 11's transitive check
       closed for non-retired chains.
-  - file: stories/7.yml
+  - file: crates/agentic-story/tests/retired_fossil_files_load_with_expected_shape.rs
     justification: |
-      Proves the retroactive backfill for hard-deleted story
-      7: the file exists on disk with `id: 7`,
-      `status: retired`, `superseded_by: 15`, and a
-      non-empty `retired_reason` naming why 7 was folded
-      into 15 (the 2026-04-20 consolidate-over-fragment pass
-      documented in story 15's guidance). The file passes
-      schema validation via the loader, is included in
-      `agentic stories health --canopy` output grouped with
-      story 15, is excluded from the default frontier view,
-      and the ancestor gate treats any descendant that once
-      depended on 7 as redirected to 15. Without this, the
-      reproducibility story for the deleted-stories fossils
-      has no anchor on disk: the commits recording story 7's
-      retirement (see `e051fea`, `2e100f7`) remain in git
-      history but the corpus pretends the id was never used,
-      and future readers cannot see what 15 supersedes without
-      spelunking git log.
-  - file: stories/8.yml
-    justification: |
-      Proves the retroactive backfill for hard-deleted story
-      8: the file exists on disk with `id: 8`,
-      `status: retired`, `superseded_by: 1`, and a non-empty
-      `retired_reason` naming the 2026 fold into story 1 (the
-      consolidation captured by commit `e051fea`,
-      "Consolidate corpus: fold story 8 into 1+3"). The user
-      direction for this story picks `1` as the single
-      successor id; the `1+3` note in research folder note 13
-      is acknowledged in `retired_reason` prose but does not
-      manifest as a multi-successor edge (the schema does not
-      support multi-successor, by design — see guidance).
-      Without this backfill, story 8's retirement is a
-      fossil with no story to attribute to, and the
-      claim "8 was folded into 1" lives only in a commit
-      subject line.
-  - file: stories/14.yml
-    justification: |
-      Proves the retroactive backfill for hard-deleted story
-      14: the file exists on disk with `id: 14`,
-      `status: retired`, `superseded_by: 15`, and a non-empty
-      `retired_reason` naming the 2026-04-20 claude-as-user
-      vs claude-as-component decision (documented in
-      `docs/reviews/claude-as-user-audit.md` and in story
-      15's guidance under "Story 14 (retired 2026-04-20)").
-      The file passes schema validation, groups with 15 and
-      7 in the canopy view, and the ancestor gate redirects
-      any descendant edge pointing at 14 through to 15.
-      Without this, the rationale for story 14's retirement
-      — the single most instructive retirement in the
-      corpus's history — has no on-disk anchor; the reader
-      sees the winning story 15 but not the losing contract
-      that taught the system to draw the library/runtime
-      boundary.
+      Proves the three retroactive backfill fixtures
+      (`stories/7.yml`, `stories/8.yml`, `stories/14.yml`)
+      exist on disk in the shape this story's backfill step
+      produces: each loads cleanly through the
+      `agentic-story` directory loader, each reads back with
+      `status: Retired`, each carries a `superseded_by`
+      pointing at an extant sibling story (7 → 15, 8 → 1,
+      14 → 15), and each carries a non-empty
+      `retired_reason` string. The test asserts the exact
+      successor ids above, asserts the three target ids
+      (15, 1, 15) resolve to loaded `Story` values in the
+      same corpus (i.e. referential integrity at the
+      supersession edges), and asserts the three fossils'
+      `retired_reason` fields are non-empty prose rather
+      than empty strings. Without this, the backfill step
+      could land YAMLs that pass schema validation in
+      isolation but drift from the successor assignments
+      authorised in this story's guidance, or could land
+      YAMLs with empty `retired_reason` fields that make
+      the fossil records functionally opaque to future
+      readers. The three fixture YAMLs themselves are
+      corpus artefacts (see guidance section "Backfill
+      successor choices" for the authoritative assignments);
+      this integration test is what pins them as loaded
+      shapes the loader-crate's type system recognises.
   uat: |
     Goal: convince yourself that the retired lifecycle is end-to-end
     — a story can be marked retired, the loader accepts it, the
@@ -416,6 +342,26 @@ guidance: |
     when this story ships proposed, and re-UATs once its
     own new tests pin the frontier/canopy behaviour.
 
+  Loader-side obligations (proven by story 6's amendment).
+    The three loader-side acceptance tests that pin the
+    retired-schema surface —
+    `crates/agentic-story/tests/load_retired_status_is_
+    accepted.rs`, `.../load_superseded_by_pointing_at_
+    unknown_id_is_rejected.rs`, and
+    `.../load_superseded_by_cycle_is_rejected.rs` — are
+    owned by story 6's amendment (story 6 is the loader and
+    schema owner). This story consumes those behaviours but
+    does not pin them in its own `acceptance.tests[]`; the
+    test-file 1-to-1-binding rule places them under story 6
+    only. When story 6's amendment reaches green, the
+    loader-side half of this story's contract is proven;
+    the remaining tests on this story's acceptance set
+    (chain-walk semantics in `agentic-uat`, frontier/canopy
+    rendering in `agentic-dashboard`, fossil YAMLs via the
+    `retired_fossil_files_load_with_expected_shape.rs`
+    integration test) are the retirement-lifecycle-specific
+    additions this story uniquely owns.
+
   Why `superseded_by` is single-id, not multi-id.
     Research folder note 13's successor table notes story 8's
     retirement as "8 → 1+3" — the content was folded into
@@ -612,13 +558,31 @@ guidance: |
         this story (the amendment may bundle or
         reference-by-file, at story-writer discretion).
       - Story 3 (dashboard) — amended for the frontier-vs-
-        canopy lens. The two dashboard tests from this
-        story's acceptance set (`health_frontier_hides_
-        retired.rs` and `health_canopy_shows_retired_
-        grouped_by_chain.rs`) can be moved into story 3's
-        acceptance set when that amendment is authored —
-        this story's acceptance tests are the PRIMARY
-        pinnings; story 3's amendment references them.
+        canopy lens. Story 3's amendment already authored
+        its own parallel dashboard tests
+        (`crates/agentic-dashboard/tests/frontier_view_
+        hides_retired.rs` and
+        `crates/agentic-dashboard/tests/canopy_view_shows_
+        retired_with_era_grouping.rs`) under test-file-
+        1-to-1-binding discipline. This story owns the
+        backfill + loader-side obligations (the retired
+        fossils on disk and the loader's acceptance of the
+        `retired` status and the `superseded_by` /
+        `retired_reason` fields); story 3 owns the
+        dashboard-side frontier/canopy rendering. The
+        acceptance tests kept on this story
+        (`health_frontier_hides_retired.rs` and
+        `health_canopy_shows_retired_grouped_by_chain.rs`)
+        are functionally parallel to story 3's but
+        differently-named, so the 1-to-1 binding holds on
+        each side; the tests pin the same behaviour from
+        the retirement-lifecycle side, while story 3's
+        tests pin it from the dashboard's frontier/canopy
+        API side. If a future consolidation pass moves
+        both pairs under story 3 (dashboard owner), this
+        story's guidance should be updated to reference
+        them as "proven by story 3's amendment"; for now
+        they remain parallel.
     Four touch-up (guidance-only, no status change):
     stories 9, 10, 13, 15 — research folder note 13
     details each. Story-writer handles those in a

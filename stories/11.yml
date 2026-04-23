@@ -633,7 +633,8 @@ guidance: |
     The gate applies only to the Pass attestation path.
 
   Relationship to story 21 (retirement lifecycle).
-    Direct dependency. Story 21 introduces the `retired` status
+    This story is UPSTREAM of story 21; story 21 triggered
+    this amendment. Story 21 introduces the `retired` status
     and the `superseded_by` edge; this story extends the
     ancestor gate to walk that edge. Story 21's schema edit
     (the `retired` enum value plus the optional
@@ -647,27 +648,30 @@ guidance: |
     (supersession edges load, retired rows hide from the
     frontier, canopy mode groups them). The two stories are
     intentionally coupled: neither is complete without the
-    other.
+    other. Per the eventual-consistency posture documented in
+    `docs/research/story_tree/13-existing-stories-impact.md`,
+    this story's `depends_on` stays as-it-was (1, 3, 6); no
+    back-edge is added from this story onto story 21, and
+    both sides sit red in parallel until the pipeline
+    converges.
 
-    Shipping order. Story 21 ships first (it proposes the
-    lifecycle); this amendment reaches `under_construction`
-    when story 21 reaches `proposed`, auto-revert-on-trigger
-    per the eventual-consistency posture documented in
-    research folder note 13. The amendment sits red until the
-    schema edit lands via story 6 and the gate-side
-    implementation reaches the chain-walking semantics pinned
-    by the new tests above. Re-UAT fires once all five new
-    tests are green alongside the original six; the story
-    returns to `healthy` via a fresh `uat_signings.verdict=pass`
-    row. No separate "pre-amendment baseline re-UAT" is
-    required — the eventual-consistency posture lets the
-    corpus converge over wall-clock time with multiple
-    stories simultaneously red.
+    Amendment sequencing. This amendment reaches
+    `under_construction` when story 21 reaches `proposed`,
+    auto-revert-on-trigger per the eventual-consistency
+    posture documented in research folder note 13. The
+    amendment sits red until the schema edit lands via story
+    6 and the gate-side implementation reaches the chain-
+    walking semantics pinned by the new tests above. Re-UAT
+    fires once all five new tests are green alongside the
+    original six; the story returns to `healthy` via a fresh
+    `uat_signings.verdict=pass` row. No separate "pre-
+    amendment baseline re-UAT" is required — the eventual-
+    consistency posture lets the corpus converge over wall-
+    clock time with multiple stories simultaneously red.
 depends_on:
 - 1
 - 3
 - 6
-- 21
 related_files:
 - crates/agentic-uat/src/**
 - crates/agentic-cli/src/**
