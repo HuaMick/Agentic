@@ -67,8 +67,17 @@ product library.
 - Depends on `claude` being installed and authenticated on the host. Our binary is useless without it. Mitigation: document this as a hard prerequisite; add a self-check at CLI startup.
 - Anthropic policy area to watch: they announced (March 2026) that subscriptions "no longer cover third-party tools" that proxy subscription auth into SaaS. Our usage — a local binary shelling out to a locally logged-in `claude` — is functionally indistinguishable from any script. Still, monitor.
 
+## Amendment (cloud posture, 2026-04-23)
+
+ADR-0006 introduces sandboxed execution — the dev's laptop launches a Docker container that runs one inner-loop story build. This ADR's original decision ("drive Claude via subprocess under the user's subscription") was authored when all execution happened on the dev's machine. It extends to the sandbox context under one condition: the sandbox mounts the authorised user's `~/.claude/.credentials.json` at launch from a per-user secret source (direct filesystem mount in Phase 0; GCP Secret Manager in Phase 1) and never persists those credentials to the sandbox image or long-lived disk.
+
+The scope clause above still holds in full inside the sandbox: `agentic-runtime` is the sole process that invokes `claude`; no product library (`agentic-uat`, `agentic-test-builder`, `agentic-ci-record`, `agentic-dashboard`, `agentic-store`, `agentic-story`) spawns an LLM. `--bare` remains forbidden. API-key fallback remains forbidden. Shared or team claude accounts are out of scope until a separate ADR addresses multi-user licensing.
+
+The policy-area-to-watch named at the bottom of "Given up" above (March 2026 Anthropic clarification on third-party SaaS tools) still applies. BYO-credentials-mounted-into-a-container-the-user-launched is functionally indistinguishable from BYO-credentials-used-by-a-local-script; monitor for further policy drift.
+
 ## Related
 
 - ADR-0001 (Rust rebuild): no official Rust SDK was a constraint factored into language choice.
+- ADR-0006 (sandboxed story-hardening loop): the cloud posture amendment above composes with this ADR's `Runtime` trait.
 - `crates/agentic-runtime/README.md`: the `Runtime` trait and the `ClaudeCodeRuntime` impl.
 - Story 1's `verify_standalone_resilience.rs` test does NOT spawn agents — that's deliberate. The verify path must work without any runtime at all.
