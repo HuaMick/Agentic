@@ -56,3 +56,11 @@ git2 = { version = "0.19", default-features = false }
 # types are expected to serialise via serde; the test probes that
 # from the allowed-deps-only perspective. Dev-scope only.
 serde = { version = "1", features = ["derive"] }
+
+# Story 19 scaffolds: `spawn_claude_session` is async (story 19 guidance
+# pins `async fn` in the `Runtime` trait). Every story 19 test is
+# `#[tokio::test(flavor = "current_thread")]` and needs the `macros`
+# + `rt` features from the workspace tokio dep. Dev-scope only; the
+# runtime crate's own `[dependencies]` remains empty until build-rust
+# implements the runtime per this story's acceptance tests.
+tokio = { workspace = true, features = ["macros", "rt"] }
