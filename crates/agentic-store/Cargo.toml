@@ -26,3 +26,13 @@ serde_json.workspace = true
 # Story 5: tests root the SurrealStore at a temp dir for isolation and
 # drop-based cleanup.
 tempfile.workspace = true
+
+# Story 16 scaffolds: the two `runs_table_*` tests exercise the `runs`
+# table through the `RunRecorder` API that lives in `agentic-runtime`,
+# because the story places those tests here (at the Store boundary
+# where the row shape is parsed) rather than in `agentic-runtime`'s
+# own tests. `agentic-runtime` has `agentic-store` as a dev-dep for
+# `MemStore`; reciprocally pulling `agentic-runtime` in here as a
+# dev-dep is a dev-graph cycle that Cargo permits because neither
+# edge is a normal (runtime) dependency. Dev-scope only.
+agentic-runtime = { path = "../agentic-runtime" }

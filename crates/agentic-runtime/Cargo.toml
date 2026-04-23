@@ -1,0 +1,58 @@
+[package]
+name = "agentic-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Story 16 shell bootstrap: the crate exists so the failing test scaffolds
+# in `tests/` can be discovered and run via
+# `cargo test --package agentic-runtime`. No runtime dependencies are
+# declared — the public surface (`RunRecorder`, `TraceTee`, `Outcome`,
+# `RunRecorderError`, `RunRecorderConfig`, `IterationSummary`) is
+# build-rust's to author once red-state evidence is on disk. The
+# scaffolds use compile-red as their natural failure path: every test
+# `use`s at least one symbol the crate does not yet declare, so
+# `cargo check` fails with a rustc "unresolved import" error before
+# any runtime code runs.
+
+[dependencies]
+
+[dev-dependencies]
+# Story 16 scaffolds: tests construct a `MemStore` (the standalone-
+# resilient dependency floor) and assert that the recorder writes rows
+# to the `runs` table through the `Store` trait.
+agentic-store = { path = "../agentic-store" }
+
+# Story 16 scaffolds: every test reads the `runs` row back as
+# `serde_json::Value` and compares against an expected shape. Already a
+# workspace dep; dev-scope visibility here.
+serde_json.workspace = true
+
+# Story 16 scaffolds: every test roots its trace files under a
+# `TempDir` so no test ever writes to the live filesystem. The
+# standalone-resilience scaffold names `tempfile` explicitly in its
+# dependency-floor claim.
+tempfile.workspace = true
+
+# Story 16 scaffold `run_recorder_story_yaml_snapshot_is_sha256_at_launch.rs`:
+# the test computes its own SHA-256 over the fixture YAML bytes and
+# compares to the `story_yaml_snapshot` field in the recorded row.
+# `sha2` is the reference hasher — matching the pattern story 14's
+# scaffolds used for the same cross-check. Dev-scope only.
+sha2 = "0.10"
+
+# Story 16 scaffold `run_recorder_captures_branch_state_from_git_repo.rs`:
+# the test initialises a tempdir git repo with a baseline commit,
+# drives the recorder's `start_branch` / `finish_branch` against it,
+# and reads SHAs back from the repo to compare with the row's
+# `branch_state.start_sha` / `end_sha` / `commits`. Same libgit2
+# binding pin used elsewhere in the workspace. Dev-scope only.
+git2 = { version = "0.19", default-features = false }
+
+# Story 16 scaffold `run_recorder_standalone_resilience.rs`: the test
+# names `serde` as part of the allowed dependency floor (see story 16
+# guidance, "Standalone-resilience posture"). The recorder's public
+# types are expected to serialise via serde; the test probes that
+# from the allowed-deps-only perspective. Dev-scope only.
+serde = { version = "1", features = ["derive"] }

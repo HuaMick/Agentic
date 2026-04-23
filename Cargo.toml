@@ -8,6 +8,14 @@ members = [
     "crates/agentic-dashboard",
     "crates/agentic-cli",
     "crates/agentic-test-builder",
+    # Story 16 un-defer: shell-only. The `agentic-runtime` crate hosts the
+    # `RunRecorder` + `TraceTee` + `Outcome` types. Its `Cargo.toml` declares
+    # no runtime dependencies yet; its `src/lib.rs` is empty. The crate is
+    # admitted to the workspace so story 16's failing test scaffolds under
+    # `crates/agentic-runtime/tests/` are discoverable by `cargo check
+    # --workspace --tests` and the red-state probe can fire. The real
+    # `[dependencies]` block lands when build-rust picks the story up.
+    "crates/agentic-runtime",
 ]
 
 [workspace.package]

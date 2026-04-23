@@ -47,9 +47,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentic-runtime"
+version = "0.1.0"
+dependencies = [
+ "agentic-store",
+ "git2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "agentic-store"
 version = "0.1.0"
 dependencies = [
+ "agentic-runtime",
  "serde_json",
  "surrealkv",
  "tempfile",
