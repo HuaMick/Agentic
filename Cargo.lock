@@ -88,6 +88,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentic-story-build"
+version = "0.1.0"
+dependencies = [
+ "agentic-runtime",
+ "agentic-store",
+ "git2",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "agentic-test-builder"
 version = "0.1.0"
 dependencies = [

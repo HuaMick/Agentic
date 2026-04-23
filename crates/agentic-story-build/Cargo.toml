@@ -1,0 +1,61 @@
+[package]
+name = "agentic-story-build"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Story 20 shell bootstrap: the crate exists so the failing test scaffolds
+# in `tests/` can be discovered and run via
+# `cargo test --package agentic-story-build`. No runtime dependencies are
+# declared — the public surface (`StoryBuild`, `StoryBuildError`,
+# `BuildConfig`, `RunOutcome`, `MergeReport`, and the `--in-sandbox`
+# entry) is build-rust's to author once red-state evidence is on disk.
+# The scaffolds use compile-red as their natural failure path: every
+# test `use`s at least one symbol the crate does not yet declare, so
+# `cargo check` fails with a rustc "unresolved import" error before
+# any runtime code runs.
+
+[dependencies]
+
+[dev-dependencies]
+# Story 20 scaffolds: every test constructs a `MemStore` via the
+# `Store` trait (or queries back rows written by the crate's
+# container-side seeding path) and asserts on the resulting row shape.
+# Matches the dev-graph edge story 16 established between
+# `agentic-runtime` and `agentic-store`; the reciprocal edge is
+# already declared on the store side.
+agentic-store = { path = "../agentic-store" }
+
+# Story 20 scaffolds: the in-sandbox green/exhausted/crashed tests
+# each drive a stub `Runtime` impl and compare the resulting
+# `runs` / `uat_signings` rows against expectations. The runtime
+# crate hosts the `Runtime` trait + `MockRuntime` + the `Outcome`
+# variants those tests consume through the trait boundary. Dev-scope
+# only.
+agentic-runtime = { path = "../agentic-runtime" }
+
+# Story 20 scaffolds: the `host_auto_merges_green_run_diff_as_squash_commit`,
+# `host_refuses_merge_on_start_sha_drift`, and
+# `host_records_failed_run_without_merging` scaffolds initialise
+# tempdir git repos via `git2`, make real commits, and compare
+# SHA resolution between the run row's `branch_state` and the
+# repo's HEAD. Same libgit2 pin the rest of the workspace uses.
+git2 = { version = "0.19", default-features = false }
+
+# Story 20 scaffolds: every tempdir-based test roots its fixture
+# runs root and repo under a `TempDir` so the tests never touch
+# the live filesystem. Named in the standalone-resilience-adjacent
+# dev-dependency floor of every other story's scaffold set.
+tempfile.workspace = true
+
+# Story 20 scaffolds: every test reads run rows / evidence back as
+# `serde_json::Value` and compares against expected shapes. Already a
+# workspace dep; dev-scope visibility here.
+serde_json.workspace = true
+
+# Story 20 scaffolds: the in-sandbox tests drive an async `Runtime`
+# impl via `spawn_claude_session`, so every test is
+# `#[tokio::test(flavor = "current_thread")]`. Same feature set
+# story 19 pins for its async tests.
+tokio = { workspace = true, features = ["macros", "rt"] }
