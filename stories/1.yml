@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic uat <id> --verdict <pass|fail>` against a
   story and receives a commit-signed verdict that is the only path by
   which a story's status on disk becomes `healthy`.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -16,19 +16,30 @@ acceptance:
       whose UAT walkthrough executes successfully (driven by a stub
       `UatExecutor` that returns Pass) on a clean working tree,
       `Uat::run` returns a Pass verdict, writes exactly one row to
-      `uat_signings` with verdict=pass and the current commit hash,
+      `uat_signings` with verdict=pass, the current commit hash, AND
+      a non-empty `signer` field equal to the resolved signer
+      identity (per story 18's four-tier chain: `--signer` flag /
+      `AGENTIC_SIGNER` env / `git config user.email` / typed error),
       and rewrites the story YAML so `status: healthy`. Without this
-      the gate cannot promote a story at all — and promotion-to-
-      healthy is the whole point of the command.
+      the gate cannot promote a story at all — promotion-to-healthy
+      is the whole point of the command — and the signing row would
+      lack the attribution string every downstream reader
+      (dashboard, audit, `agentic story build` post-merge UI) now
+      relies on to tell who attested the verdict.
   - file: crates/agentic-uat/tests/uat_fail.rs
     justification: |
       Proves the failure path at the library boundary: given a stub
       `UatExecutor` that returns Fail, `Uat::run` returns a Fail
-      verdict, writes a `uat_signings` row with verdict=fail and the
-      current commit, and does NOT mutate the story YAML's `status`
-      field. Without this a Fail could either silently promote
-      (catastrophic) or leave no audit trail (we'd lose the negative
-      evidence the dashboard needs to compute "fell from grace").
+      verdict, writes a `uat_signings` row with verdict=fail, the
+      current commit, AND a non-empty `signer` field equal to the
+      resolved signer identity (same four-tier chain as the pass
+      path — attribution is unconditional on verdict, pinning the
+      symmetry so a red row is as attributable as a green one), and
+      does NOT mutate the story YAML's `status` field. Without this
+      a Fail could either silently promote (catastrophic), leave no
+      audit trail (we'd lose the negative evidence the dashboard
+      needs to compute "fell from grace"), or land an anonymous
+      Fail row the dashboard cannot attribute to a source.
   - file: crates/agentic-uat/tests/uat_fail_closed_dirty_tree.rs
     justification: |
       Proves the fail-closed contract on a dirty git working tree at
@@ -197,9 +208,13 @@ guidance: |
 
   Architectural boundary — see the standalone-resilient-library
   pattern. Allowed dependencies for `agentic-uat`: `agentic-story`,
-  `agentic-store`, `agentic-events`, `git2`. Forbidden: anything in
-  `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`, or the
-  CLI crate itself. The standalone-resilience test enforces this.
+  `agentic-store`, `agentic-events`, `agentic-signer`, `git2`.
+  Forbidden: anything in `agentic-orchestrator`, `agentic-runtime`,
+  `agentic-sandbox`, or the CLI crate itself. The standalone-
+  resilience test enforces this. `agentic-signer` is itself a
+  standalone-resilient library (story 18's contract) with a
+  dependency floor of `git2` + stdlib, so importing it does not
+  breach this crate's own standalone posture.
 
   UAT executor is a trait, not a concrete agent.
     The library defines `trait UatExecutor { fn execute(&self, story:
@@ -244,11 +259,38 @@ guidance: |
       - `story_id`: integer, matches `stories/<id>.yml`.
       - `verdict`: `"pass"` | `"fail"` (lowercase string).
       - `commit`: full git SHA of HEAD at signing time.
+      - `signer`: non-empty identity string resolved by
+        `agentic-signer` (see "Signer composition" below).
       - `signed_at`: RFC3339 UTC timestamp.
     The dashboard (story 3) reads this table to compute `healthy` /
     `unhealthy`. We deliberately do NOT include the transcript
     here; transcript bytes go to a separate evidence blob (later
     story) so the signing table stays small and queryable.
+
+  Signer composition (coexists with the commit-hash contract).
+    Story 18 introduces a sibling identity alongside the commit
+    hash: a `signer` string resolved by the `agentic-signer` crate
+    through a four-tier chain (`--signer` flag → `AGENTIC_SIGNER`
+    env → `git config user.email` → typed `SignerMissing` error).
+    Every `uat_signings` row `Uat::run` writes now carries BOTH:
+    the commit SHA (attesting "which tree state was attested") and
+    the signer string (attesting "which identity attested it").
+    The two are orthogonal — the commit is a tree-state pin, the
+    signer is an attribution — and both are mandatory on every
+    row, Pass or Fail. `Uat::run` takes a `SignerSource` input
+    (either `Resolve`, delegating to `agentic_signer::Signer::
+    resolve`, or an explicit pre-resolved `Signer` for tests) and
+    surfaces resolution failure as `UatError::SignerMissing`,
+    which the CLI maps to exit 2 alongside the existing dirty-
+    tree and bad-id failures. The signer field is additive: no
+    existing field shape changes, and the schemaless Store
+    (ADR-0002) absorbs the new column without migration. Per
+    ADR-0006 §8 the three identities that can land in corpus
+    history (sandbox convention `sandbox:<model>@<run_id>` on
+    agent-signed rows, dev email on human-signed rows, and the
+    git commit author on an auto-merge commit) remain distinct —
+    this story's contract only owns the row-side signer; the
+    composition is `agentic-signer`'s responsibility.
 
   Promotion contract.
     On a Pass verdict AND only on a Pass verdict, the library
@@ -276,16 +318,28 @@ guidance: |
   Signing semantics.
     "Signed by a commit" means the verdict row records the full
     SHA of HEAD at the moment of signing, and the signing happened
-    on a clean tree. We do not use GPG or cryptographic signatures
-    in this story. If stronger provenance is needed later, extend
-    the row schema (schemaless makes this cheap) — do not change
-    the gate's public contract.
+    on a clean tree. "Signed by an identity" means the verdict row
+    also records a non-empty `signer` string resolved via
+    `agentic-signer` (story 18). Together these are the whole
+    "signing" contract: a tree-state pin plus an attribution. We
+    do not use GPG or cryptographic signatures in this story. If
+    stronger provenance is needed later, extend the row schema
+    (schemaless makes this cheap) — do not change the gate's
+    public contract.
 
   CLI shape — argv for `agentic uat` (authoritative).
-    agentic uat <id> --verdict <pass|fail> [--store <path>]
+    agentic uat <id> --verdict <pass|fail> [--signer <identity>]
+                     [--store <path>]
 
     `<id>` is required; `--verdict` is required. A missing
-    `--verdict` exits 2, not 0 or 1.
+    `--verdict` exits 2, not 0 or 1. `--signer` is optional at the
+    argv level — when absent, the resolver falls through to
+    `AGENTIC_SIGNER` and then to `git config user.email` per story
+    18's tier chain. An unresolvable signer (all three sources
+    empty) exits 2 in the same `could-not-verdict` bucket as
+    dirty-tree / bad-id; see story 18 for the full contract. An
+    explicitly passed `--signer ""` or `--signer "   "` exits 2
+    with `SignerInvalid`, NOT falling through to the next tier.
 
   Store location — default and override (shared with story 3).
     The binary MUST accept an explicit store location. Flag:
@@ -326,13 +380,14 @@ guidance: |
 
   Allowed dependencies for `agentic-cli` (CLI-wide, shared with
   story 3).
-    `agentic-dashboard`, `agentic-uat`, `agentic-store`,
-    `agentic-story`, one argument parser (`clap` or `argh`),
-    `serde_json`, `git2`. Dev-dependencies: whatever drives the
-    end-to-end tests (recommended: `assert_cmd`, `predicates`,
-    `tempfile`). Forbidden (same boundary stories 2 and 5 enforce
-    via the standalone-resilience pattern):
-    `agentic-orchestrator`, `agentic-runtime`, `agentic-sandbox`.
+    `agentic-dashboard`, `agentic-uat`, `agentic-signer`,
+    `agentic-store`, `agentic-story`, one argument parser
+    (`clap` or `argh`), `serde_json`, `git2`. Dev-dependencies:
+    whatever drives the end-to-end tests (recommended:
+    `assert_cmd`, `predicates`, `tempfile`). Forbidden (same
+    boundary stories 2 and 5 enforce via the standalone-
+    resilience pattern): `agentic-orchestrator`,
+    `agentic-runtime`, `agentic-sandbox`.
     The CLI is the composition root, but it is still the LEAST
     privileged crate in terms of runtime capability — if a feature
     requires one of the forbidden crates, that feature belongs in a
@@ -399,6 +454,7 @@ guidance: |
 depends_on:
 - 4
 - 6
+- 18
 related_files:
 - crates/agentic-uat/src/**
 - crates/agentic-cli/src/**

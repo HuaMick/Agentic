@@ -4,7 +4,7 @@ outcome: |
   After each acceptance-test run, the system has a single up-to-date row
   per story in the `test_runs` table that the dashboard can read to
   surface which stories' tests are currently red.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -58,6 +58,31 @@ acceptance:
       coupled to whatever invokes it; we want the CI hook, a
       future local pre-commit hook, and the orchestrator to all be
       valid callers of the same library.
+  - file: crates/agentic-ci-record/tests/record_stamps_signer_on_pass_and_fail_rows.rs
+    justification: |
+      Proves signer symmetry with `uat_signings` at the
+      `test_runs` row shape: given a `Recorder::record(...,
+      SignerSource::Resolve)` call for story `<pass-id>` with
+      passing tests in an environment where the signer resolves
+      to `dev@example.com` (via story 18's four-tier chain —
+      flag → `AGENTIC_SIGNER` env → `git config user.email` →
+      typed error), the row written to `test_runs` carries
+      `signer == "dev@example.com"` alongside the existing
+      `story_id`, `verdict=pass`, `failing_tests=[]`, `commit`,
+      `ran_at` fields. The same test then drives a Fail row for
+      story `<fail-id>` under the same resolution scaffold and
+      asserts the Fail row ALSO carries `signer ==
+      "dev@example.com"` — symmetry is unconditional, not
+      outcome-gated. A Pass row without a signer or a Fail row
+      without a signer would both fail this test. Without this,
+      the dashboard (story 3) can tell who signed a UAT verdict
+      but not who ran the CI that reddened a `test_runs` row,
+      and the cross-table asymmetry surfaces as a permanent
+      lint at the dashboard join. Pairs with story 18's
+      `record_writes_resolved_signer_onto_test_runs_row.rs`,
+      which exercises the same contract from the signer-crate
+      side; this test is story 2's owner-side pin of the
+      additive field.
   uat: |
     Goal: convince yourself that one CI run produces exactly one row per
     story in `test_runs`, that Pass and Fail rows look right, and that
@@ -189,12 +214,33 @@ guidance: |
     door open.
 
   Test file locations.
-    All five tests live under `crates/agentic-ci-record/tests/`
-    as Rust integration tests. They use the `MemStore` impl
-    from `agentic-store` (no real DB), construct a temporary
-    git repo via `tempfile` + `git2`, and invoke the library
-    directly. None of them shell out to the top-level
-    `agentic` binary or to the CI shim.
+    All acceptance tests live under
+    `crates/agentic-ci-record/tests/` as Rust integration tests.
+    They use the `MemStore` impl from `agentic-store` (no real
+    DB), construct a temporary git repo via `tempfile` + `git2`,
+    and invoke the library directly. None of them shell out to
+    the top-level `agentic` binary or to the CI shim.
+
+  Signer symmetry with uat_signings.
+    Per story 18, every evidence-writing path — `agentic uat`,
+    this recorder, and the runtime's `RunRecorder` — stamps a
+    non-empty `signer: String` on the row it emits, resolved via
+    story 18's four-tier chain (flag → `AGENTIC_SIGNER` env →
+    `git config user.email` → `SignerError::SignerMissing`).
+    `test_runs` carries the same `signer` field as
+    `uat_signings`, on BOTH Pass and Fail rows (symmetry is
+    unconditional, not outcome-gated), so the dashboard's join
+    can attribute a reddened row to whoever ran the CI just as
+    it attributes a signing to whoever issued the verdict.
+    `Recorder::record` consumes `agentic-signer`'s `Resolver`
+    and maps its typed errors into a new
+    `RecordError::SignerMissing` variant, distinct from
+    `RecordError::MalformedInput`; on `SignerMissing` the
+    recorder writes zero rows (any existing row is untouched
+    per the malformed-input contract shape above) so a
+    misconfigured CI runner cannot silently stamp empty
+    signers. The field is additive — every existing field on
+    the row contract above remains unchanged.
 
   Relationship to story 1.
     Story 1 writes to `uat_signings`. This story writes to
@@ -204,5 +250,6 @@ guidance: |
     neither requires nor invalidates a prior UAT signing.
 depends_on:
 - 4
+- 18
 related_files:
 - crates/agentic-ci-record/src/**

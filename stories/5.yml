@@ -4,7 +4,7 @@ outcome: |
   A developer can point any consumer crate at a SurrealDB-embedded
   `Store` and get the same behaviour as the in-memory implementation,
   with writes that survive process restart.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -57,6 +57,75 @@ acceptance:
       an env var, a stale DB from an older schema — surface as
       panics halfway through the first write rather than as
       clear "could not open store" errors at startup.
+  - file: crates/agentic-store/tests/surreal_snapshot_for_story_returns_ancestor_closure.rs
+    justification: |
+      Proves the snapshot primitive's closure property holds
+      for `SurrealStore` with the same semantics story 4
+      pins for `MemStore`: given a `SurrealStore` rooted at a
+      temp directory and seeded with `uat_signings` rows for a
+      three-story fixture chain (`leaf` depends_on `mid`, `mid`
+      depends_on `root`), each ancestor carrying a valid
+      `verdict=pass` row, `Store::snapshot_for_story(leaf_id)`
+      returns a `StoreSnapshot` containing exactly the two
+      ancestor signings (`root` and `mid`) and does NOT contain
+      the leaf's own signing nor signings for unrelated stories
+      present in the same store. Two calls against the same
+      store state return byte-identical JSON when serialised
+      with sorted keys. Without this, the trait-parity claim
+      that story 5 was promoted on collapses: the snapshot
+      method added to the trait (via story 4's amendment) would
+      behave one way for `MemStore` and an unspecified way for
+      `SurrealStore`, and every consumer routing through
+      `Arc<dyn Store>` would hit backend-specific surprises at
+      the seeding boundary. This test mirrors story 4's
+      amendment test of the same shape against the production
+      backend.
+  - file: crates/agentic-store/tests/surreal_restore_roundtrips_snapshot.rs
+    justification: |
+      Proves the restore primitive's idempotence and
+      completeness hold for `SurrealStore`: given a
+      `StoreSnapshot` produced by `snapshot_for_story` on a
+      seeded source store, a fresh `SurrealStore` rooted at a
+      distinct temp directory whose `runs` and `uat_signings`
+      tables are empty, and a call to `Store::restore(snapshot)`,
+      the destination store's `uat_signings` table ends with
+      exactly the rows the snapshot carried (same `signer`,
+      `verdict`, `commit`, and `story_id` values), and a
+      subsequent ancestor-gate query (e.g.
+      `has_pass_verdict(mid_id)`) returns true. A second
+      `restore` call with the same snapshot is rejected with
+      `StoreError::AlreadyRestored` rather than silently
+      double-writing. Without this, story 20's container-side
+      seeding step (which constructs a `SurrealStore` and
+      restores the host-computed snapshot into it) has no
+      trait-level guarantee that the ancestor gate fires
+      correctly inside the sandbox — and a backend-specific
+      divergence would surface as either a spurious gate refusal
+      or a silent double-seed on retry.
+  - file: crates/agentic-store/tests/surreal_snapshot_survives_drop_and_reopen.rs
+    justification: |
+      Proves the snapshot/restore primitives compose with
+      `SurrealStore`'s durability contract: given a fresh
+      `SurrealStore` rooted at a temp directory, a call to
+      `Store::restore(snapshot)` carrying three ancestor
+      signings, followed by a drop of the store and a fresh
+      `SurrealStore::open` against the same root, the three
+      restored rows are still present with byte-identical
+      content. This is the specifically-SurrealStore invariant
+      — `MemStore` cannot exhibit it because it is in-memory by
+      design — and it is what makes `restore` meaningful as the
+      sandbox's seeding primitive: the container's embedded
+      store is restored once, then operates across any number
+      of internal process lifecycles against that seed. Without
+      this, a sandbox that restarts its embedded store mid-run
+      (e.g. after an internal crash the runtime recovers from)
+      would silently lose its ancestor signings and the next
+      ancestor-gate check would refuse as
+      `AncestorNotHealthy` against a store that LOOKS empty but
+      was seeded minutes earlier. Durability of the restore is
+      not a free consequence of durability-of-writes — the
+      restore's write path must actually commit, and this test
+      pins that.
   uat: |
     Goal: convince yourself that the embedded SurrealDB
     implementation is drop-in interchangeable with `MemStore` for
@@ -154,6 +223,57 @@ guidance: |
       ordering because that is a schemaless DB contract, not
       a consumer-observable property.
 
+  Snapshot / restore on top of surrealkv (story 20's
+  prerequisite, added via this story's amendment).
+    `SurrealStore` inherits the two new trait methods from
+    story 4's amendment: `snapshot_for_story(id) ->
+    StoreSnapshot` and `restore(snapshot) -> Result<()>`.
+    Two implementation shapes are available on top of the
+    embedded surrealkv backend; pick ONE and document the
+    choice in the crate's implementation notes:
+
+      (a) Transactional export (preferred). Open a SurrealDB
+          read transaction, walk the `uat_signings` table
+          with a `WHERE story_id IN (...)` query computed
+          from the story DAG, serialise the matching rows
+          into the `StoreSnapshot` shape, and commit (or
+          drop) the read transaction. Restore opens a write
+          transaction, inserts every row from the snapshot
+          into `uat_signings`, and commits atomically. The
+          one-shot guard (`StoreError::AlreadyRestored`) is
+          enforced by a pre-insert count query on the
+          destination table inside the same transaction.
+          Tradeoff: relies on SurrealDB's transaction
+          semantics being honest over surrealkv (they are,
+          per the current embedded docs) and pins us to
+          whichever transaction API the `surrealdb` crate
+          exposes at implementation time.
+
+      (b) Naive iterate-all-prefix. Do a full table scan of
+          `uat_signings`, filter in-process against the DAG
+          closure, emit the snapshot. Restore iterates the
+          snapshot and calls `append` per row. The one-shot
+          guard does a separate `query` first to check for
+          any existing `uat_signings` rows; fails if
+          non-empty. Tradeoff: simpler, backend-agnostic
+          shape that would port unchanged to story 22's
+          cloud impl, but the restore is not atomic — a
+          partial failure halfway through leaves the
+          destination in a half-seeded state with no
+          rollback. For Phase 0 this is acceptable (the
+          sandbox's embedded store is disposable scratch; a
+          bad restore aborts the container and the next run
+          opens a fresh store) but the preference is (a) for
+          the cleaner atomicity story.
+
+    Either way, the behavioural contract pinned by the three
+    new acceptance tests is the same: ancestor-closure is
+    exact, restore is one-shot, and the restored rows
+    survive a drop and reopen. The trait parity with
+    `MemStore` (story 4) is the load-bearing proof that the
+    choice of (a) vs (b) is an implementation concern, not a
+    consumer-observable one.
+
   Cloud-swap compatibility — see project memory.
     The store will eventually move from local embedded
     SurrealDB to a cloud target. The consumer-facing surface
@@ -182,21 +302,28 @@ guidance: |
     crates can pattern-match on failure modes.
 
   Test file locations.
-    All four tests live under `crates/agentic-store/tests/`
-    as Rust integration tests. They construct the store at a
+    All seven tests (four original + three added by this
+    amendment) live under `crates/agentic-store/tests/` as
+    Rust integration tests. They construct the store at a
     `tempfile::TempDir`, drive it directly, and clean up at
     drop. None of them shell out to the top-level `agentic`
     binary. None of them depend on any other workspace crate.
 
-  Relationship to stories 1, 2, 3, 4.
+  Relationship to stories 1, 2, 3, 4, 20.
     Story 4 defines the trait and ships `MemStore`. This story
     ships `SurrealStore` behind the same trait. Stories 1, 2,
     and 3 use the trait via `Arc<dyn Store>` and therefore work
     against either impl at runtime. Phase 2 ships with
     `SurrealStore` as the CLI default and `MemStore` as the
-    test-time default.
+    test-time default. Story 20 (`agentic story build`) is the
+    trigger for this amendment: its sandbox seeding step needs
+    `snapshot_for_story` / `restore` on the production backend,
+    so `SurrealStore` must implement them at parity with
+    `MemStore` (which story 4's amendment pins for the in-
+    memory impl).
 depends_on:
 - 4
+- 20
 related_files:
 - crates/agentic-store/src/surrealstore.rs
 - crates/agentic-store/src/lib.rs

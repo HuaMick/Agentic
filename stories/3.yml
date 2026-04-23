@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -101,6 +101,57 @@ acceptance:
       missing id. Without this, the only way to access
       `Dashboard::drilldown` is via Rust, defeating the purpose of
       the subcommand for an operator.
+  - file: crates/agentic-dashboard/tests/frontier_view_hides_retired.rs
+    justification: |
+      Proves the default (frontier) lens excludes retired stories:
+      given a fixture corpus containing at least one story with
+      `status: retired` and one with `status: healthy`, invoking
+      `agentic stories health` with no mode flag renders a table
+      whose rows contain no entry for the retired story, and whose
+      summary counts at the foot exclude retired from their
+      denominators (retired is neither healthy nor unhealthy — it
+      is off-tree). Without this, the dashboard's frontier
+      discipline degrades as the corpus accumulates retired eras:
+      the default view becomes cluttered with stories that have
+      been explicitly pruned, defeating the lens's purpose and
+      undoing the frontier filter story 10 established for the
+      non-retirement statuses.
+  - file: crates/agentic-dashboard/tests/canopy_view_shows_retired_with_era_grouping.rs
+    justification: |
+      Proves the canopy lens surfaces retired stories grouped by
+      supersession chain with the era head as the grouping key:
+      given a fixture corpus where `A` is
+      `retired (superseded_by: B)`, `B` is
+      `retired (superseded_by: C)`, and `C` is `healthy` (i.e.
+      `C` is the era head because no story supersedes it),
+      invoking `agentic stories health --canopy` (equivalently
+      `--all-eras`) renders rows including A, B, and C clustered
+      together under C as the era head, with A and B ordered as
+      prior eras whose chain resolves through to C. A retired
+      story with no `superseded_by` renders as a single-member
+      terminal group (itself the era head). Without this, the
+      canopy promise — "honest history of the tree's prior eras"
+      — is a prose claim with no observable, and retired stories
+      would appear as an un-grouped flat list indistinguishable
+      from a broken frontier filter.
+  - file: crates/agentic-dashboard/tests/json_mode_emits_era_head_id_per_story.rs
+    justification: |
+      Proves the JSON-mode grouping contract at the library
+      boundary: `agentic stories health --canopy --json` (and,
+      for symmetry, the default `--json` over a corpus containing
+      retired stories even though they are filtered from frontier
+      output) emits a `stories[]` array where each row object
+      carries an `era_head_id` field pointing at the terminal
+      successor of that story's supersession chain (the story
+      itself when it is already terminal, whether healthy or
+      retired-with-no-successor). Downstream tooling can therefore
+      reconstruct era grouping via `group_by(.era_head_id)`
+      without re-walking the `superseded_by` chain itself.
+      Without this, consumers of JSON mode (CI status checks,
+      future web UI) must re-implement the chain-walk against
+      the same `superseded_by` pointers the dashboard already
+      resolved — a duplication that would drift the moment the
+      chain-walk algorithm evolves.
   uat: |
     Goal: convince yourself the dashboard correctly classifies the four
     statuses, surfaces `unhealthy` first, drills down on a specific
@@ -419,9 +470,95 @@ guidance: |
     classification + rendering contract is unchanged. Status stays
     `under_construction` pending re-UAT against the narrower
     contract.
+
+  Era semantics — frontier vs canopy (2026-04-22 amendment, triggered by story 21).
+    The dashboard now renders two lenses over the same underlying
+    classification: the default frontier and the opt-in canopy.
+    Both read the same store and the same stories/ directory; they
+    differ only in which rows are included and how they are
+    arranged.
+
+      - "Frontier" = the stories humans care about right now. Any
+        story whose on-disk `status` is one of
+        `proposed | under_construction | healthy | unhealthy` is
+        on the frontier. Retired stories are filtered out before
+        the four-status classifier runs. The frontier is the
+        default view (no flag).
+
+      - "Canopy" = the frontier plus every retired story, arranged
+        as eras. Opted into via `agentic stories health --canopy`
+        (alias: `--all-eras`). The canopy exists to give the
+        reader an honest history of prior eras without re-
+        cluttering the default daily view.
+
+      - "Era" = the terminal successor of a `superseded_by` chain.
+        An era is identified by its "era head": walk the chain
+        forward via `superseded_by` until a story is reached that
+        no other story supersedes (i.e. it is not itself retired-
+        with-successor). The era head can be either a live story
+        (on the frontier) or a terminal retirement (a retired
+        story with no `superseded_by`); either way, it is the
+        group key. A non-retired story that no one supersedes is
+        its own era head. For chain `A (retired→B) → B (retired
+        →C) → C (healthy)`, the era head for A, B, and C is C.
+
+    Rendering in canopy mode.
+      Rows are grouped by era head. Within each group, rows
+      render in chain order (oldest retired first, era head last),
+      so the reader scans a group top-to-bottom from deepest
+      history to present. A retired story with no successor
+      (terminal retirement) is its own single-member group. The
+      existing four-status sort (`unhealthy` → `under_construction`
+      → `proposed` → `healthy`, `error` above all) applies between
+      groups, keyed off the era head's classification — so a group
+      whose era head is unhealthy sorts above a group whose era
+      head is healthy, regardless of the retired members beneath.
+
+    JSON-mode shape (canopy-compatible, additive).
+      Every story object in the `stories[]` array carries an
+      `era_head_id: integer` field pointing at the terminal
+      successor of that story's supersession chain. A story that
+      is its own era head emits `era_head_id` equal to its own
+      `id`. This field is present in BOTH frontier and canopy
+      JSON output so downstream tooling has a single, stable way
+      to reconstruct grouping — `stories | group_by(.era_head_id)`
+      — regardless of which lens produced the output. The
+      frontier JSON simply omits retired rows, so its
+      `era_head_id` values are usually self-referential; the
+      canopy JSON is where the grouping becomes interesting.
+
+    Delegated concerns.
+      The `retired` status itself, the `superseded_by` field, the
+      loader-level referential integrity and cycle defence, and
+      the chain-walk algorithm used by the ancestor gate all
+      belong to story 21 — this story consumes them. The schema
+      edit (adding `retired` to the status enum and the optional
+      `superseded_by` field) flows through story 6's amendment
+      pass per the bundling described in story 21's guidance.
+      Story 3 is the dashboard's read-side expression of those
+      primitives; any substantive change to the chain-walk
+      semantics re-opens story 21, not story 3.
+
+    CLI shape update.
+      The authoritative argv shape becomes:
+
+        agentic stories health [<id>] [--canopy | --all-eras]
+                               [--json] [--store <path>]
+
+      `--canopy` and `--all-eras` are aliases for the same flag —
+      `--canopy` is the primary spelling (tree-metaphor
+      vocabulary from research folder note 03), `--all-eras` is
+      the plain-English alias for readers unfamiliar with the
+      metaphor. Passing both is accepted (they are the same
+      flag); no flag selects frontier by default. Drilldown
+      (`<id>`) can be combined with either lens — a drilldown
+      on a retired story renders its expanded view regardless
+      of frontier/canopy (the frontier filter applies only to
+      the table, not to explicitly-named ids).
 depends_on:
 - 1
 - 2
+- 21
 related_files:
 - crates/agentic-dashboard/src/**
 - crates/agentic-cli/src/**

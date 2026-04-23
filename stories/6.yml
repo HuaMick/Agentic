@@ -5,7 +5,7 @@ outcome: |
   value whose construction has already enforced the schema and the
   dependency-graph acyclicity, so downstream code never has to defend
   against malformed input.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -53,26 +53,129 @@ acceptance:
   - file: crates/agentic-story/tests/load_invalid_status_enum_is_rejected.rs
     justification: |
       Proves enum-boundary enforcement: a story file whose
-      `status` field is a string not in `proposed |
-      under_construction | healthy | unhealthy` is rejected
-      with a typed error naming the field AND the offending
-      value. Without this, a typo in `status:` (or a leftover
-      legacy value like `tested`) loads as a default or a
-      catch-all and the four-status model the dashboard
-      depends on is silently violated.
+      `status` field is a string not in the five-valued enum
+      `proposed | under_construction | healthy | unhealthy |
+      retired` is rejected with a typed error naming the
+      field AND the offending value. The canonical invalid
+      example pinned by this test is `status: deprecated`
+      (a plausible-looking legacy value that is deliberately
+      NOT in the enum — distinct from `tested`, which the
+      pre-amendment test used and which is now a common near-
+      miss but still invalid). Without this, a typo in
+      `status:` loads as a default or a catch-all and the
+      five-status model the dashboard depends on is silently
+      violated. This test's invalid example must remain
+      invalid after any future enum extension — pick a value
+      with no realistic lifecycle semantics.
+  - file: crates/agentic-story/tests/load_retired_status_is_accepted.rs
+    justification: |
+      Proves the fifth enum value `retired` round-trips
+      through the loader: a story file whose `status` field
+      is the string `retired` loads cleanly into a typed
+      `Story` value whose `status` reads back as `Retired`.
+      A retired story may carry an optional
+      `superseded_by: <integer>` edge pointing at the
+      successor that inherited its health responsibility;
+      when present, `story.superseded_by` reads back as
+      `Some(<id>)`; when absent, it reads back as `None`
+      (terminal retirement — a legitimate shape for
+      experiments abandoned without replacement). A retired
+      story may also carry an optional `retired_reason:
+      String` prose field documenting why the retirement
+      happened; it round-trips verbatim when present,
+      `None` when absent. Without this test, the vocabulary
+      story 21 introduces (retired, supersession, era) has
+      no loader-level anchor and every downstream consumer
+      (dashboard canopy view, ancestor gate's chain-walk)
+      would have to re-invent the YAML shape from
+      observation.
+  - file: crates/agentic-story/tests/load_build_config_is_parsed.rs
+    justification: |
+      Proves the happy path for the new optional
+      `build_config` field: a story YAML carrying
+      `build_config: {max_inner_loop_iterations: 5,
+      models: []}` loads through `Story::load` (and
+      `Story::load_dir`) into a typed `Story` whose
+      `build_config` is `Some(BuildConfig {
+      max_inner_loop_iterations: 5, models: vec![] })`. A
+      populated models array (e.g. `models: ["claude-sonnet-
+      4-6", "claude-opus-4-7"]`) preserves order and content
+      on round-trip. No other story field is perturbed when
+      the block is present. Without this, story 17's
+      `build_config` contract has no loader-level pinning
+      and each downstream consumer would re-parse the YAML
+      shape independently, producing N slightly different
+      readers of the same block.
+  - file: crates/agentic-story/tests/load_build_config_optional_defaults_apply.rs
+    justification: |
+      Proves the optionality decision from story 17: a story
+      YAML that does NOT declare `build_config:` loads
+      cleanly into a `Story` whose `build_config` field is
+      `None` — not a typed error, not a silently-substituted
+      default struct synthesised at parse time, not a panic.
+      Consumers that need a concrete budget consult the
+      public constant `DEFAULT_BUILD_CONFIG` (owned by
+      `agentic-story`; story 17 pins its value) and apply
+      it at the point of consumption, preserving the
+      distinction between "author thought about it and
+      declined to pin" (`Some(BuildConfig {…})`) and "author
+      expressed no opinion" (`None`). Without this, a later
+      refactor could silently auto-fill defaults at load
+      time and the author's intent (or lack thereof) would
+      become un-introspectable downstream.
+  - file: crates/agentic-story/tests/load_superseded_by_pointing_at_unknown_id_is_rejected.rs
+    justification: |
+      Proves referential integrity on supersession edges at
+      directory-load time: a `stories/` directory where one
+      story declares `superseded_by: 999` but no
+      `stories/999.yml` exists is rejected with a typed
+      `StoryError::SupersededByUnknown { source_id,
+      target_id }` naming both ids. The check runs in the
+      directory path (not the single-file path, which
+      cannot meaningfully validate cross-file edges — same
+      rule this story already applies to `depends_on`).
+      Without this, a retired story whose successor was
+      itself retired-and-deleted (or mistyped) would
+      silently bind to nothing, and downstream consumers —
+      dashboard's canopy rendering, ancestor gate's chain
+      walk — would follow a dangling pointer, producing
+      either a panic or a silently-wrong answer.
+  - file: crates/agentic-story/tests/load_superseded_by_cycle_is_rejected.rs
+    justification: |
+      Proves cycle defence on supersession edges: a
+      `stories/` directory where `A.superseded_by = B`,
+      `B.superseded_by = C`, `C.superseded_by = A` (or the
+      degenerate self-loop `A.superseded_by = A`) is
+      rejected with a typed `StoryError::SupersededByCycle`
+      naming at least one participating id. Supersession
+      cycles are structurally distinct from `depends_on`
+      cycles (same graph shape, different edge label) and
+      the loader rejects both independently — a story may
+      participate in one edge set without the other. Without
+      this, the ancestor gate's chain-walk (story 11's
+      amendment) would loop forever when evaluating health
+      on a descendant whose retired ancestor pointed into a
+      cyclically-linked successor set — strictly worse than
+      a loud load-time refusal.
   uat: |
-    Goal: convince yourself the loader accepts valid stories,
-    rejects the four specific failure modes with typed errors,
-    and never crashes the caller.
+    Goal: convince yourself the loader accepts valid stories
+    (including the new `retired` status and the new optional
+    `build_config` block), rejects every documented failure
+    mode with typed errors (including unknown-target and
+    cyclic `superseded_by` edges), and never crashes the
+    caller.
 
     Setup:
       1. From a clean checkout on branch `main`, run `git status`
          and confirm the working tree is clean.
       2. Confirm `crates/agentic-story/` builds as a library
-         (`cargo build -p agentic-story`) and that the loader
-         entry point (`Story::load` for single file and
-         `Story::load_dir` for a directory, or whatever the
-         impl names them) is publicly re-exported.
+         (via WSL: `wsl bash -c "source ~/.cargo/env && cd
+         /home/code/Agentic && cargo build -p agentic-story"`)
+         and that the loader entry point (`Story::load` for
+         single file and `Story::load_dir` for a directory, or
+         whatever the impl names them) is publicly re-exported,
+         together with the `BuildConfig` type and the
+         `DEFAULT_BUILD_CONFIG` constant.
       3. Pick a scratch directory you will use for fixtures.
 
     Valid walkthrough:
@@ -93,38 +196,98 @@ acceptance:
 
     Bad-status walkthrough:
       6. Restore the fixture's `outcome:` block. Change `status:
-         proposed` to `status: tested` (a legacy value the new
-         enum does not include). Re-run the loader. Observe:
-         non-zero exit, an error naming `status` and the
-         offending value `tested`.
+         proposed` to `status: deprecated` (a value the five-
+         value enum does not include and will not include).
+         Re-run the loader. Observe: non-zero exit, an error
+         naming `status` and the offending value `deprecated`.
+
+    Retired-status walkthrough:
+      7. Restore `status:` to a valid value. Create a second
+         scratch fixture `retired-story.yml` with `status:
+         retired`, `superseded_by: 1`, and a prose
+         `retired_reason:` block. Also create a successor
+         fixture `1.yml` (you already have one from step 4;
+         confirm its `id:` matches). Run the loader against
+         the scratch DIRECTORY. Observe: exit 0, both stories
+         parse, the retired story's `status` reads back as
+         `Retired`, `superseded_by` as `Some(1)`, and
+         `retired_reason` round-trips verbatim.
+      8. Edit `retired-story.yml` to remove the
+         `superseded_by:` line entirely (terminal retirement).
+         Re-run the loader. Observe: exit 0, `superseded_by`
+         reads back as `None`, no error — a retired story with
+         no successor is a valid shape.
+
+    Build-config walkthrough:
+      9. Copy `stories/15.yml` to `<scratch>/build.yml`,
+         append after `status:`:
+           ```
+           build_config:
+             max_inner_loop_iterations: 7
+             models:
+               - claude-sonnet-4-6
+               - claude-opus-4-7
+           ```
+         Run the loader and print `build_config` via `{:?}`.
+         Observe: `Some(BuildConfig { max_inner_loop_iterations:
+         7, models: ["claude-sonnet-4-6", "claude-opus-4-7"] })`.
+     10. Remove the `build_config:` block entirely, keep the
+         rest. Re-run. Observe: `build_config` reads back as
+         `None` (NOT a default-filled struct). Query
+         `agentic_story::DEFAULT_BUILD_CONFIG` in the same
+         example and confirm it prints `BuildConfig {
+         max_inner_loop_iterations: 5, models: [] }` — the
+         single source of truth for defaults per story 17.
 
     Cycle walkthrough:
-      7. Restore the `status:` field. Copy the fixture twice
+     11. Starting from the step-4 fixture, copy it twice
          more into your scratch directory as `2.yml` and
-         `3.yml`. Edit `1.yml` so `depends_on: [2]`, `2.yml` so
-         `depends_on: [3]`, `3.yml` so `depends_on: [1]` — and
-         change the `id:` field of each to match its filename.
-         Run the loader against the scratch DIRECTORY (not a
-         single file). Observe: non-zero exit, an error naming
-         at least one of ids 1, 2, 3 as participating in a
-         cycle.
+         `3.yml`. Edit `1.yml` so `depends_on: [2]`, `2.yml`
+         so `depends_on: [3]`, `3.yml` so `depends_on: [1]` —
+         and change the `id:` field of each to match its
+         filename. Run the loader against the scratch
+         DIRECTORY (not a single file). Observe: non-zero
+         exit, an error naming at least one of ids 1, 2, 3
+         as participating in a depends_on cycle.
+
+    Supersession-cycle walkthrough:
+     12. In a fresh scratch dir, create `100.yml` and
+         `101.yml`. Set `100.yml` to `status: retired,
+         superseded_by: 101`, and `101.yml` to `status:
+         retired, superseded_by: 100`. Run the loader
+         against the directory. Observe: non-zero exit,
+         a `SupersededByCycle` error naming at least one
+         of 100, 101. Repeat with a single-file self-loop
+         (`102.yml` with `superseded_by: 102`). Observe
+         the same shape of refusal.
+
+    Unknown-successor walkthrough:
+     13. In the same fresh scratch dir, keep a single file
+         `200.yml` with `status: retired, superseded_by:
+         999` (no `999.yml` in the directory). Run the
+         directory loader. Observe: non-zero exit, a
+         `SupersededByUnknown` error naming source_id=200
+         and target_id=999.
 
     Missing-file walkthrough:
-      8. Remove the scratch directory. Run the loader against a
-         path that definitely does not exist. Observe: the
-         loader returns the absence sentinel or a typed
-         "not found" error — NOT a panic, NOT a raw I/O
-         error trace.
+     14. Remove the scratch directory. Run the loader
+         against a path that definitely does not exist.
+         Observe: the loader returns the absence sentinel
+         or a typed "not found" error — NOT a panic, NOT
+         a raw I/O error trace.
 
     Cleanup:
-      9. Remove the scratch directory and any example files
+     15. Remove the scratch directory and any example files
          you added but do not want to commit.
-     10. Confirm `git status` is clean.
+     16. Confirm `git status` is clean.
 guidance: |
   This story defines the parse-time contract for the story
-  corpus. It is deliberately small: load, validate, reject
-  early with typed errors. Downstream crates (the dashboard,
-  the UAT gate, the recorder) consume already-validated
+  corpus. It is deliberately small in spirit — load, validate,
+  reject early with typed errors — even though the schema
+  surface it holds grew with the Phase 0 amendment (bundling
+  stories 17 and 21's schema additions into a single
+  re-UAT pass). Downstream crates (the dashboard, the UAT
+  gate, the recorder, the runtime) consume already-validated
   `Story` values and are therefore allowed to assume
   well-formedness without extra defensive code.
 
@@ -140,6 +303,19 @@ guidance: |
     schema validator library if useful, etc.) without the
     "minimal dependency floor" discipline the pattern enforces.
 
+    Exception — NEW invariant introduced by the amendment: the
+    `build_config` loading path specifically MUST NOT widen
+    the dependency floor. Story 19's runtime is the first
+    consumer of `build_config`; if `agentic-story`'s loader
+    depended on `agentic-runtime` (or any orchestration /
+    runtime crate) to parse the field, story 19 would inherit
+    a dependency cycle the day it tries to read its own
+    configuration source. The loader stays a leaf on the
+    dependency graph for this field. Story 17 pins this with
+    `load_build_config_standalone_resilience.rs`; the
+    invariant applies to every field the loader grows, not
+    just `build_config`.
+
   Validation layers, in order.
     1. YAML parse (serde_yaml or equivalent). Failures are
        reported with the source position if the library
@@ -150,64 +326,359 @@ guidance: |
     3. Semantic validation: the `id` field inside the file
        must match the filename (`stories/<id>.yml`) when
        loading from disk; the `status` must be one of the
-       four enum values the dashboard understands.
-    4. Graph validation (directory-load only): the `depends_on`
-       edges across all loaded stories must form a DAG.
-       Missing dependency targets and cycles both fail the
-       directory load with typed errors.
+       five enum values the dashboard and gate understand
+       (`proposed | under_construction | healthy | unhealthy
+       | retired`); `build_config.max_inner_loop_iterations`
+       must be a positive integer (`u32 > 0`; `0`, negatives,
+       and out-of-range inputs are rejected here, NOT at
+       schema-layer time, because the loader needs to
+       produce a typed error with the offending value for the
+       author).
+    4. Graph validation (directory-load only): two
+       independent edge sets are validated. The `depends_on`
+       edges across all loaded stories must form a DAG
+       (missing target rejected, cycle rejected). The
+       `superseded_by` edges must ALSO form a DAG on their
+       own — structurally distinct graph, same shape of
+       validation (missing target rejected with
+       `SupersededByUnknown { source_id, target_id }`; cycle
+       rejected with `SupersededByCycle` naming at least one
+       participating id). A story may participate in one
+       edge set without the other; the validations do not
+       compose or cross.
+
+  Status enum — five values (post-amendment).
+    `proposed | under_construction | healthy | unhealthy |
+    retired`. The addition of `retired` is the schema trigger
+    from story 21. Semantics:
+      - `proposed`, `under_construction`, `healthy` — the
+        on-tree lifecycle values the UAT gate drives.
+      - `unhealthy` — computed by the dashboard, never
+        written to disk (authors do not hand-write this).
+      - `retired` — NEW: a terminal off-tree state. A retired
+        story is no longer on the frontier; it may carry an
+        optional `superseded_by: <id>` pointing at the
+        successor that inherited its behaviour, and an
+        optional `retired_reason: <prose>` documenting why.
+        The ancestor gate (story 11's amendment) walks THROUGH
+        retired ancestors via `superseded_by` to evaluate the
+        successor's health; a terminal retirement (no
+        `superseded_by`) is treated as satisfied. The
+        dashboard's default "frontier" lens filters retired
+        stories out; `--canopy` mode (story 3's amendment)
+        surfaces them grouped by supersession chain.
+
+    The loader's job with `retired` is narrow: accept it as
+    a valid status, round-trip it through the typed `Story`
+    value, validate the `superseded_by` edge graph at
+    directory-load time, and let downstream consumers
+    implement the semantics. The loader does NOT decide
+    whether a retired story is "blocking" for a gate — that
+    is story 11's concern.
+
+  Retirement semantics (loader-relevant subset).
+    A story's `status: retired` edit is a status mutation and
+    therefore invalidates the proof hash for that story (the
+    proof hash covers outcome + patterns + acceptance +
+    guidance — note that `status` itself is metadata about the
+    proof, not part of it; the hash does not change, but the
+    signing row's "latest verdict" is now for a retired
+    story). Retired is terminal: the loader exposes it, the
+    gate treats it as terminal, the dashboard filters it from
+    the frontier. The loader never transitions a story into
+    retired on its own authority — retirement is always an
+    explicit human or curator edit.
+
+    `superseded_by` is a single-id edge (not a multi-id
+    hyperedge). If a retirement folded a story into multiple
+    successors in spirit, the primary successor goes in
+    `superseded_by` and the secondary is named in
+    `retired_reason` prose. The loader's chain-walk at
+    validation time is strictly linear — one predecessor,
+    one successor per edge. If a future schema iteration
+    adds a `superseded_by_also: [<id>]` audit-only field,
+    the primary DAG this loader validates stays keyed on
+    the linear `superseded_by`.
+
+    `retired_reason` is optional, intentionally. The
+    retroactive backfill of hard-deleted stories (7, 8, 14)
+    that story 21 performs cannot always reconstruct a
+    truthful reason from git history alone; mandatory
+    `retired_reason` would force fabrication, which is
+    worse than an absent field because a fabricated reason
+    is a first-class lie future readers would treat as
+    authoritative. Going-forward retirements SHOULD
+    populate it; the enforcement is social, not schematic.
+    The loader round-trips the field verbatim when present
+    and `None` when absent; it does not validate prose
+    content.
+
+  Build config defaults — single source of truth.
+    The optional `build_config` field carries
+    `max_inner_loop_iterations: u32` (positive; `0` is
+    rejected) and `models: Vec<String>` (may be empty).
+    Default values live in exactly ONE place: the public
+    constant `DEFAULT_BUILD_CONFIG` exported from
+    `agentic-story` (owned by story 17, which pins its
+    value at `max_inner_loop_iterations: 5, models:
+    Vec::new()`). The loader does NOT synthesise a
+    `BuildConfig` value when the block is absent —
+    `story.build_config` is `None` in that case, and
+    consumers that need a concrete budget call
+    `story.build_config.as_ref().unwrap_or(&
+    DEFAULT_BUILD_CONFIG)` (or a helper) at the point of
+    consumption.
+
+    The distinction between `None` (author expressed no
+    opinion) and `Some(BuildConfig { models: vec![], .. })`
+    (author declared a budget but declined to pin a model
+    list) matters: the former signals "I did not think about
+    this"; the latter signals "I thought about it and chose
+    not to constrain it." Auto-filling defaults at load time
+    would collapse this distinction and hide authorial
+    intent from every downstream reader. The loader's job
+    is to preserve the distinction, not to resolve it.
+
+    `max_inner_loop_iterations` is rejected at load time
+    when `0`, negative, or out-of-`u32`-range, with a typed
+    error naming the field AND the offending value — the
+    runtime must never be asked to start a zero-budget run
+    (that is the inner loop's no-op state), and negative
+    budgets are clearly malformed. A non-integer (string,
+    float, null) also fails with a typed type-mismatch
+    error. See story 17's
+    `load_build_config_rejects_non_positive_iterations.rs`
+    for the exhaustive cases.
+
+  Supersession chain validation (authoritative).
+    Directory-load enforces two conditions on the
+    `superseded_by` edge set:
+
+      1. Existence: for every story with
+         `superseded_by: <id>`, a sibling `stories/<id>.yml`
+         must exist in the same directory load. Violation is
+         `StoryError::SupersededByUnknown { source_id,
+         target_id }` — the error names both ends of the
+         broken edge so the author can fix either side.
+
+      2. Acyclicity: the set of all `superseded_by` edges
+         across the loaded stories must form a DAG.
+         Self-loops (`A.superseded_by = A`) AND multi-hop
+         cycles (`A → B → C → A`) both fail with
+         `StoryError::SupersededByCycle` naming at least
+         one participating id. Implementation is the same
+         graph traversal used for `depends_on` cycle
+         defence — DFS with a visited-set and a recursion-
+         stack; on revisit of a recursion-stack node,
+         report the cycle.
+
+    The two edge sets (`depends_on` and `superseded_by`)
+    are validated independently. A story that participates
+    in a `depends_on` cycle but a clean `superseded_by`
+    graph fails the first check and surfaces a depends_on
+    error; the converse also holds. This independence is
+    deliberate — the two semantics (scheduling-prerequisite
+    vs era-succession) are orthogonal and the authoring
+    UX surfaces them as distinct authoring mistakes.
+
+    The ancestor gate's chain-walk (story 11's amendment)
+    depends on these invariants: it walks `superseded_by`
+    edges recursively past retired ancestors, and if the
+    loader had let a cycle through, the gate would loop
+    forever. The gate's own cycle defence (a visited-set)
+    is defence-in-depth, not primary defence — primary
+    defence is load-time refusal here.
 
   Error type surface.
-    The public error type is a typed enum (not `anyhow::Error`).
-    Required variants — at minimum — cover: YAML parse,
-    schema violation (with the path to the offending field),
-    id/filename mismatch, unknown status value, cycle in
-    `depends_on` (with at least one participating id), and
-    file-or-directory not found. Additional variants are
-    allowed when they add real information.
+    The public error type is a typed enum (not
+    `anyhow::Error`). Variants — at minimum — cover:
+      - YAML parse failure.
+      - Schema violation (with the JSON Pointer to the
+        offending field).
+      - id/filename mismatch.
+      - Unknown status value (names the field AND the
+        offending string).
+      - Cycle in `depends_on` (names at least one
+        participating id).
+      - Unknown `depends_on` target (missing sibling
+        story).
+      - `SupersededByUnknown { source_id, target_id }` —
+        NEW per amendment.
+      - `SupersededByCycle` naming at least one
+        participating id — NEW per amendment.
+      - `BuildConfigInvalidIterations { value: i64 }` for
+        `0`, negatives, or out-of-`u32`-range — NEW per
+        amendment (shape owned by story 17).
+      - `BuildConfigTypeMismatch { field: String,
+        expected: String, found: String }` for type
+        mismatches on either sub-field — NEW per amendment
+        (shape owned by story 17).
+      - File-or-directory not found.
+    Additional variants are allowed when they add real
+    information. No variant is `anyhow::Error` or a raw
+    serde failure bubbled through.
 
   Single-file vs directory load.
-    The loader exposes two entry points: load one file at a
-    known path, and load an entire `stories/` directory.
-    Cycle detection and `depends_on`-target-exists checks only
-    run in the directory path, because a single file cannot
-    meaningfully validate its edges against stories it has
-    never seen. The dashboard uses the directory path; a
-    future lint over `stories/` may use either.
+    The loader exposes two entry points: load one file at
+    a known path, and load an entire `stories/`
+    directory. Cycle detection, `depends_on`-target-exists
+    checks, AND `superseded_by`-target-exists/cycle checks
+    only run in the directory path, because a single file
+    cannot meaningfully validate its edges against stories
+    it has never seen. Single-file load still performs
+    YAML parse, schema validation, semantic validation
+    (id/filename, status enum, build_config positivity),
+    and round-trips all fields including `superseded_by`
+    and `build_config` — it just cannot verify the
+    `superseded_by` target exists or the chain is
+    acyclic without its siblings in scope. The dashboard
+    uses the directory path; a future lint over
+    `stories/` may use either.
 
   Keep the `Story` struct aligned with the schema.
-    Fields are already enumerated in `crates/agentic-story/README.md`
-    and on `schemas/story.schema.json`. Do not add fields in
-    this story that are not in the schema. If a field would
-    be useful but the schema does not support it, that is a
-    schema change proposal — a separate story — not a silent
-    extension here.
+    Fields are enumerated in `crates/agentic-story/README.md`
+    and `schemas/story.schema.json`. Post-amendment the
+    struct exposes:
+      - `build_config: Option<BuildConfig>` — optional;
+        `None` when the YAML block is absent.
+      - `superseded_by: Option<u32>` (or whatever integer
+        type the id field uses; the two must agree) —
+        optional; `None` when the edge is absent.
+      - `retired_reason: Option<String>` — optional;
+        prose.
+    Do not add fields in this story that are not in the
+    schema. If a field would be useful but the schema does
+    not support it, that is a schema change proposal — a
+    separate story — not a silent extension here.
+
+  Schema edit coordination (CRITICAL — per CLAUDE.md).
+    Per CLAUDE.md, `schemas/` is authoritative and
+    story-writer does not edit `schemas/story.schema.json`
+    on its own authority. This story's amendment DECLARES
+    the schema dependencies but does NOT perform the edit.
+    The orchestrator (or the human) lands the schema edit
+    as a separate atomic change that co-lands with this
+    amendment's test-builder + build-rust cycle.
+
+    The amendment bundles TWO independent schema triggers
+    into ONE story-6 re-UAT pass (per the 2026-04-23 user
+    direction in `docs/research/story_tree/13-existing-
+    stories-impact.md` — "pay our costs upfront; single
+    UAT preference"):
+
+      (a) From story 17 — add optional `build_config`
+          object at story root:
+            "build_config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["max_inner_loop_iterations"],
+              "properties": {
+                "max_inner_loop_iterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "models": {
+                  "type": "array",
+                  "default": [],
+                  "items": {"type": "string",
+                    "minLength": 1}
+                }
+              }
+            }
+
+      (b) From story 21 — extend the status enum AND
+          add optional `superseded_by` and
+          `retired_reason`:
+            - `status.enum` gains `"retired"` (five
+              values total).
+            - `superseded_by`: `{"type": "integer",
+              "minimum": 1}` (optional; root property,
+              NOT in `required`).
+            - `retired_reason`: `{"type": "string",
+              "minLength": 1}` (optional; root
+              property, NOT in `required`).
+
+    Bundling the two rationale. If the two schema edits
+    landed separately, story 6 would auto-revert twice,
+    test-builder would scaffold twice, build-rust would
+    implement twice, UAT would sign twice — six pipeline
+    cycles for two conceptually-orthogonal changes. One
+    bundled amendment is one cycle. The user's "single
+    UAT preference / eventual consistency" posture
+    (research folder note 13) picks the bundle. If
+    either trigger story (17 or 21) is subsequently
+    abandoned or restructured, this amendment stands
+    independently on the surviving trigger — the two
+    field additions don't interact at the loader or
+    schema level.
+
+    Sequencing: the orchestrator lands this YAML
+    amendment, the JSON-schema edit, and the new test
+    files as a single atomic change (or as a tightly-
+    coupled sequence within one review window). The
+    orchestrator invokes test-builder to scaffold the
+    new tests red against the current implementation,
+    then build-rust to implement the field parsing and
+    validation, then UAT to sign. Story-writer's
+    responsibility ends at this YAML — surface the
+    dependency, do not perform the schema edit.
 
   The loader does NOT write.
-    This story is strictly read-only. No status mutation, no
-    proof-hash recomputation, no store writes. Those are
-    owned by stories 1 (UAT promotion) and 2 (test_runs
-    recorder). Keeping the loader pure means every consumer
-    can call it speculatively without side effects.
+    This story is strictly read-only. No status mutation,
+    no proof-hash recomputation, no store writes. Those
+    are owned by stories 1 (UAT promotion) and 2
+    (test_runs recorder). Keeping the loader pure means
+    every consumer can call it speculatively without side
+    effects.
 
   Test file locations.
-    All five tests live under `crates/agentic-story/tests/`
-    as Rust integration tests. They build fixture YAML either
-    inline as string literals or via `tempfile::TempDir` for
-    the directory-level cases. They do not touch the live
-    `stories/` directory at repo root. They do not shell out
-    to the top-level `agentic` binary. They do not depend on
-    `agentic-store`, the dashboard, or any other workspace
-    crate.
+    All acceptance tests live under
+    `crates/agentic-story/tests/` as Rust integration
+    tests. They build fixture YAML either inline as
+    string literals or via `tempfile::TempDir` for the
+    directory-level cases. They do not touch the live
+    `stories/` directory at repo root. They do not shell
+    out to the top-level `agentic` binary. They do not
+    depend on `agentic-store`, the dashboard, or any
+    other workspace crate — see the standalone-posture
+    exception above for why the `build_config` path in
+    particular must not widen the dependency floor.
 
-  Relationship to stories 1, 3, 4, 5.
-    Story 1 (UAT gate) uses this loader to find the story it
-    is verdicting and to rewrite its `status` after a Pass.
-    Story 3 (dashboard) uses it to enumerate every story for
-    the table. Neither needs the loader to do anything the
-    tests here do not pin. Stories 4 and 5 are unrelated at
-    runtime (the loader does not persist anything) but share
-    Phase 2 acceptance.
-depends_on: []
+  Relationship to stories 1, 3, 11, 17, 21.
+    Story 1 (UAT gate) uses this loader to find the
+    story it is verdicting and to rewrite its `status`
+    after a Pass. It must also tolerate encountering
+    `retired` as a terminal state it never drives into
+    (the gate does not promote retired stories).
+    Story 3 (dashboard) uses it to enumerate every
+    story for the table; its own amendment (triggered
+    by story 21) adds the frontier-vs-canopy lens that
+    consumes the `retired` status and the
+    `superseded_by` edges this loader exposes.
+    Story 11 (ancestor gate) uses the loader's
+    directory output to walk `depends_on` AND
+    `superseded_by` chains; its amendment implements
+    the chain-walk algorithm that treats retired
+    ancestors as transparent redirections to their
+    successors. All chain-walk cycle defences are
+    belt-and-braces; the primary defence is this
+    loader's cycle rejection.
+    Story 17 is the proposer of `build_config` and
+    the owner of `DEFAULT_BUILD_CONFIG`; this story
+    loads the field but does not consume its values
+    (the runtime, story 19, does that).
+    Story 21 is the proposer of `retired` +
+    `superseded_by` + `retired_reason`; this story
+    loads the fields but does not consume the
+    supersession semantics (the dashboard canopy
+    view and the ancestor gate do).
+
+    Stories 4 and 5 are unrelated at runtime (the
+    loader does not persist anything) but share
+    Phase 2 acceptance context.
+depends_on:
+- 17
+- 21
 related_files:
 - crates/agentic-story/src/**
 - schemas/story.schema.json

@@ -5,7 +5,7 @@ outcome: |
   whose ancestors are not all `healthy` receives a typed refusal with
   no signing row written, so a Pass verdict cannot attest a story
   whose foundation is unproven.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -80,6 +80,105 @@ acceptance:
       Without this, a cycle reaching the UAT path would either loop
       forever computing "is every ancestor healthy" or panic — both
       strictly worse than a loud refusal.
+  - file: crates/agentic-uat/tests/uat_permits_retired_ancestor_with_healthy_successor.rs
+    justification: |
+      Proves the gate walks the supersession chain: given a
+      descendant `<leaf>` whose `depends_on` names `<mid>`, where
+      `<mid>` is `retired` with `superseded_by: <root>` and
+      `<root>` is `healthy` with a valid
+      `uat_signings.verdict=pass` row, `Uat::run` with a Pass
+      verdict on `<leaf>` proceeds through its usual path, writes
+      exactly one `uat_signings.verdict=pass` row, and rewrites
+      `<leaf>`'s YAML to `status: healthy`. The retired ancestor
+      `<mid>` is transparent to the gate — the chain-walk lands on
+      `<root>` and finds it satisfied. This is the inverse of
+      story 11's original `uat_refuses_unhealthy_ancestor`: the
+      gate must neither refuse retirement as a failure nor treat
+      it as a free pass; it must follow `superseded_by` and
+      evaluate the successor. Without this, every retirement
+      would break every downstream descendant — the exact
+      destructive-surgery shape story 21 exists to eliminate —
+      and the gate's ancestor check would regress to "retirement
+      means broken."
+  - file: crates/agentic-uat/tests/uat_refuses_when_retired_chain_terminates_in_unhealthy.rs
+    justification: |
+      Proves the gate surfaces the TERMINAL link of the chain,
+      not the retired intermediary: given a descendant `<leaf>`
+      whose `depends_on` names `<mid>`, where `<mid>` is `retired`
+      with `superseded_by: <root>` and `<root>` is
+      `under_construction` (or any non-healthy non-retired state),
+      `Uat::run` with a Pass verdict on `<leaf>` returns
+      `UatError::AncestorNotHealthy { ancestor_id: <root>,
+      reason: ... }`. The `ancestor_id` field names `<root>` —
+      the first non-transparent, non-healthy link in the chain —
+      NOT `<mid>`. The retired intermediary is never the error's
+      subject because retired is terminal from the gate's
+      perspective: the operator cannot un-retire or re-UAT a
+      retired story; they can only push its successor to healthy.
+      Without this, the operator is directed to a retired
+      ancestor they have no action for and the refusal message
+      is a dead end — strictly worse than story 11's original
+      transitive-refusal contract, which always named an
+      actionable ancestor.
+  - file: crates/agentic-uat/tests/uat_walks_multi_hop_supersession_chain.rs
+    justification: |
+      Proves the chain-walk is recursive, not single-hop: given
+      a descendant `<leaf>` whose `depends_on` names `<mid1>`,
+      where `<mid1>` is `retired (superseded_by: <mid2>)`,
+      `<mid2>` is `retired (superseded_by: <root>)`, and
+      `<root>` is `healthy` with a valid
+      `uat_signings.verdict=pass` row, `Uat::run` with a Pass
+      verdict on `<leaf>` proceeds through its usual path and
+      signs. The gate walks both retirement hops before landing
+      on `<root>`. Without this, a second-era retirement (a
+      story whose successor was itself later retired in favour
+      of a newer replacement) would block every descendant, and
+      the tree metaphor's "eras succeeding eras" promise would
+      decay to "one retirement hop maximum." The visited-set
+      guard on the chain-walk (see guidance) bounds the
+      traversal to corpus size regardless of chain depth.
+  - file: crates/agentic-uat/tests/uat_permits_on_terminal_retired_with_no_successor.rs
+    justification: |
+      Proves the terminal-retirement semantics from the gate's
+      perspective: given a descendant `<leaf>` whose
+      `depends_on` names `<mid>`, where `<mid>` is `retired`
+      with NO `superseded_by` field — and more generally where
+      the chain-walk from `<mid>` terminates at a retired story
+      that carries no further supersession edge — `Uat::run`
+      with a Pass verdict on `<leaf>` proceeds through its
+      usual path and signs. A retired-terminal ancestor is
+      satisfied: it means "this branch was pruned with no
+      replacement" — a legitimate shape for experiments that
+      were tried and abandoned — and the dependency edge is
+      satisfied by the fact of retirement alone. This mirrors
+      story 21's `uat_permits_retired_ancestor_with_no_successor`
+      test at story 11's boundary: story 21 owns the lifecycle
+      contract; story 11 owns the gate's evaluation rule, and
+      both must agree. Without this, retired stories with no
+      successor would permanently block every descendant and
+      the only escape would be hand-editing `depends_on` across
+      the subtree — re-introducing the destructive-surgery
+      pressure story 21 exists to eliminate.
+  - file: crates/agentic-uat/tests/uat_refuses_retirement_chain_cycle.rs
+    justification: |
+      Proves defence-in-depth on supersession cycles: given a
+      `stories/` directory the loader accepted but where a
+      supersession cycle somehow reaches the UAT call (e.g. a
+      regression in story 21's load-time
+      `SupersededByCycle` check, or an in-memory corruption of
+      the chain), `Uat::run` on a descendant whose chain-walk
+      would traverse that cycle returns `UatError::Cycle`
+      naming a participating edge, writes no row, and does not
+      rewrite any YAML. The reused variant is intentional: the
+      gate has one cycle-refusal shape, not two, because an
+      operator-visible "cycle in the story graph" is the same
+      failure whether the cycle is along `depends_on` edges or
+      `superseded_by` edges — both collapse the invariant that
+      ancestry is a DAG. Without this, a supersession cycle
+      that slipped past the loader would either loop forever
+      inside the chain-walk or panic — both strictly worse
+      than the loud refusal story 11 already contracts for
+      `depends_on` cycles.
   - file: crates/agentic-cli/tests/uat_ancestor_refusal_exits_2.rs
     justification: |
       Proves the typed refusal reaches the operator through the
@@ -314,6 +413,118 @@ guidance: |
     `UatError::Cycle { edge }` and stop. This mirrors the
     dashboard's cycle-refusal contract pinned in story 10.
 
+    Supersession cycles (added via story 21's amendment). The
+    chain-walk described in "Retirement semantics" below
+    maintains its OWN visited set keyed on story id. If a
+    `superseded_by` chain forms a cycle that reaches the gate
+    (story 21's `SupersededByCycle` load-time check should
+    have caught it, but the gate defends in depth), the same
+    `UatError::Cycle` variant is returned — one cycle-refusal
+    shape, not two. Rationale: the operator-visible failure
+    "cycle in the story graph" is identical whether the cycle
+    is along `depends_on` edges or `superseded_by` edges; both
+    collapse the invariant that the ancestry is a DAG. The
+    walk's two visited sets (outer `depends_on` walk, inner
+    chain-walk) are independent because the graphs are
+    orthogonal — a story may legitimately appear in both.
+
+  Retirement semantics (added via story 21's amendment).
+    Retired is not a failure state. Retired means the story
+    was superseded — its health responsibility has transferred
+    to whatever `superseded_by` names. The gate reflects that
+    by making retired ancestors TRANSPARENT during traversal:
+    when the gate encounters a retired ancestor it does not
+    refuse (story 11's original behaviour for any non-healthy
+    status) and does not silently skip (the simplistic
+    alternative); it WALKS the `superseded_by` chain.
+
+    Chain-walk algorithm. For a direct or transitive ancestor
+    `A` reached during the `depends_on` traversal, evaluate:
+
+    ```
+    fn is_ancestor_satisfied(A) -> Result<(), UatError> {
+        let mut cursor = A;
+        let mut visited = HashSet::new();
+        loop {
+            if !visited.insert(cursor.id) {
+                return Err(UatError::Cycle { ... });
+            }
+            match cursor.status {
+                Healthy if has_valid_signing(cursor) => return Ok(()),
+                Healthy => return Err(AncestorNotHealthy {
+                    ancestor_id: cursor.id,
+                    reason: NoSigningRow,
+                }),
+                Retired => match cursor.superseded_by {
+                    Some(next_id) => {
+                        cursor = load(next_id);
+                        continue; // walk the chain
+                    }
+                    None => return Ok(()), // terminal retirement permits
+                },
+                Proposed | UnderConstruction | Unhealthy => {
+                    return Err(AncestorNotHealthy {
+                        ancestor_id: cursor.id,
+                        reason: StatusNotHealthy,
+                    });
+                }
+            }
+        }
+    }
+    ```
+
+    Error variant composition. The refusal uses the EXISTING
+    `UatError::AncestorNotHealthy { ancestor_id, reason }`
+    variant unchanged. The `ancestor_id` field always names
+    the TERMINAL link of the chain-walk — the first id that
+    is neither healthy-with-signing nor transparent (i.e.
+    neither retired-with-successor nor terminal-retirement).
+    For a chain `leaf → retired_mid → under_construction_root`,
+    the refusal names `root`, not `mid`. Rationale: retired is
+    a terminal lifecycle from the gate's perspective —
+    operators cannot un-retire a story or re-UAT it; they can
+    only push the successor to healthy. Naming the retired
+    intermediary in the refusal would point at an un-actionable
+    id. The reason sub-enum is unchanged from the original
+    story 11 contract (NoSigningRow, StatusNotHealthy, etc.);
+    no new reason variant is introduced by retirement because
+    retired ancestors never surface as errors.
+
+    Terminal-retired-no-successor: permits. A retired story
+    with no `superseded_by` field terminates the chain-walk
+    as satisfied. Rationale: terminal retirement is the
+    "branch pruned with no replacement" shape (an experiment
+    tried and abandoned). Refusing to sign a descendant on
+    that basis would force hand-editing `depends_on` across
+    the subtree to remove the edge — exactly the destructive-
+    surgery pressure story 21 exists to eliminate. This
+    decision is consistent with story 21's own
+    `uat_permits_retired_ancestor_with_no_successor` test;
+    the two stories agree on the same semantic at their two
+    boundaries (story 21 owns the lifecycle, story 11 owns
+    the gate's evaluation rule). Alternative "refuse on
+    terminal retirement" was rejected because it would make
+    retirement with no successor a second-class lifecycle —
+    useful only when the author happens to have a
+    replacement ready — and would re-introduce the hand-
+    migration burden for every pruned-without-replacement
+    era.
+
+    Composition with the outer `depends_on` walk. The chain-
+    walk is strictly internal to the ancestor-satisfaction
+    check. The OUTER walk (story 11's original transitive
+    `depends_on` traversal) is unchanged: it still walks
+    every `depends_on` edge and for each ancestor calls
+    `is_ancestor_satisfied`. A retired ancestor's
+    `depends_on` edges are NOT traversed by the outer walk —
+    once the chain-walk resolves the retired ancestor
+    (satisfied or surfacing the successor's failure), the
+    outer walk continues with the NEXT `depends_on` edge of
+    the descendant under UAT. The two walks are orthogonal:
+    retirement-transparency follows `superseded_by`,
+    depends_on-transitivity follows `depends_on`, and they
+    compose cleanly because the edge labels are disjoint.
+
   Signing log bookkeeping on refusal.
     A refusal writes NOTHING to `uat_signings`. No "refused"
     record, no partial row, no marker. Rationale: the signing
@@ -358,20 +569,43 @@ guidance: |
     pattern's contract fits both axes without modification.
 
   Test file locations.
-    Library-level tests (six tests:
+    Library-level tests (eleven tests — six from story 11's
+    original contract plus five added via story 21's amendment
+    for chain-walking semantics:
     `uat_refuses_unhealthy_ancestor.rs`,
     `uat_permits_all_healthy_ancestors.rs`,
     `uat_refuses_ancestor_with_stale_yaml_status.rs`,
     `uat_refuses_transitive_unhealthy_ancestor.rs`,
     `uat_fail_verdict_ignores_ancestor_health.rs`,
-    `uat_refuses_ancestor_cycle.rs`) live under
+    `uat_refuses_ancestor_cycle.rs`,
+    `uat_permits_retired_ancestor_with_healthy_successor.rs`,
+    `uat_refuses_when_retired_chain_terminates_in_unhealthy.rs`,
+    `uat_walks_multi_hop_supersession_chain.rs`,
+    `uat_permits_on_terminal_retired_with_no_successor.rs`,
+    `uat_refuses_retirement_chain_cycle.rs`) live under
     `crates/agentic-uat/tests/` as Rust integration tests. They
     construct a temporary git repo via `tempfile` + `git2`, seed
     it with a minimal multi-story fixture (a three-story chain is
     sufficient for the transitive test; a two-story pair for the
-    direct test), and either pre-seed `uat_signings` rows via
-    `MemStore` or drive `Uat::run` against the ancestors first to
-    build real rows.
+    direct test; a four-story chain for the multi-hop supersession
+    test), and either pre-seed `uat_signings` rows via `MemStore`
+    or drive `Uat::run` against the ancestors first to build real
+    rows.
+
+    Relationship to story 21's own acceptance tests. Story 21
+    owns analogous tests at the retirement-lifecycle boundary
+    (`uat_permits_retired_ancestor_when_successor_healthy.rs`,
+    `uat_refuses_when_retired_chain_points_at_unhealthy_successor.rs`,
+    `uat_permits_retired_ancestor_with_no_successor.rs`,
+    `uat_refuses_transitive_unhealthy_through_retirement_chain.rs`).
+    The two sets intentionally mirror each other at different
+    boundaries: story 21 pins the LIFECYCLE (retired is a
+    first-class status with a supersession edge), story 11 pins
+    the GATE's evaluation rule (the chain-walk algorithm and
+    terminal-link naming). Both are authoritative; neither
+    subsumes the other. The file paths differ so each test
+    remains 1-to-1 bound to exactly one story per the schema's
+    test-binding rule.
 
     Binary-level tests (one test:
     `uat_ancestor_refusal_exits_2.rs`) lives under
@@ -397,10 +631,43 @@ guidance: |
     CI runs — running tests on a story whose ancestry is broken
     is legitimate (you may be debugging that exact situation).
     The gate applies only to the Pass attestation path.
+
+  Relationship to story 21 (retirement lifecycle).
+    Direct dependency. Story 21 introduces the `retired` status
+    and the `superseded_by` edge; this story extends the
+    ancestor gate to walk that edge. Story 21's schema edit
+    (the `retired` enum value plus the optional
+    `superseded_by` field) lands via story 6's amendment pass
+    per research folder note 13's bundling — this story
+    consumes the schema shape but does not edit
+    `schemas/story.schema.json` directly. The chain-walk
+    algorithm (see "Retirement semantics" in guidance) is the
+    gate-side half of story 21's contract; story 21's own
+    acceptance tests cover the lifecycle-shape half
+    (supersession edges load, retired rows hide from the
+    frontier, canopy mode groups them). The two stories are
+    intentionally coupled: neither is complete without the
+    other.
+
+    Shipping order. Story 21 ships first (it proposes the
+    lifecycle); this amendment reaches `under_construction`
+    when story 21 reaches `proposed`, auto-revert-on-trigger
+    per the eventual-consistency posture documented in
+    research folder note 13. The amendment sits red until the
+    schema edit lands via story 6 and the gate-side
+    implementation reaches the chain-walking semantics pinned
+    by the new tests above. Re-UAT fires once all five new
+    tests are green alongside the original six; the story
+    returns to `healthy` via a fresh `uat_signings.verdict=pass`
+    row. No separate "pre-amendment baseline re-UAT" is
+    required — the eventual-consistency posture lets the
+    corpus converge over wall-clock time with multiple
+    stories simultaneously red.
 depends_on:
 - 1
 - 3
 - 6
+- 21
 related_files:
 - crates/agentic-uat/src/**
 - crates/agentic-cli/src/**
