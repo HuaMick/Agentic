@@ -6,7 +6,7 @@ outcome: |
   dashboard, ancestor gate — treats the retired story as a transparent
   redirection to its successor so the story tree can grow new eras
   without destructive deletion.
-status: proposed
+status: under_construction
 patterns: []
 acceptance:
   tests:

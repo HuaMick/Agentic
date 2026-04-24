@@ -1,0 +1,41 @@
+id: 14
+title: test-build scaffolds via claude-as-component library method
+outcome: |
+  The test-builder library can spawn claude via subprocess to author
+  failing-test scaffolds, bundling AI inference into the library and
+  using claude's API key from the environment, so authors do not need
+  to hand-author every scaffold.
+status: retired
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-test-builder/tests/story_14_retired_stub.rs
+    justification: |
+      Stub test for retired story 14. This story was replaced by
+      story 15 on 2026-04-20, which implements the claude-as-user
+      model instead of the retired claude-as-component pattern. The
+      retired status is verified by the fossil loader integration test
+      in story 21.
+  uat: |
+    (retired)
+guidance: |
+  This story was retired on 2026-04-20 in favor of story 15, which
+  replaced it with the claude-as-user model. Story 14 embedded AI
+  inference INSIDE the test-builder library (the library spawned
+  `claude` to author scaffold bodies) — the claude-as-component shape
+  the legacy Python system died of. Story 15 replaces this with a
+  plan/record split whose library never spawns an LLM: the user
+  (human or claude-as-agent) writes scaffolds with their own tools,
+  and the CLI atomically verifies and records red-state evidence.
+  See docs/reviews/claude-as-user-audit.md and story 15's guidance
+  section titled "Story 14 (retired 2026-04-20)" for the full
+  justification.
+superseded_by: 15
+retired_reason: |
+  Story 14's claude-as-component pattern was identified as the
+  architectural failure mode that bloated the legacy Python system.
+  Story 15 replaces it with claude-as-user on 2026-04-20, moving
+  inference out of the library entirely and into the user's control.
+  See docs/reviews/claude-as-user-audit.md for the audit.
+depends_on: []
+related_files: []

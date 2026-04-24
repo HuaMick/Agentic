@@ -1,0 +1,32 @@
+id: 7
+title: Record atomic red-state evidence from test scaffolds
+outcome: |
+  The test-builder can deterministically record red-state evidence
+  from failing scaffolds without chef-mode guessing, so the gate
+  between red scaffolds and green implementation has measurable
+  closure.
+status: retired
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-test-builder/tests/story_7_retired_stub.rs
+    justification: |
+      Stub test for retired story 7. This story was folded into
+      story 15 on 2026-04-20. The retired status is verified by the
+      fossil loader integration test in story 21.
+  uat: |
+    (retired)
+guidance: |
+  This story was folded into story 15 on 2026-04-20 as part of a
+  consolidation-over-fragment pass. Story 7 owned the evidence-
+  atomicity contract for `agentic test-build`; story 15 incorporated
+  its substantive contracts in whole and supersedes it directly. See
+  story 15's guidance section titled "Story 7 (retired, folded into
+  this story 2026-04-20)" for the full context.
+superseded_by: 15
+retired_reason: |
+  Folded into story 15 on 2026-04-20. The evidence-atomicity
+  contract for test-build scaffolds moved from story 7 into story 15's
+  plan-and-record CLI model.
+depends_on: []
+related_files: []

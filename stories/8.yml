@@ -1,0 +1,39 @@
+id: 8
+title: CLI shell for stories health and uat verdict
+outcome: |
+  The agentic CLI exposes two top-level subcommands `agentic stories
+  health` and `agentic uat` so developers can drive the core verdicting
+  and visibility workflows from the command line.
+status: retired
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-cli/tests/story_8_retired_stub.rs
+    justification: |
+      Stub test for retired story 8. This story was consolidated into
+      stories 1 and 3 on 2026-04-19 after an audit found the split was
+      along library/binary boundaries rather than user journeys. The
+      retired status is verified by the fossil loader integration test
+      in story 21.
+  uat: |
+    (retired)
+guidance: |
+  This story was retired on 2026-04-19 after an audit found the split
+  was along library/binary crate boundaries rather than along user
+  journeys. Story 8 explicitly joined two distinct observables (signing
+  a verdict AND reading the dashboard), which the retirement resolved
+  by folding the CLI wiring into stories 1 and 3 instead. Story 1
+  owns the UAT verdict signing contract; story 3 owns the dashboard
+  queries. See commit e051fea for the consolidation details and
+  stories 1 and 3 for the current bindings.
+superseded_by: 1
+retired_reason: |
+  Story 8's dashboard half moved into story 3 and its UAT half into
+  story 1 on 2026-04-19. The audit found the split was along
+  library/binary boundaries rather than user journeys. The CLI
+  bindings for both commands now live in those respective stories'
+  contracts. Story 1 is named as the primary successor for single-id
+  `superseded_by`; story 3 is the secondary (see story 3's
+  acceptance.tests for the dashboard CLI wiring).
+depends_on: []
+related_files: []
