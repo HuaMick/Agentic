@@ -1,0 +1,441 @@
+id: 23
+title: "`agentic test-build record` emits mixed red/preserved/re-authored verdicts"
+outcome: |
+  A test-builder agent running `agentic test-build record <id>` against an
+  amended story whose acceptance tests are a mix of red, preserved, and
+  re-authored scaffolds receives an atomic evidence JSONL row that
+  classifies each scaffold with one of the three sanctioned verdicts.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-test-builder/tests/record_emits_preserved_verdict_for_unchanged_scaffold.rs
+    justification: |
+      Proves the PRESERVED verdict path reaches the evidence JSONL:
+      given a fixture story whose `acceptance.tests[]` names one
+      scaffold whose file exists on disk unchanged since the story's
+      most recent evidence row (the three-gate signal does not fire
+      — either the story YAML has no commits since the last evidence
+      row, or the story's status is `healthy`, or the tree is dirty
+      in a way that blocks re-authoring), `agentic test-build record
+      <id>` classifies that scaffold as `verdict: "preserved"`, runs
+      NO probe against it (no `cargo check`, no `cargo test`), and
+      writes one JSONL row whose verdicts entry for that file carries
+      exactly `{file, verdict: "preserved"}` — no `red_path` key, no
+      `diagnostic` key. Without this test, the CLI would continue to
+      refuse on any scaffold that parses green, and the three-verdict
+      shape named in ADR-0005's 2026-04-24 sub-amendment would remain
+      reachable only by test-builder self-authoring the JSONL — the
+      exact fallback the six Phase 0 incidents documented.
+  - file: crates/agentic-test-builder/tests/record_emits_re_authored_verdict_when_three_gates_pass.rs
+    justification: |
+      Proves the RE-AUTHORED verdict path reaches the evidence JSONL:
+      given a fixture story whose status is `under_construction`,
+      whose YAML has a more recent `git log` commit than the file's
+      most recent `evidence/runs/<id>/*.jsonl` row, and whose working
+      tree is clean (all three gates of the ADR-0005 amendment pass),
+      and whose named scaffold on disk now probes red against the
+      amended justification, `agentic test-build record <id>`
+      classifies that scaffold as `verdict: "re-authored"`, writes
+      `red_path` (one of `"compile"` or `"runtime"`) and a non-empty
+      per-iteration `diagnostic` alongside that verdict, and exits 0.
+      The three gates are checked git-natively — no new YAML field,
+      no new flag. Without this test, the RE-AUTHORED distinction
+      collapses into plain `"red"` at the CLI boundary, and the
+      audit-trail value the sub-amendment grants ("which verdicts in
+      this row were re-authoring events vs first-authoring?") is
+      lost.
+  - file: crates/agentic-test-builder/tests/record_emits_mixed_verdicts_in_one_atomic_row.rs
+    justification: |
+      Proves the atomicity invariant holds across mixed verdicts:
+      given a fixture story with three `acceptance.tests[]` entries
+      whose scaffolds classify respectively as `red`, `preserved`,
+      and `re-authored` under the three gates, `agentic test-build
+      record <id>` on a clean tree writes exactly one JSONL file at
+      `evidence/runs/<id>/<timestamp>-red.jsonl` whose `verdicts`
+      array has exactly three entries in declaration order, each
+      carrying the correct verdict string and the correct shape per
+      verdict (red + re-authored rows carry `red_path` and
+      `diagnostic`; preserved rows do not). If ANY per-scaffold
+      probe or classification errors out mid-run (e.g. the third
+      scaffold's three-gate check throws because the git repo is
+      wedged), no partial JSONL row is written and no directory is
+      created under `evidence/runs/<id>/`. Without this test, a
+      partial-amendment pipeline could write a row with only the
+      `red` scaffolds and silently drop the `preserved` and
+      `re-authored` entries — the evidence chain would lie about
+      which scaffolds the CLI actually considered at that commit,
+      and the per-commit-atomicity invariant the amendment pinned
+      would regress.
+  - file: crates/agentic-test-builder/tests/record_no_longer_refuses_on_green_scaffold_under_preserve.rs
+    justification: |
+      Proves the regression fence on the pre-sub-amendment behaviour:
+      given a fixture story with one scaffold that exists on disk and
+      probes green (via `cargo check` succeeding AND `cargo test`
+      exiting 0) BUT whose classification under the three gates is
+      PRESERVED (e.g. no commits on the story YAML since the last
+      evidence row), `agentic test-build record <id>` no longer
+      returns `TestBuilderError::ScaffoldNotRed` for that scaffold —
+      it writes a `"preserved"` verdict instead, exits 0, and writes
+      the evidence row. The previous `ScaffoldNotRed` refusal is
+      preserved ONLY when the scaffold's classification is
+      `re-authored` (three gates passed; probe is expected red) or
+      the scaffold is a first-authoring (new story, never had an
+      evidence row). Without this test, the sub-amendment's "the CLI
+      no longer exits non-zero on the first non-red scaffold when the
+      scaffold legitimately classifies as preserved or re-authored"
+      observable is unpinned, and a future refactor could resurrect
+      the blanket refusal.
+  - file: crates/agentic-test-builder/tests/record_new_story_loop_emits_all_red_verdicts.rs
+    justification: |
+      Proves the new-story loop (every scaffold `red`, one row per
+      invocation) is preserved additively: given a fixture story
+      with `status: proposed`, whose scaffolds are all newly
+      authored (no prior `evidence/runs/<id>/*.jsonl` exists for
+      that story) and all probe red, `agentic test-build record
+      <id>` writes exactly one JSONL row whose `verdicts` array
+      has one entry per scaffold, every entry carrying `verdict:
+      "red"` (NOT `"re-authored"`; re-authored requires an earlier
+      evidence row to re-author from), each with `red_path` and a
+      non-empty `diagnostic`. Without this test, the classification
+      rule could accidentally route first-authoring scaffolds
+      through the re-authored path (because Gate 2's "story YAML
+      newer than last evidence row" trivially holds when there is
+      no last evidence row), and the audit trail would lose the
+      "this is the story's first red record" signal from day one
+      of a new story's life.
+  - file: crates/agentic-test-builder/tests/record_classification_matches_three_gate_rule.rs
+    justification: |
+      Proves the classifier's gate semantics at the library
+      boundary: given a matrix of fixture stories covering the
+      gate combinations the ADR-0005 amendment enumerates —
+      (status `healthy` + YAML newer than evidence + clean tree →
+      PRESERVED; status `under_construction` + YAML older-or-equal
+      than evidence + clean tree → PRESERVED; status
+      `under_construction` + YAML newer + dirty tree → refused
+      by the dirty-tree gate before classification) — the
+      library function `TestBuilder::classify_scaffold(&Story,
+      &Path, &Repo) -> ScaffoldClassification` returns a typed
+      enum value matching the amendment's rule table, without
+      probing, without touching the evidence directory, and
+      without mutating the working tree. The three-gate rule is
+      named once, in code, and this test is the shape-fence that
+      catches a drift between the ADR and the implementation.
+      Without this test, the amendment's carve-out semantics live
+      only in prose, and the CLI's behaviour against mixed
+      pipelines depends on an undocumented path through its
+      internals.
+  - file: crates/agentic-cli/tests/test_build_record_mixed_verdicts_through_binary.rs
+    justification: |
+      Proves the contract reaches the operator through the
+      `agentic` binary: running `agentic test-build record
+      <fixture-id>` against a fixture story whose scaffolds
+      classify as a mix of `red`, `preserved`, and `re-authored`
+      exits 0, writes the mixed-verdict evidence JSONL, and names
+      each recorded file and its verdict in stdout. Without this,
+      the library-level claims are library-level claims only —
+      the argv-to-subcommand wire could drop the classification
+      output, silently map `preserved` to `red` on write, or
+      misroute the evidence path, and the operator running the
+      CLI against a real amended story would not notice until the
+      next UAT pass tripped over the bad row.
+  uat: |
+    Goal: convince yourself that `agentic test-build record` now
+    handles the partial-amendment scenario — some scaffolds red,
+    some preserved, some re-authored — by emitting a single atomic
+    evidence JSONL row carrying one verdict per
+    `acceptance.tests[].file` entry, with each verdict drawn from
+    the three-value set the ADR-0005 sub-amendment names. Convince
+    yourself the new-story loop (every scaffold red) still works
+    unchanged; the new capability is additive, not substitutive.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status
+         --porcelain` and confirm it is empty.
+      2. Install the CLI: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves.
+      3. On a scratch branch, author three fixture stories under
+         `stories/<fixture-root>/`:
+           a. `<new-id>.yml` with `status: proposed`, two
+              acceptance tests, and newly-written scaffolds that
+              both probe red. No prior `evidence/runs/<new-id>/`.
+           b. `<amended-id>.yml` with `status: under_construction`,
+              three acceptance tests, one existing
+              `evidence/runs/<amended-id>/<old-timestamp>-red.jsonl`
+              in which all three scaffolds previously probed red,
+              and a `git log` on `stories/<amended-id>.yml`
+              showing one commit AFTER the evidence row's `commit`
+              field. Two of the three scaffolds should now probe
+              red again (their justifications were tightened, the
+              existing files are left from the last green cycle
+              but no longer satisfy the amended observables); the
+              third scaffold's justification is unchanged and its
+              file on disk is byte-identical to its state at the
+              last evidence commit.
+           c. `<preserved-id>.yml` with `status: healthy`, one
+              acceptance test, one existing scaffold that probes
+              green (because the impl was built to satisfy it and
+              no amendment has occurred), and an
+              `evidence/runs/<preserved-id>/<old-timestamp>-red
+              .jsonl` row in which that scaffold is the only
+              entry and carried `verdict: "red"` at its commit.
+         Stage and commit every fixture change to the scratch
+         branch.
+
+    New-story loop (regression fence):
+      4. From the scratch branch head, run `agentic test-build
+         record <new-id>`.
+      5. Observe:
+           - Process exits 0.
+           - stdout names both scaffolds and reports verdict
+             `red` for each.
+           - Exactly one new file appears at `evidence/runs/
+             <new-id>/<timestamp>-red.jsonl`.
+           - `cat` it. `verdicts[]` has two entries, each with
+             `verdict: "red"`, a `red_path` in `{"compile",
+             "runtime"}`, and a non-empty `diagnostic`.
+           - No `"re-authored"` or `"preserved"` verdicts appear
+             anywhere in the row. The new-story loop is unchanged.
+
+    Mixed-amendment pipeline (the new capability):
+      6. `git reset --hard` to the scratch-branch commit. Run
+         `agentic test-build record <amended-id>`.
+      7. Observe:
+           - Process exits 0.
+           - stdout names all three scaffolds. The two whose
+             justifications changed report verdict `re-authored`
+             (or `red` — the ADR allows both; the CLI's choice
+             is stable and documented in guidance). The third
+             reports verdict `preserved`.
+           - Exactly one new file appears at `evidence/runs/
+             <amended-id>/<timestamp>-red.jsonl`.
+           - `cat` it. `verdicts[]` has three entries in
+             declaration order. The two probed-red entries have
+             `red_path` and non-empty `diagnostic`. The
+             `preserved` entry has neither `red_path` nor
+             `diagnostic`.
+
+    Grandfathered-preserve walkthrough (pre-ADR-0005 bridge):
+      8. `git reset --hard` to the scratch-branch commit. Run
+         `agentic test-build record <preserved-id>`.
+      9. Observe:
+           - Process exits 0.
+           - stdout names the one scaffold and reports verdict
+             `preserved` (not `red`, even though the scaffold
+             probes green — the CLI no longer probes preserved
+             scaffolds).
+           - Exactly one new JSONL row appears at `evidence/
+             runs/<preserved-id>/<timestamp>-red.jsonl` with
+             one verdict entry carrying `verdict: "preserved"`.
+           - The prior evidence row at `evidence/runs/
+             <preserved-id>/<old-timestamp>-red.jsonl` is
+             still on disk, byte-identical. The chain is
+             append-only.
+
+    Refusal walkthroughs:
+     10. `git reset --hard` and introduce a random untracked
+         file at the repo root (e.g. `echo '' >
+         /tmp/scratch && cp /tmp/scratch README.md.tmp`). Run
+         `agentic test-build record <amended-id>`. Confirm
+         exit 2, `TestBuilderError::DirtyTree`, no evidence
+         row written. The mixed-verdict capability does not
+         weaken the dirty-tree gate.
+     11. `git reset --hard` and `git clean -fd`. Edit
+         `<amended-id>.yml` to add a fourth `acceptance.tests[]`
+         entry whose scaffold path does NOT exist on disk.
+         Run `agentic test-build record <amended-id>`. Confirm
+         exit 2, `TestBuilderError::ScaffoldMissing`, no
+         evidence row written. Missing scaffolds still refuse
+         atomically regardless of the other scaffolds'
+         classification.
+
+    Cleanup:
+     12. `git reset --hard <SHA-before-UAT>` and `git clean -fd`
+         to restore the working tree and the fixture stories
+         to their pre-walkthrough state.
+     13. Revert to `main` and delete the scratch branch.
+     14. If you want the installed binary gone: `cargo
+         uninstall agentic-cli`.
+guidance: |
+  This story adds a single capability to `agentic test-build
+  record`: classify each `acceptance.tests[].file` entry into one
+  of the three verdicts the ADR-0005 2026-04-24 sub-amendment
+  names — `red`, `preserved`, `re-authored` — and emit one
+  evidence JSONL row containing one entry per scaffold, all
+  verdicts carried at the same per-commit-atomic granularity the
+  amendment pins. Story 15 stays unchanged; the new-story loop it
+  describes continues to work, now as the special case where every
+  verdict happens to be `red`.
+
+  Trigger. During the Phase 0 amendment pipeline, six of seven
+  amended-story scaffolding passes hit the same CLI gap: `record`
+  refused to emit an evidence row whenever any named scaffold
+  probed non-red, even when the scaffold legitimately classified
+  as `preserved` or `re-authored` under the three-gate edit rule.
+  Each pass fell back to test-builder authoring the evidence JSONL
+  directly — which works but routes around the sanctioned writer.
+  This story closes that gap so test-builder can invoke `agentic
+  test-build record` as a normal user, under every classification
+  shape the ADR allows.
+
+  Classification is inferred, not declared. The CLI derives each
+  scaffold's classification from repository state — it does NOT
+  take a classification manifest from the caller. Adding an agent-
+  authored manifest would introduce a forgery axis the amendment
+  explicitly closed (the whole reason the signal is git-native is
+  to avoid a YAML field the caller could set wrong). For each
+  scaffold named in the story's `acceptance.tests[]`:
+
+    1. If the story has NO prior `evidence/runs/<id>/*.jsonl` row
+       at all → first-authoring: probe the scaffold; on red,
+       classify `red`; on green or unparseable or missing, fail
+       exactly as today (`ScaffoldNotRed`, `ScaffoldParseError`,
+       `ScaffoldMissing`).
+    2. Else read the most recent `evidence/runs/<id>/*.jsonl` row
+       and its `commit` field. Evaluate the three gates from
+       ADR-0005's amendment:
+         Gate A: `story.status == "under_construction"`.
+         Gate B: `git log -1 --format=%H stories/<id>.yml`
+                 returns a commit strictly AFTER the evidence
+                 row's `commit` (HEAD-reachable).
+         Gate C: working tree clean (the existing dirty-tree
+                 check; already in place for the whole command).
+       - All three gates pass → eligible for RE-AUTHOR: probe the
+         scaffold; on red, classify `re-authored` (or `red`;
+         either is allowed per the sub-amendment, but the CLI
+         picks `re-authored` when the gates fired, for the
+         audit-trail value); on green, `ScaffoldNotRed`.
+       - Any gate fails → classify `preserved`: emit the
+         `preserved` verdict with no probe.
+    3. The very first evidence row written for a story whose
+       `status` was `healthy` BEFORE ADR-0005 was accepted and
+       whose scaffolds have no prior evidence chain is the
+       grandfathered-bridge case: classify `preserved` directly
+       (the story's pre-ADR-0005 `healthy` signing stands in for
+       the missing `red` row). Detection: no prior
+       `evidence/runs/<id>/*.jsonl` AND `status: healthy`.
+       Subsequent amendments that move the test's contract
+       trigger the normal RE-AUTHOR path and retire the
+       grandfather state.
+
+  Evidence-row shape. Per-verdict entries extend to three shapes.
+  The top-level keys (`run_id`, `story_id`, `commit`, `timestamp`,
+  `verdicts`) do NOT change — only the per-verdict shape gains
+  two new values:
+
+    - `red`: `{file, verdict: "red", red_path, diagnostic}`.
+      Unchanged from story 15.
+    - `preserved`: `{file, verdict: "preserved"}`. No `red_path`.
+      No `diagnostic`. Omitted keys, not null.
+    - `re-authored`: `{file, verdict: "re-authored", red_path,
+      diagnostic}`. Identical in shape to `red`; the verdict
+      string is the only distinction.
+
+    A strict parser on the JSONL must accept all three shapes
+    without `additionalProperties` failures. The shape is
+    re-pinned by `record_emits_mixed_verdicts_in_one_atomic_row
+    .rs` so that a drift (e.g. a refactor adding a null
+    `diagnostic: null` on preserved rows) is caught at the test
+    boundary.
+
+  Probe discipline. `preserved` verdicts are the ONLY classification
+  that skips the probe. `red` and `re-authored` both run the
+  existing probe (`cargo check` then `cargo test` per story 15's
+  contract), and the observed `red_path` is what lands in
+  evidence even if it disagrees with any upstream hint. This
+  preserves story 15's "record re-probes; plan's heuristic is a
+  hint" invariant.
+
+  Atomicity. The evidence-write atomicity rule from story 15
+  (record writes the directory and JSONL file in one final step
+  after every scaffold has been classified) carries over
+  unchanged. The classifier's three-gate evaluation is purely
+  read (git log, a file existence check, a stored evidence row
+  load), so it can precede the probe without any rollback logic.
+  If classification OR probe fails mid-run, no partial row is
+  written and no directory is created.
+
+  Fail-closed-on-dirty-tree remains a record-wide gate. Gate C
+  of the re-author carve-out is "working tree clean," and the
+  existing `DirtyTree` refusal (story 15) fires before any
+  classification runs. There is no world where a subset of
+  scaffolds classify as `re-authored` on a dirty tree — the
+  whole command refuses first. This is also why the classifier's
+  gate is redundant-by-design with the command-wide check: the
+  command-wide check means the classifier will never see a dirty
+  tree in practice, but keeping Gate C named in the classifier's
+  rule table keeps the ADR and the implementation legible
+  against each other.
+
+  Exit codes and typed errors.
+    - Success (all scaffolds classified, evidence written):
+      exit 0.
+    - `DirtyTree`: exit 2. Unchanged.
+    - `ScaffoldMissing`, `ScaffoldParseError`, `ScaffoldNotRed`
+      (for scaffolds whose classification is `red` or
+      `re-authored` and whose probe came back green or
+      unparseable): exit 2. Unchanged from story 15.
+    - Classifier-internal errors (e.g. git2 refuses to open
+      the repo, the evidence directory is unreadable): exit 2
+      with a new typed error variant whose name is
+      implementation-chosen (likely `ClassificationFailed` or
+      similar — story-writer does not prescribe the name;
+      build-rust does). The contract is "fail-closed with
+      distinct error, no partial row."
+
+  What this story is NOT.
+    - NOT an amendment to story 15. Story 15's contract (plan /
+      record shape, probe semantics, evidence atomicity,
+      dirty-tree gate, typed errors) is unchanged and stays
+      `healthy`. This story adds behaviour to `record`; it does
+      not reshape its existing surface.
+    - NOT an ADR edit. The ADR-0005 sub-amendment landed already.
+      This story is the CLI-level implementation of the shape the
+      ADR named.
+    - NOT a test-builder agent edit. The agent's spec already
+      carries the full three-gate classification logic per the
+      2026-04-24 amendment; what the agent has been doing via
+      self-authored JSONL fallbacks, the CLI now does natively.
+      Agent spec edits are out of this story's scope.
+    - NOT a schema change. No new field lands in story YAML. The
+      per-scaffold classification is inferred from git state
+      plus the evidence chain, not declared in the story file.
+    - NOT a new subcommand. `agentic test-build record` grows
+      behaviour; no `--preserved-manifest`, no
+      `--classify-as`, no `--allow-green-scaffolds` flag is
+      introduced. The sub-amendment's semantics are
+      unconditional at the CLI boundary.
+
+  Standalone-resilience posture. The classifier additions stay
+  inside `agentic-test-builder` and consume only the dependencies
+  already declared (`agentic-store`, `agentic-story`, `syn`,
+  `serde`/`serde_json`, `uuid`, `git2`). The three-gate evaluation
+  is a pure function of git state and the evidence chain — no
+  network, no LLM, no orchestrator dependency. The
+  standalone-resilience pattern's four conventions (dependency
+  floor, `*_standalone_resilience.rs` integration test, dumb CLI
+  shim, no in-crate LLM subprocess) all survive unchanged.
+
+  Fail-closed-on-dirty-tree posture. The command-wide dirty-tree
+  check remains the first thing `record` does. The new
+  classification path does not introduce a second opinion on tree
+  state; Gate C is a read of the same signal the command-wide
+  check already produced, kept in the rule table for legibility.
+
+  Why now. The Phase 0 amendment pipeline (seven amended stories,
+  six incidents where test-builder self-authored the evidence
+  JSONL) is the concrete trigger. Without this story, every
+  future amendment pass retains the self-authoring fallback,
+  which is a forgery axis one layer down from the evidence-
+  atomicity contract and a drift surface between the sanctioned
+  writer and the agent's adhoc writes. Closing the gap returns
+  the CLI to being the sole writer of `evidence/runs/<id>/*.jsonl`
+  across all classification paths.
+depends_on:
+- 15
+related_files:
+- crates/agentic-test-builder/src/**
+- crates/agentic-cli/src/**
+- docs/decisions/0005-red-green-is-a-contract.md
