@@ -4,27 +4,37 @@
 //!
 //! Justification (from stories/1.yml): proves the
 //! standalone-resilient-library claim — the UAT library is driven
-//! directly with only `agentic-store`, `agentic-events`, `agentic-story`,
-//! and `git2` wired up (no orchestrator, no runtime, no sandbox), and
-//! produces the same verdict-and-signing shape as the CLI path. Without
-//! this we cannot claim `agentic uat` is the layer that still promotes
-//! stories when the rest of the system is in flames; it would be just
-//! another thing that breaks together.
+//! directly with only `agentic-store`, `agentic-events`,
+//! `agentic-story`, and `git2` wired up (no orchestrator, no runtime,
+//! no sandbox, no CLI crate), and produces the same
+//! verdict-and-signing shape as the binary path. Without this we
+//! cannot claim `agentic uat` is the layer that still promotes stories
+//! when the rest of the system is in flames; it would be just another
+//! thing that breaks together.
 //!
 //! Pattern: standalone-resilient-library. The dependency floor is
 //! enforced by what this test file imports — ONLY `agentic_uat`,
 //! `agentic_store`, `agentic_story`, and `git2` from the workspace.
 //! Adding `agentic_orchestrator`, `agentic_runtime`, `agentic_sandbox`,
 //! or `agentic_cli` here would be a review-time red flag and the
-//! standalone-resilience claim would break. `agentic-events` is named
-//! in the allowed set by the story but is not yet a published workspace
-//! crate at this commit; the resilience claim is still witnessed by the
-//! absence of every forbidden crate from this file's imports.
+//! standalone-resilience claim would break. Per story 1's amendment,
+//! `agentic-signer` is now in the library's allowed dependency floor
+//! (it is itself a standalone-resilient library with a git2 + stdlib
+//! floor, so importing it does not breach this crate's own posture);
+//! this test transitively links `agentic-signer` through `agentic-uat`
+//! when invoking the amended `Uat::run(<id>, SignerSource::Resolve)`
+//! — but this file does NOT import `agentic_signer::*` directly,
+//! because the resilience claim is about what `agentic-uat` re-exports
+//! for its library callers, not about the floor's composition.
 //!
-//! Red today is compile-red via the missing `agentic_uat` public surface
-//! — `Uat`, `Uat::run`, `Verdict`, `UatError`, `UatExecutor`,
-//! `ExecutionOutcome`, `StubExecutor` do not yet exist in
-//! `crates/agentic-uat/src/lib.rs`.
+//! Red today is compile-red via the missing `agentic_uat::SignerSource`
+//! symbol: story 1's amendment (2026-04-23) changed `Uat::run`'s
+//! signature to take a `SignerSource` as its second argument, and the
+//! `SignerSource` type is re-exported through `agentic_uat::*` per
+//! story 18's wire contract. Until that wire lands, `use
+//! agentic_uat::SignerSource` fails to resolve and the two-arg
+//! `uat.run(...)` call site fails to compile. The verdict-and-signing
+//! observable this test pins is unchanged by the amendment.
 
 // Compile-time witness: the only workspace crates this test names are
 // `agentic_uat`, `agentic_store`, and `agentic_story`. Anything else in
@@ -35,7 +45,9 @@ use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
 use agentic_story::Story;
-use agentic_uat::{ExecutionOutcome, StubExecutor, Uat, UatError, UatExecutor, Verdict};
+use agentic_uat::{
+    ExecutionOutcome, SignerSource, StubExecutor, Uat, UatError, UatExecutor, Verdict,
+};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4245;
@@ -96,7 +108,9 @@ fn uat_library_is_driveable_with_only_the_declared_dependency_floor() {
     let executor = StubExecutor::always_pass();
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
-    let verdict = uat.run(STORY_ID).expect("standalone uat must produce a verdict");
+    let verdict = uat
+        .run(STORY_ID, SignerSource::Resolve)
+        .expect("standalone uat must produce a verdict");
     assert!(
         matches!(verdict, Verdict::Pass),
         "standalone stub-always-pass path must yield a Pass verdict; got {verdict:?}"

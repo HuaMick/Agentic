@@ -1,27 +1,35 @@
 //! Story 1 acceptance test: clean failure on an unknown story id.
 //!
 //! Justification (from stories/1.yml): proves clean failure on bad
-//! input — invoking `Uat::run` with a non-existent story id returns
-//! `UatError::UnknownStory`, does not panic, writes no row to
-//! `uat_signings`, and does not create or touch any YAML file.
-//! Without this a typo or stale id could produce a panic trace that
-//! looks like a system fault when it is actually user error — eroding
-//! trust in the verdict precisely when we need it.
+//! input at the library boundary — invoking `Uat::run` with a
+//! non-existent story id returns `UatError::UnknownStory`, does not
+//! panic, writes no row to `uat_signings`, and does not create or
+//! touch any YAML file. Without this a typo or stale id could produce
+//! a panic trace that looks like a system fault when it is actually
+//! user error — eroding trust in the verdict precisely when we need
+//! it.
 //!
 //! The scaffold builds a fresh clean-tree git repo with an EMPTY
-//! `stories/` directory (no fixture written), invokes `Uat::run` with
-//! an id that does not exist, and asserts: a typed
-//! `UatError::UnknownStory { id }` carrying the bad id, zero signing
-//! rows, and no file created under `stories/`. Red today is compile-red
-//! via the missing `agentic_uat` public surface (`Uat`, `UatError`,
-//! `StubExecutor`).
+//! `stories/` directory (no fixture written), invokes the amended
+//! `Uat::run(BAD_ID, SignerSource::Resolve)` with an id that does not
+//! exist, and asserts: a typed `UatError::UnknownStory { id }`
+//! carrying the bad id, zero signing rows, and no file created under
+//! `stories/`. The bad-id observable is unchanged by story 1's
+//! amendment — the lookup still misses before any signing or signer
+//! resolution work begins — only the call site's shape moves.
+//!
+//! Red today is compile-red via the missing `agentic_uat::SignerSource`
+//! symbol (story 1's amendment changed `Uat::run` to take a
+//! `SignerSource` as its second argument); the `use` of
+//! `agentic_uat::SignerSource` fails to resolve until story 18 lands
+//! the signer wire.
 
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{StubExecutor, Uat, UatError};
+use agentic_uat::{SignerSource, StubExecutor, Uat, UatError};
 use tempfile::TempDir;
 
 const BAD_ID: u32 = 99_999;
@@ -54,7 +62,7 @@ fn uat_run_returns_unknown_story_on_unknown_id_without_panic_or_side_effects() {
     // The call must NOT panic and must NOT return Ok. It returns a
     // typed UnknownStory error carrying the offending id.
     let err = uat
-        .run(BAD_ID)
+        .run(BAD_ID, SignerSource::Resolve)
         .expect_err("unknown story id must surface as Err, not Ok");
     match err {
         UatError::UnknownStory { id } => {

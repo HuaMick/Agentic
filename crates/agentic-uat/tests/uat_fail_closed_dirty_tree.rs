@@ -1,28 +1,37 @@
 //! Story 1 acceptance test: the fail-closed dirty-tree contract.
 //!
 //! Justification (from stories/1.yml): proves the fail-closed contract
-//! on a dirty git working tree — with uncommitted changes present,
-//! `Uat::run` refuses to produce a verdict, returns
-//! `UatError::DirtyTree`, writes no row to `uat_signings`, and does not
-//! touch the story YAML. Without this the commit-signed guarantee is
-//! forgeable — someone could run UAT, see Pass, then edit code and claim
-//! the old verdict still applies to the new tree.
+//! on a dirty git working tree at the library boundary — with
+//! uncommitted changes present, `Uat::run` refuses to produce a
+//! verdict, returns `UatError::DirtyTree`, writes no row to
+//! `uat_signings`, and does not touch the story YAML. Without this the
+//! commit-signed guarantee is forgeable — someone could run UAT, see
+//! Pass, then edit code and claim the old verdict still applies to the
+//! new tree.
 //!
 //! The scaffold builds a fresh git repo in a `TempDir`, commits a seed
-//! containing the story fixture, then writes an unrelated untracked file
-//! so the working tree is dirty. It invokes `Uat::run` — configured with
-//! `StubExecutor::always_pass()` so the ONLY reason the call can fail is
-//! the dirty-tree precondition — and asserts the typed error, zero
-//! signing rows, and an unchanged story file. Red today is compile-red
-//! via the missing `agentic_uat` public surface (`Uat`, `UatError`,
-//! `StubExecutor`).
+//! containing the story fixture, then writes an unrelated untracked
+//! file so the working tree is dirty. It invokes the amended
+//! `Uat::run(<id>, SignerSource::Resolve)` — configured with
+//! `StubExecutor::always_pass()` so the ONLY reason the call can fail
+//! is the dirty-tree precondition, which fires BEFORE the signer
+//! resolver is consulted — and asserts the typed error, zero signing
+//! rows, and an unchanged story file.
+//!
+//! Red today is compile-red via the missing `agentic_uat::SignerSource`
+//! symbol: story 1's amendment (2026-04-23) changed `Uat::run`'s
+//! signature to take a `SignerSource` as its second argument; this
+//! scaffold now calls that two-argument shape, and the `use` of
+//! `agentic_uat::SignerSource` fails to resolve until story 18 lands
+//! the signer wire. The dirty-tree observable is unchanged by the
+//! amendment — only the call site's shape moves.
 
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{StubExecutor, Uat, UatError};
+use agentic_uat::{SignerSource, StubExecutor, Uat, UatError};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4244;
@@ -80,7 +89,7 @@ fn uat_run_refuses_on_dirty_tree_returning_dirty_tree_error_with_no_side_effects
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
     let err = uat
-        .run(STORY_ID)
+        .run(STORY_ID, SignerSource::Resolve)
         .expect_err("dirty tree must surface as an Err, not Ok(Pass/Fail)");
     assert!(
         matches!(err, UatError::DirtyTree),

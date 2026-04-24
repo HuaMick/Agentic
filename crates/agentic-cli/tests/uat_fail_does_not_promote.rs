@@ -2,18 +2,32 @@
 //! not promote.
 //!
 //! Justification (from stories/1.yml): proves the Fail exit-code
-//! contract flows through the binary: `agentic uat <id> --verdict fail`
-//! on the same clean fixture returns exit 1 (not 0, not 2), writes
-//! exactly one row with `verdict=fail`, and leaves the fixture YAML's
+//! contract at the binary boundary: `agentic uat <id> --verdict fail`
+//! on the same clean fixture exits 1 (not 0, not 2), writes exactly
+//! one row with `verdict=fail`, and leaves the fixture YAML's
 //! `status:` field untouched. Without this a Fail could either
 //! silently promote (catastrophic) or surface as exit 2 and be
 //! confused with "the CLI itself could not run," which breaks CI's
 //! distinction between a real negative verdict and a system fault.
 //!
-//! The scaffold is a twin of uat_pass_promotes.rs, except the verdict
-//! is `fail`. Assertions are symmetric: exit 1 exactly (not 0, not 2),
-//! one row with verdict=fail, fixture YAML byte-identical before and
+//! Post-amendment observable (per story 1's 2026-04-23 amendment's
+//! `uat_signings` row contract): every row — Pass and Fail — carries
+//! a non-empty `signer` field resolved through story 18's four-tier
+//! chain. The Fail-path test pins the symmetry claim from the amended
+//! `uat_fail.rs` justification directly ("attribution is unconditional
+//! on verdict, pinning the symmetry so a red row is as attributable
+//! as a green one") at the binary boundary. The fixture seeds
+//! `git config user.email` so tier-3 resolution is deterministic.
+//!
+//! The scaffold is a twin of `uat_pass_promotes.rs`, except the
+//! verdict is `fail`. Assertions are symmetric: exit 1 exactly (not
+//! 0, not 2), one row with verdict=fail + a `signer` field matching
+//! the resolved identity, and fixture YAML byte-identical before and
 //! after.
+//!
+//! Red today is runtime-red: the binary currently writes a
+//! `uat_signings` row but does not yet populate `signer`; the new
+//! assertion below fails until the signer wire (story 18) lands.
 
 use std::fs;
 use std::path::Path;
@@ -23,6 +37,7 @@ use assert_cmd::Command;
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 88803;
+const SIGNER_EMAIL: &str = "cli-fail@agentic.local";
 
 const FIXTURE_YAML: &str = r#"id: 88803
 title: "Fixture story for story 1 CLI fail-does-not-promote"
@@ -60,15 +75,19 @@ fn agentic_uat_verdict_fail_exits_one_writes_fail_row_and_leaves_yaml_unchanged(
     let story_path = stories_dir.join(format!("{STORY_ID}.yml"));
     fs::write(&story_path, FIXTURE_YAML).expect("write fixture");
 
-    init_repo_and_commit_seed(repo_root);
+    init_repo_and_commit_seed(repo_root, SIGNER_EMAIL);
     let before_bytes = fs::read(&story_path).expect("read fixture before run");
 
     let store_tmp = TempDir::new().expect("store tempdir");
     let store_path = store_tmp.path().to_path_buf();
 
+    // Scrub AGENTIC_SIGNER from the child env so the resolver falls
+    // through to tier-3 (`git config user.email`), which the fixture
+    // seeded.
     let assert = Command::cargo_bin("agentic")
         .expect("cargo_bin agentic must resolve")
         .current_dir(repo_root)
+        .env_remove("AGENTIC_SIGNER")
         .arg("uat")
         .arg(STORY_ID.to_string())
         .arg("--verdict")
@@ -115,6 +134,27 @@ fn agentic_uat_verdict_fail_exits_one_writes_fail_row_and_leaves_yaml_unchanged(
         rows[0]
     );
 
+    // Attribution-is-unconditional-on-verdict (post-amendment): the
+    // Fail row must carry a non-empty `signer` equal to the resolved
+    // identity. This mirrors the Pass-path assertion from
+    // `uat_pass_promotes.rs` — the symmetry is the observable story 1's
+    // amended `uat_fail.rs` justification names explicitly.
+    let signer = rows[0]
+        .get("signer")
+        .and_then(|v| v.as_str())
+        .expect("signing row must carry a string `signer` field on Fail too");
+    assert!(
+        !signer.trim().is_empty(),
+        "Fail-through-binary signing row `signer` must be non-empty; \
+         got {signer:?}"
+    );
+    assert_eq!(
+        signer, SIGNER_EMAIL,
+        "tier-3 resolver must stamp `signer` = git config user.email on \
+         Fail rows (same chain as Pass); got {signer:?}, expected \
+         {SIGNER_EMAIL:?}"
+    );
+
     // Fixture YAML must be byte-for-byte unchanged.
     let after_bytes = fs::read(&story_path).expect("read fixture after run");
     assert_eq!(
@@ -124,13 +164,12 @@ fn agentic_uat_verdict_fail_exits_one_writes_fail_row_and_leaves_yaml_unchanged(
     );
 }
 
-fn init_repo_and_commit_seed(root: &Path) -> String {
+fn init_repo_and_commit_seed(root: &Path, email: &str) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
         cfg.set_str("user.name", "test-builder").expect("set user.name");
-        cfg.set_str("user.email", "test@agentic.local")
-            .expect("set user.email");
+        cfg.set_str("user.email", email).expect("set user.email");
     }
     let mut index = repo.index().expect("repo index");
     index

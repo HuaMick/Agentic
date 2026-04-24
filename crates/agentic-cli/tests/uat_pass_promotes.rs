@@ -1,20 +1,35 @@
 //! Story 1 acceptance test: Pass-and-promote end-to-end through the binary.
 //!
-//! Justification (from stories/1.yml): proves the happy path end-to-end
-//! through the binary: `agentic uat <id> --verdict pass` on a clean
-//! fixture repo with a valid story returns exit 0, writes exactly one
-//! row to the configured store's `uat_signings` table with
-//! `verdict=pass` and the fixture HEAD SHA, and rewrites the fixture's
-//! `stories/<id>.yml` to `status: healthy`. Without this we cannot
-//! claim the CLI is a real path to `healthy` — the library-level
-//! scaffolds prove the library does it, but the binary could still
-//! fail to construct `Uat` correctly or drop the promotion on the floor.
+//! Justification (from stories/1.yml): proves the happy path through
+//! the binary: `agentic uat <id> --verdict pass` on a clean fixture
+//! repo with a valid story exits 0, writes exactly one row to the
+//! configured store's `uat_signings` table with `verdict=pass` and the
+//! fixture HEAD SHA, and rewrites the fixture's `stories/<id>.yml` to
+//! `status: healthy`. Without this we cannot claim the binary is a
+//! real path to `healthy` — the library could do it right while the
+//! argv parser or the signing-library wire-up drops the promotion on
+//! the floor.
+//!
+//! Post-amendment observable (per story 1's 2026-04-23 amendment and
+//! the guidance's `uat_signings` row contract): the one row the
+//! binary writes now MUST carry a non-empty `signer` field resolved
+//! through story 18's four-tier chain. The fixture repo seeds its git
+//! config with a known committer email so tier-3 resolution is
+//! deterministic; the scaffold does not set `--signer` or
+//! `AGENTIC_SIGNER`, so the resolver falls through to tier 3 and the
+//! row's `signer` must equal that seeded email.
 //!
 //! The scaffold builds a fresh fixture repo + stories dir + SurrealStore
 //! tempdir, invokes the compiled `agentic` binary, then re-opens the
 //! SurrealStore from the SAME tempdir path (proving the binary wrote
-//! to the configured location) and asserts on the row shape. The
-//! YAML on disk is re-read and checked for `status: healthy`.
+//! to the configured location) and asserts on the row shape — including
+//! the new `signer` field. The YAML on disk is re-read and checked for
+//! `status: healthy`.
+//!
+//! Red today is runtime-red: the binary currently writes a
+//! `uat_signings` row but does not yet populate `signer`; the new
+//! assertion below fails until the signer wire (story 18) lands in the
+//! library and the CLI crate.
 
 use std::fs;
 use std::path::Path;
@@ -24,6 +39,7 @@ use assert_cmd::Command;
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 88802;
+const SIGNER_EMAIL: &str = "cli-pass@agentic.local";
 
 const FIXTURE_YAML: &str = r#"id: 88802
 title: "Fixture story for story 1 CLI pass-and-promote"
@@ -61,14 +77,18 @@ fn agentic_uat_verdict_pass_exits_zero_writes_signing_row_and_promotes_yaml_to_h
     let story_path = stories_dir.join(format!("{STORY_ID}.yml"));
     fs::write(&story_path, FIXTURE_YAML).expect("write fixture");
 
-    let head_sha = init_repo_and_commit_seed(repo_root);
+    let head_sha = init_repo_and_commit_seed(repo_root, SIGNER_EMAIL);
 
     let store_tmp = TempDir::new().expect("store tempdir");
     let store_path = store_tmp.path().to_path_buf();
 
+    // Invoke with no `--signer` flag and strip `AGENTIC_SIGNER` from the
+    // child env so the resolver falls through to tier-3 (git config
+    // user.email) — which the fixture seeded as `SIGNER_EMAIL`.
     let assert = Command::cargo_bin("agentic")
         .expect("cargo_bin agentic must resolve")
         .current_dir(repo_root)
+        .env_remove("AGENTIC_SIGNER")
         .arg("uat")
         .arg(STORY_ID.to_string())
         .arg("--verdict")
@@ -129,6 +149,26 @@ fn agentic_uat_verdict_pass_exits_zero_writes_signing_row_and_promotes_yaml_to_h
         "signing row must carry a full 40-char SHA; got {commit:?}"
     );
 
+    // Post-amendment: the row must carry a non-empty `signer` field
+    // resolved through story 18's four-tier chain. With no `--signer`
+    // flag and no `AGENTIC_SIGNER` env (scrubbed above), the resolver
+    // must land on tier-3 (`git config user.email`), which this
+    // fixture seeded.
+    let signer = row
+        .get("signer")
+        .and_then(|v| v.as_str())
+        .expect("signing row must carry a string `signer` field");
+    assert!(
+        !signer.trim().is_empty(),
+        "Pass-through-binary signing row `signer` must be non-empty; \
+         got {signer:?}"
+    );
+    assert_eq!(
+        signer, SIGNER_EMAIL,
+        "tier-3 resolver must stamp `signer` = git config user.email; \
+         got {signer:?}, expected {SIGNER_EMAIL:?}"
+    );
+
     // The fixture YAML on disk must now say status: healthy.
     let rewritten = fs::read_to_string(&story_path).expect("re-read fixture");
     assert!(
@@ -143,13 +183,12 @@ fn agentic_uat_verdict_pass_exits_zero_writes_signing_row_and_promotes_yaml_to_h
     );
 }
 
-fn init_repo_and_commit_seed(root: &Path) -> String {
+fn init_repo_and_commit_seed(root: &Path, email: &str) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
         cfg.set_str("user.name", "test-builder").expect("set user.name");
-        cfg.set_str("user.email", "test@agentic.local")
-            .expect("set user.email");
+        cfg.set_str("user.email", email).expect("set user.email");
     }
     let mut index = repo.index().expect("repo index");
     index
