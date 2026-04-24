@@ -708,7 +708,18 @@ fn is_ancestor_satisfied(
                         reason: AncestorUnhealthyReason::NoSigningRow,
                     });
                 }
-                // Healthy with valid signing row: satisfied.
+                // Healthy with valid signing row: check its ancestors transitively.
+                let mut visited_temp: HashSet<u32> = HashSet::new();
+                let mut path_temp: Vec<u32> = Vec::new();
+                for &ancestor_id in &cursor.depends_on {
+                    check_ancestor_dfs(
+                        ancestor_id,
+                        stories_by_id,
+                        store,
+                        &mut visited_temp,
+                        &mut path_temp,
+                    )?;
+                }
                 return Ok(());
             }
             Status::Retired => {
