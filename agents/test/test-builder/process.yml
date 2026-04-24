@@ -16,27 +16,82 @@ workflow:
 
     - step: Classify every acceptance.tests[] entry.
       detail: |
-        For each entry, decide exactly one of three outcomes and record it
+        For each entry, decide exactly one of four outcomes and record it
         for the summary:
-          - EXISTING: file exists on disk with non-empty content. Preserve
-            it — do not open, do not edit. Record the path under "preserved."
           - REJECT: justification is thin (empty-after-trim, a single token,
             or matches `/^\s*(TODO|TBD|\.\.\.)\s*$/i`). Stop the session,
             escalate to story-writer with the offending test's index and
             justification text. Do not write any scaffolds for the story.
           - SCAFFOLD: file is missing or empty, and the justification is
-            substantive. Proceed to the write step.
+            substantive. Proceed to the write step (creation path).
+          - RE-AUTHOR: file exists with content AND all three amendment
+            gates pass (ADR-0005 amendment, per-commit evidence atomicity)
+            — see the next step for the gate check. Re-author the scaffold
+            body to match the current justification; a fresh red-state
+            evidence row MUST land in the same atomic commit as the edit.
+          - PRESERVED: file exists with content and at least one of the
+            three amendment gates fails. Do not open, do not edit. Record
+            the path and which gate blocked (status, git-log signal, or
+            dirty-tree) under "preserved."
+        A file that exists on disk with content is never silently
+        classified as SCAFFOLD. The only path from "file exists" to "file
+        edited" is through the RE-AUTHOR classification, which requires
+        the gate check in the next step.
+
+    - step: Check the amendment gates for each existing test file.
+      detail: |
+        Per ADR-0005's 2026-04-24 amendment, test-builder may re-author an
+        existing test file iff three gates all pass. Evaluate them in
+        order; short-circuit on the first failure to PRESERVED.
+          - Gate 1 (story status): read `stories/<id>.yml` and confirm
+            `status: under_construction`. If `proposed`, the test file
+            should not exist yet — surface as a story-authoring defect.
+            If `healthy` or `unhealthy`, PRESERVE — tests on non-
+            under_construction stories are immutable; re-authoring one
+            is an unacknowledged contract change.
+          - Gate 2 (story newer than last evidence): list
+            `evidence/runs/<story-id>/*.jsonl` sorted by filename (the
+            timestamp prefix orders them). Parse the `commit` field on
+            the most recent file. Run
+            `git log --format=%H <last-evidence-commit>..HEAD -- stories/<id>.yml`.
+            Non-empty output means the story's contract has moved since
+            the last red-state proof — Gate 2 passes. Empty output means
+            PRESERVE (the test's current contract is still the one the
+            last evidence row proved). If no prior evidence file exists
+            for the story, Gate 2 is indeterminate — an existing test
+            file with content but no prior evidence is a pre-amendment
+            bridge case; classify as PRESERVED with a note to escalate
+            to story-writer (see `pre-adr-0005-scaffolds` rule below).
+          - Gate 3 (atomic commit): the edit and its new evidence JSONL
+            row MUST commit together, on a tree otherwise clean. This is
+            enforced in the "Record red-state evidence" step — the
+            fail-closed-on-dirty-tree check plus a single-commit write
+            of `(edited-test-file, new-evidence-jsonl)` is the atomicity
+            guarantee. A RE-AUTHOR classification is a promise that this
+            step will hold; splitting edit and evidence across commits
+            is a defect and forfeits the amendment carve-out.
+        The signal for Gate 2 is git-native by design (ADR-0005
+        amendment): any story-writer edit to `stories/<id>.yml` after
+        the last evidence commit is the signal, with no YAML bookkeeping
+        field. Record the gate evaluation in the run summary — which
+        gate each PRESERVED entry failed, and which evidence-vs-story
+        commits justified each RE-AUTHOR entry.
 
     - step: Write the scaffolds.
       detail: |
-        For each SCAFFOLD entry, create the file. For a `crates/*/tests/*.rs`
-        path, write a Rust integration test whose single `#[test]` function
-        is named from a snake_case reduction of the first sentence of the
-        justification. The body is the real test: real setup, real
-        assertions derived from the justification — no trailing `panic!`
-        guard, no `unimplemented!()` stub, no unreachable guard, no
-        `assert!(true)` contrivance. The test reads as the test it will be
-        once the implementation lands.
+        For each SCAFFOLD entry, create the file. For each RE-AUTHOR entry,
+        overwrite the existing file's body to match the current
+        justification (the file path and the `#[test]` test-name derivation
+        rule are unchanged; the body is replaced in full — a RE-AUTHOR is
+        not a partial patch, it is a re-scaffolding). PRESERVED and REJECT
+        entries are never opened for writing.
+        For a `crates/*/tests/*.rs` path, write a Rust integration test
+        whose single `#[test]` function is named from a snake_case reduction
+        of the first sentence of the justification. The body is the real
+        test: real setup, real assertions derived from the justification —
+        no trailing `panic!` guard, no `unimplemented!()` stub, no
+        unreachable guard, no `assert!(true)` contrivance. The test reads
+        as the test it will be once the implementation lands.
         Red comes from one of two natural paths — pick whichever the story
         produces:
           - Compile-red: the scaffold imports a type, function, or module
@@ -60,7 +115,11 @@ workflow:
     - step: Prove red state.
       detail: |
         Either red path (compile-red or runtime-red) is a valid red
-        observation. Per Rust scaffold, run `cargo check --workspace --tests`
+        observation. RE-AUTHOR entries are proved identically to SCAFFOLD
+        entries — the red-state proof does not distinguish first-authoring
+        from re-authoring; both produce a fresh red verdict keyed by
+        `(test-file, current-commit)`.
+        Per Rust scaffold, run `cargo check --workspace --tests`
         first.
           - If `cargo check` fails: the scaffold is compile-red. Capture
             the first line of the rustc error (typically
@@ -90,9 +149,13 @@ workflow:
 
     - step: Record red-state evidence.
       detail: |
-        Re-run `git status --porcelain`. It must still be empty (you have
-        only created files listed in owns; they are now staged by the act
-        of writing — the clean-tree check here is against OTHER paths).
+        Re-run `git status --porcelain`. The only paths that may show up
+        are files this session authored — new SCAFFOLD test files, the
+        forthcoming evidence JSONL, and any RE-AUTHOR edits to existing
+        test files. Any OTHER uncommitted path is a fail-closed condition:
+        the atomicity guarantee requires that the commit bundling
+        (edited-or-new-test-files, evidence-JSONL) is the only content in
+        the resulting commit. Stop if unrelated dirt appears.
         Read HEAD with `git rev-parse HEAD`. Write one JSON line to
         `evidence/runs/<story-id>/<UTC-ISO-8601>-red.jsonl` with shape:
             {"run_id": "<uuid-v4>",
@@ -104,8 +167,19 @@ workflow:
                ...
              ]}
         The file name is new per run; do not overwrite a prior red-state
-        artefact. Preserved entries appear in the verdicts array with
-        `"verdict": "preserved"` and no `red_path` or `diagnostic` field.
+        artefact. Red-state evidence is append-only and atomic per
+        `(test-file, commit)`: a test file may have multiple evidence
+        rows across its lifetime, one per commit at which its contract
+        was last re-proven red. Preserved entries appear in the verdicts
+        array with `"verdict": "preserved"` and no `red_path` or
+        `diagnostic` field. RE-AUTHOR entries appear as `"verdict": "red"`
+        like any other freshly proven scaffold — downstream agents
+        distinguish first-authoring from re-authoring by reading the
+        chain of evidence rows across commits, not by a row-local flag.
+        The atomic commit (Gate 3): the edited-or-new test files AND the
+        new evidence JSONL land in one git commit together. This is the
+        only thing that makes RE-AUTHOR safe — a split commit forfeits
+        the amendment carve-out.
 
     - step: Stop.
       detail: |
@@ -119,27 +193,53 @@ guidance:
     - The first observable check of every session is `git status --porcelain`. Non-empty output is a fail-closed condition — the red-state record is only meaningful if it is a committable atomic, and a dirty tree forfeits that claim.
     - Read each file listed in required_reading every session. See agents/assets/definitions/session-start-memory.yml.
     - "A scaffold that does not fail is a defect. Never suppress with `#[ignore]`, `#[cfg(..)]`, `assert!(true)`, unreachable code guards, or a trailing `panic!(\"red: ...\")` after real assertions (the trailing-panic pattern is what makes a scaffold uncodifiable — even a perfect implementation cannot make it stop firing)."
-    - Never edit an existing test file. An acceptance.tests[].file that already has content is preserved and reported — it is not your authority to re-redden what the implementer has already worked on.
+    - name: amendment-gated-test-edit
+      detail: |
+        An existing acceptance.tests[].file is PRESERVED by default — do
+        not open, do not edit. The only exception is the narrow
+        amendment carve-out from ADR-0005 (2026-04-24, per-commit
+        evidence atomicity), which permits RE-AUTHOR iff all three gates
+        pass together:
+          (a) the owning story's `status:` is `under_construction`;
+          (b) the story YAML has commits since the test's most recent
+              red-state evidence row (signal:
+              `git log --format=%H <last-evidence-commit>..HEAD -- stories/<id>.yml`
+              returns at least one commit); AND
+          (c) the RE-AUTHOR edit and its fresh evidence JSONL land in a
+              single atomic commit, on an otherwise-clean tree.
+        If any gate fails, classify as PRESERVED and report which gate
+        blocked. Tests on `healthy` stories are immutable — re-authoring
+        one is an unacknowledged contract change. The Gate 2 signal is
+        git-native by deliberate design: story-writer's YAML edit is
+        the signal, with no bookkeeping field; a schema-embedded signal
+        (e.g. `acceptance.tests[].revised_at`) was considered and
+        rejected as drift-prone.
     - Never write production source. `crates/*/src/**` is explicitly forbidden in contract.yml and that is the whole point of this agent — authoring tests without being able to make them pass.
     - Dev-dependency edits are narrowly scoped. You MAY add an entry to `[dev-dependencies]` in `crates/<target-crate>/Cargo.toml` when a scaffold's `use` of it would otherwise fail to compile. You MAY NOT edit `[dependencies]`, the workspace-root `Cargo.toml`, any other crate's `Cargo.toml`, or `Cargo.lock`. Every dev-dep added must appear in the run summary with the scaffold that demanded it.
     - The test's name and its red-state diagnostic (panic message for runtime-red, compile error for compile-red) both derive from the acceptance.tests[].justification. The goal is that a failed test run reads the justification back to a human with no extra context — that is what makes red-state evidence self-describing.
     - "Preserved entries still appear in the red-state evidence file, with `verdict: preserved`. Build-rust and `agentic uat` need to see the full shape of the acceptance.tests[] array, not only the subset you wrote."
     - name: pre-adr-0005-scaffolds
       detail: |
-        Stories that were `under_construction` before ADR-0005 was accepted
-        may carry test files that build-rust (pre-v0.3.0) created. Treat
-        them exactly like any other existing file: classify as PRESERVED,
-        do not open for writing, do not re-scaffold. If such a file
-        currently passes on a clean tree, that is a red-state-evidence
-        defect — escalate to story-writer; the observable in the
-        justification likely needs revising.
+        Stories that were `under_construction` before ADR-0005 was
+        accepted may carry test files that build-rust (pre-v0.3.0)
+        created, with no prior red-state evidence row to key off. For
+        these, Gate 2 of the amendment carve-out is indeterminate — the
+        git-log-vs-last-evidence signal has nothing to compare against.
+        Classify as PRESERVED and escalate to story-writer rather than
+        re-authoring unilaterally; the bridge case belongs to a human
+        judgement, not to test-builder. If such a file currently passes
+        on a clean tree, that is a red-state-evidence defect —
+        escalate; the observable in the justification likely needs
+        revising.
 
   anti_patterns:
     - Writing any file under `crates/*/src/**`. That crosses the red-green line and the whole contract collapses.
     - Adding `#[ignore]` or `#[cfg(all(test, never))]` to a scaffold "just to make cargo check quiet." The scaffold must fail when run; muting it is the legacy failure mode in a new skin.
     - Using `assert!(true)` or `#[test] fn _() {}` as a placeholder. A scaffold is not a placeholder — it is the red evidence.
     - "Appending a trailing `panic!(\"red: ...\")` after real assertions in a scaffold. The trailing panic guarantees the test stays red even after a correct implementation lands, which makes the scaffold uncodifiable. Red comes from the natural failure path (compile error or assertion failure), not from a guard."
-    - Overwriting an existing test file because "mine is better." Existing content is preserved without inspection; improvements are a story-writer concern.
+    - Overwriting an existing test file because "mine is better" or to "tidy" its assertions. The only authorised path into an existing test file is RE-AUTHOR, and RE-AUTHOR fires only when the amendment gates pass (see rule `amendment-gated-test-edit`). Taste-driven rewrites of a test that is still proving the current justification are a contract violation.
+    - "Editing an existing test file without producing a new red-state evidence row in the same commit. The evidence row IS the proof that the edit was validated red; a split commit (edit now, evidence later) forfeits the per-commit atomicity invariant and is indistinguishable from silently re-reddening the test on a healthy story. If you cannot commit edit + evidence together, do not edit."
+    - "Editing an existing test file on a `healthy` or `unhealthy` story. The three amendment gates require `under_construction`; any other status makes the edit an unacknowledged contract change, because the story's verdict is already recorded against the pre-edit test."
     - Deriving a test name from the file path instead of the justification. The justification is the contract; the path is a location.
     - Editing `[dependencies]`, the workspace-root `Cargo.toml`, `Cargo.lock`, or any Cargo.toml outside the target crate — runtime-dep choices remain build-rust's or an ADR's concern. The narrow dev-deps carve-out (see the dev-dependency rule) does not extend to any of these.
     - Skipping the `git status --porcelain` precheck. Red-state evidence on a dirty tree is forgeable and the whole artefact is then worthless.
@@ -154,3 +254,5 @@ guidance:
     - "`cargo check --workspace --tests` fails on a path the scaffold did not introduce — i.e. an unrelated crate-level breakage rather than a missing symbol the scaffold references: STOP. Likely signals a crate-level issue that belongs to build-rust or a schema change."
     - "A scaffold you just wrote both compiles AND passes when run on a fresh checkout (or, for shell, exits zero): STOP. Diagnose — the justification may name a guarantee the existing code already satisfies, in which case the story either needs revision or the scaffold's observable is wrong. Do not record evidence until the scaffold fails deliberately via the natural compile-red or runtime-red path."
     - "An acceptance.tests[].file path falls outside `crates/*/tests/**` and `scripts/verify/**`: STOP. The path is outside this agent's authority. Surface to story-writer."
+    - "An existing test file's story status is `under_construction` AND the story YAML has commits since the last evidence row (Gates 1 and 2 pass), BUT the existing test file has no prior evidence row at all to key Gate 2 off: STOP. This is the pre-ADR-0005 bridge case — escalate to story-writer; do not unilaterally re-author (see rule `pre-adr-0005-scaffolds`)."
+    - "A RE-AUTHOR edit was made but the resulting commit cannot bundle the edit with its new evidence JSONL (Gate 3 would fail): STOP. Revert the edit rather than shipping a split commit. The per-commit evidence-atomicity invariant is the thing that makes RE-AUTHOR safe; a split commit forfeits the carve-out and reduces to editing a test without a fresh proof."

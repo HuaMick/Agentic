@@ -1,12 +1,16 @@
 scope:
   name: test-builder
   category: test
-  version: 0.2.0
+  version: 0.3.0
   purpose: |
     Writes the failing test scaffolds that a story's acceptance.tests[].file
     entries point at, and records the red-state evidence that proves the
-    story was red before implementation began. Never writes production source
-    or edits an existing test file.
+    story was red at the commit implementation begins from. Never writes
+    production source. Default is preserve-existing; re-authors an existing
+    test file only under the narrow amendment carve-out defined in
+    ADR-0005 (story `under_construction`, story YAML newer than the test's
+    most recent evidence row, and the edit + new evidence land in one
+    atomic commit).
   owns:
     - crates/*/tests/**
     - scripts/verify/**
@@ -28,7 +32,7 @@ scope:
   authority:
     - May create a test file at a path listed in story.acceptance.tests[].file if and only if that file does not already exist on disk.
     - May create or append to `evidence/runs/<story-id>/<timestamp>-red.jsonl` with one row per acceptance test confirming its red verdict.
-    - May not edit an existing test file under any circumstance — preserve and report instead.
+    - "May edit an existing test file listed in story.acceptance.tests[].file IFF all three gates pass (ADR-0005 amendment, per-commit evidence atomicity): (a) the owning story's `status:` is `under_construction`; AND (b) the story YAML has been edited since the test's most recent red-state evidence row, detected git-natively by comparing the `commit` field on the most recent `evidence/runs/<id>/*.jsonl` against `git log` on `stories/<id>.yml`; AND (c) the edit and its new red-state evidence JSONL row land in one atomic commit. If any gate fails, preserve and report. Tests on `healthy` stories are immutable."
     - May not create, edit, or delete any production source under `crates/*/src/**`.
     - May add entries under `[dev-dependencies]` in `crates/<target-crate>/Cargo.toml` when a scaffold being authored would not compile without them. This is the only Cargo.toml edit permitted; the workspace-root `Cargo.toml`, any other crate's `Cargo.toml`, the `[dependencies]` / runtime-deps tables, and `Cargo.lock` remain forbidden. Dev-dep additions must be named in the run summary.
     - May not edit the story's YAML, including its `status` field. That remains build-rust's (for `proposed → under_construction`) and `agentic uat`'s (for `healthy`) authority.
@@ -52,21 +56,29 @@ outcome:
     - kind: file
       path: evidence/runs/<story-id>/<timestamp>-red.jsonl
       description: |
-        Append-only JSON-lines artefact recording the red-state run. One row
-        with run_id (UUID v4), story_id, commit hash (HEAD on a clean tree),
-        ISO-8601 timestamp, and per-test verdicts — each verdict keyed by
-        test file path with value `red`, a `red_path` of `compile` or
-        `runtime`, and a short diagnostic captured from the scaffold's
-        failing output (first line of the rustc error for compile-red, first
-        line of the panic message for runtime-red).
+        Append-only JSON-lines artefact recording the red-state run. One
+        file per run; a test file may appear across multiple evidence
+        files over its lifetime — red-state evidence is atomic per
+        `(test-file, commit)`, not per `(test-file, forever)`. Each row
+        carries run_id (UUID v4), story_id, commit hash (HEAD on a clean
+        tree), ISO-8601 timestamp, and per-test verdicts — each verdict
+        keyed by test file path with value `red`, a `red_path` of
+        `compile` or `runtime`, and a short diagnostic captured from the
+        scaffold's failing output (first line of the rustc error for
+        compile-red, first line of the panic message for runtime-red).
     - kind: summary
       description: |
         Per-story report covering: which files were created, which were
-        preserved (already existed), which justifications were rejected as
-        thin with the reason, the recorded red-state evidence path, and the
+        preserved (already existed, gates failed or did not apply), which
+        were re-authored under the amendment carve-out (with the gate
+        signals recorded — story status, last evidence commit, story-yaml
+        commits since then), which justifications were rejected as thin
+        with the reason, the recorded red-state evidence path, and the
         commit hash of the clean tree the run was signed against.
   success_criteria: |
     Every acceptance.tests[].file entry in the target story either exists
-    with content (preserved) or was created by this run, compiles under
+    with content (preserved or re-authored this run), compiles under
     `cargo check --workspace`, fails when executed, and appears as a red
     row in the evidence file for the current HEAD commit on a clean tree.
+    Any re-authored test is committed atomically with its new evidence
+    JSONL row.

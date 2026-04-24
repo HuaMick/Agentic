@@ -16,7 +16,10 @@ required_reading:
     reason: |
       The ADR that defines this agent's authority. Defines the red-state
       evidence shape, the fail-closed rules, the preserve-existing rule,
-      and the boundary with build-rust during migration.
+      the boundary with build-rust during migration, and the 2026-04-24
+      amendment narrowing "never edit existing tests" to a three-gate
+      carve-out (per-commit evidence atomicity) — the load-bearing input
+      for the detection + re-author path in this agent's workflow.
   - path: stories/<id>.yml
     reason: |
       The story you are scaffolding. Read in full, including `guidance` —
@@ -87,3 +90,14 @@ commands:
     purpose: |
       Read the current commit hash to stamp into the red-state evidence
       row. Must be called on a clean tree (porcelain output empty).
+  - name: git-log-story-since-evidence
+    invocation_example: git log --format=%H <last-evidence-commit>..HEAD -- stories/<id>.yml
+    purpose: |
+      Detect whether the amendment carve-out applies to an existing test
+      file (ADR-0005 amendment, per-commit evidence atomicity). Parse the
+      `commit` field on the most recent `evidence/runs/<id>/*.jsonl`,
+      then list commits to `stories/<id>.yml` since that commit. Non-empty
+      output means the story contract has moved since the last red-state
+      proof — the re-author path is eligible, provided the other two
+      gates (status is `under_construction`; edit commits atomically with
+      new evidence) also pass. Empty output means preserve.

@@ -72,6 +72,36 @@ Completed in the same session this ADR was authored. `build/build-rust` v0.3.0 f
 
 - `agents/test/test-builder/contract.yml` — authoritative scope for the new agent.
 - `agents/test/test-builder/process.yml` — red-state workflow, including fail-closed on dirty tree.
-- `stories/7.yml` — meta-story proving the contract end-to-end.
+- `stories/7.yml` — meta-story proving the contract end-to-end. (Retired 2026-04-20; substantive contracts folded into `stories/15.yml`.)
 - `agents/build/build-rust/process.yml` step 23 — stop-gap scaffold creation, to be removed post-migration.
 - `docs/decisions/0004-no-bootstrap-generator.md` — same pattern: an authoritative YAML spec with a hand-written pointer file.
+
+## Amendment (per-commit evidence atomicity, 2026-04-24)
+
+The original decision point 4 — *"Test-builder does not edit existing test files"* — was correct for the new-story loop (author red → make green → promote to healthy). Phase 0 revealed it is too blunt for the amendment loop: when `story-writer` amends a story's `acceptance.tests[].justification` to extend what an existing test must prove, no agent in the system has authority to re-red the existing test file. The amendment's new observable is unproven; the test passes against the pre-amendment contract; build-rust cannot write tests; test-builder refuses to edit existing tests.
+
+This amendment narrows point 4 rather than removing it. The load-bearing invariant is re-stated precisely, and a gated carve-out is added for the amendment case.
+
+### Restated invariant
+
+**Red-state evidence is atomic per `(test-file, commit)`, not per `(test-file, forever)`.** A test file may have multiple red-state evidence rows across its lifetime — one per commit at which its contract was last re-proven red. Each row is commit-signed and immutable; the chain is append-only. `agentic uat` and `agentic-verify` read the most recent row ≤ the current commit when deciding whether a story is verified.
+
+### Gated carve-out: test-builder may edit an existing test file iff
+
+1. **The owning story's status is `under_construction`.** Tests on `healthy` stories stay immutable; editing one is an unacknowledged contract change. Tests on `proposed` stories don't exist yet — the creation path still applies.
+2. **The story YAML has been edited since the test file's most recent red-state evidence row.** The signal is git-native: `git log -1 --format=%H stories/<id>.yml` against the `commit` field on the most recent `evidence/runs/<id>/*.jsonl`. If the story is newer, the test's contract has moved since the last proof; test-builder may re-author the scaffold body to match the current justification. If the story is older or equal, preserve.
+3. **The edit produces a new red-state evidence row atomically with the commit.** Same fail-closed-on-dirty-tree rule as creation: the edited test + the new evidence JSONL land in one commit. No edit without a fresh record.
+
+Build-rust still never edits test files. Story-writer still never edits source. The three-hands separation — story-writer owns the claim, test-builder owns the failing proof surface, build-rust owns the implementation — is preserved; what changes is that test-builder's authorship surface now includes re-authoring under amendment, not just first-authoring.
+
+### Why not a schema signal (e.g. `acceptance.tests[].revised_at`)
+
+Considered and rejected. Making the signal a YAML field would require story-writer to remember to set it, risk drift between the field and the actual edit, and duplicate information git already has. Deriving the signal from `git log stories/<id>.yml` vs the last evidence-row commit is automatic — any story-writer edit is the signal, no bookkeeping. Revisit if the derivation proves fragile at scale (Phase 2+, when multiple amendments may interleave on a single story).
+
+### Failure mode this closes
+
+Phase 0's seven amendments (stories 1, 2, 3, 4, 5, 6, 11) each extended justifications on existing tests. Under the pre-amendment rule, test-builder could not re-red those tests, leaving the amendment's new observables unproven at the amended story's surface. The audit surfaced this as a design gap, not a misuse of the rule. The amendment converts the gap into a normal path: story-writer amends → test-builder detects the story-newer-than-evidence signal → re-authors the scaffold → records red → build-rust drives to green → uat re-signs.
+
+### Relationship to story 15
+
+Story 15 (`agentic test-build plan|record`) owns the CLI that records red-state evidence. The CLI itself requires no change — it already writes a new evidence row per invocation, commit-stamped, append-only. This amendment is a spec/agent-boundary change, not a CLI change. The per-commit atomicity was always latent in the evidence shape; the amendment names it as the invariant and removes the blanket rule that contradicted it.

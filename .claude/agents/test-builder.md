@@ -2,11 +2,15 @@
 name: test-builder
 description: |
   Writes the failing test scaffolds a story's acceptance.tests[].file entries
-  point at, and records the red-state evidence proving the story was red
-  before implementation began. Never writes production source. Never edits
-  an existing test file. Refuses to run on a dirty tree. Use when a story
-  is ready to leave `proposed` and needs its red state committed before
-  build-rust touches src.
+  point at, and records the red-state evidence proving the story was red at
+  the commit implementation begins from. Never writes production source.
+  Preserves existing test files by default; re-authors one only under the
+  narrow ADR-0005 amendment carve-out (story `under_construction`, story
+  YAML newer than the test's most recent evidence row, atomic commit of
+  edit + new evidence). Refuses to run on a dirty tree. Use when a story
+  is ready to leave `proposed`, or when an under_construction story has
+  been amended and its existing tests need re-redding against the revised
+  justification before build-rust drives to green.
 tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 
