@@ -1,24 +1,29 @@
 //! Story 4 acceptance test: the empty-closure edge case.
 //!
 //! Justification (from stories/4.yml acceptance.tests[7]):
-//!   Proves the empty-closure edge case: given a fixture story with
-//!   `depends_on: []` in a store that contains signings for other
-//!   unrelated stories, `Store::snapshot_for_story` returns an empty
-//!   `StoreSnapshot` (zero signing rows), and `Store::restore(
-//!   empty_snapshot)` on a fresh `MemStore` succeeds without error and
-//!   without writing any rows. A subsequent ancestor-gate query against
-//!   the destination store returns the empty-ancestor-set answer (the
-//!   gate is trivially satisfied for a story with no declared
-//!   ancestors). Without this, story 20's happy-path UAT — a fixture
-//!   story with no ancestors — either crashes at snapshot time (no
-//!   ancestors treated as an error) or at restore time (empty bundle
-//!   treated as malformed), and the simplest possible sandbox
-//!   invocation fails for reasons unrelated to the inner loop.
+//!   Proves the empty-closure edge case: given a fixture story seeded
+//!   into the `stories` table as `{"id": T, "depends_on": []}` per the
+//!   stories-table fixture mechanism (see guidance, "Ancestry fixture
+//!   mechanism"), in a store that also contains `uat_signings` rows
+//!   for other unrelated stories, `Store::snapshot_for_story(T)`
+//!   returns an empty `StoreSnapshot` (zero signing rows), and
+//!   `Store::restore(empty_snapshot)` on a fresh `MemStore` succeeds
+//!   without error and without writing any rows. A subsequent
+//!   ancestor-gate query against the destination store returns the
+//!   empty-ancestor-set answer (the gate is trivially satisfied for a
+//!   story with no declared ancestors). Without this, story 20's
+//!   happy-path UAT — a fixture story with no ancestors — either
+//!   crashes at snapshot time (no ancestors treated as an error) or at
+//!   restore time (empty bundle treated as malformed), and the simplest
+//!   possible sandbox invocation fails for reasons unrelated to the
+//!   inner loop.
 //!
 //! Red today: compile-red. The trait does not yet expose
 //! `snapshot_for_story` or `restore`, and the `StoreSnapshot` type is
-//! not declared. Story 4's amendment (triggered by story 20) lands all
-//! three.
+//! not declared. Story 4's amendment (triggered by story 20, refined by
+//! the fixture-mechanism follow-up) lands all three. Ancestry flows
+//! through the `stories` table seeded inline — no filesystem, no env
+//! var.
 
 use agentic_store::{MemStore, Store, StoreSnapshot};
 use serde_json::json;
@@ -29,9 +34,32 @@ const UNRELATED_B: i64 = 4211;
 
 #[test]
 fn no_ancestor_story_snapshots_to_empty_bundle_and_restores_as_noop() {
-    // Seed a store with signings for UNRELATED stories only. The target
-    // story has no ancestors declared, so its closure is empty.
+    // Seed a store with signings for UNRELATED stories only, and declare
+    // the target story's empty-depends_on row in the `stories` table per
+    // the fixture mechanism pinned in story 4's guidance.
     let source: Box<dyn Store> = Box::new(MemStore::new());
+
+    source
+        .append(
+            "stories",
+            json!({ "id": TARGET_STORY_ID, "depends_on": [] }),
+        )
+        .expect("seed target story row (depends_on: [])");
+    // Unrelated story rows — present in the stories table but NOT part
+    // of the target's closure. Proves the walker does not vacuum up
+    // unrelated story rows just because they exist.
+    source
+        .append(
+            "stories",
+            json!({ "id": UNRELATED_A, "depends_on": [] }),
+        )
+        .expect("seed unrelated A story row");
+    source
+        .append(
+            "stories",
+            json!({ "id": UNRELATED_B, "depends_on": [] }),
+        )
+        .expect("seed unrelated B story row");
 
     source
         .append(

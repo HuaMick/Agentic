@@ -3,28 +3,34 @@
 //!
 //! Justification (from stories/4.yml acceptance.tests[6]):
 //!   Proves the restore primitive's round-trip completeness: given a
-//!   `StoreSnapshot` produced by `snapshot_for_story` on a source
-//!   `MemStore`, calling `Store::restore(snapshot)` on a second, fresh
-//!   `MemStore` causes that destination store's ancestor-gate queries
-//!   (e.g. "is there a Pass verdict for story `mid`?") to return true
-//!   for every row the snapshot carried, with `signer`, `verdict`,
-//!   `commit`, and `story_id` preserved byte-for-byte. This is the
-//!   complement to `snapshot_for_story_returns_ancestor_closure.rs`:
-//!   that test pins what the snapshot CONTAINS; this one pins that the
-//!   contents arrive intact on the restored side, in a form the
-//!   ancestor-gate helper can read.
+//!   source `MemStore` whose `stories` table is seeded with a two-
+//!   ancestor chain for the leaf per the stories-table fixture
+//!   mechanism (see guidance, "Ancestry fixture mechanism"), and whose
+//!   `uat_signings` table carries one row per ancestor, a
+//!   `StoreSnapshot` produced by `snapshot_for_story` restores into a
+//!   fresh destination `MemStore` such that the destination's ancestor-
+//!   gate queries (e.g. "is there a Pass verdict for story `mid`?")
+//!   return true for every row the snapshot carried, with `signer`,
+//!   `verdict`, `commit`, and `story_id` preserved byte-for-byte.
+//!   Without this, the snapshot could serialise selectively but restore
+//!   into a shape the gate can't read — the container-side embedded
+//!   Store would be seeded with rows that are present but invisible to
+//!   the ancestor-gate helper, and story 11's invariant would silently
+//!   break inside the sandbox.
 //!
 //! Red today: compile-red. The trait does not yet expose
 //! `snapshot_for_story` or `restore`, and the `StoreSnapshot` type is
-//! not declared. Story 4's amendment (triggered by story 20) lands all
-//! three.
+//! not declared. Story 4's amendment (triggered by story 20, refined by
+//! the fixture-mechanism follow-up) lands all three.
 //!
 //! Distinct from `restore_roundtrips_snapshot_into_embedded_store.rs`
 //! (story 20): that test exercises the one-shot semantics and the
 //! `AlreadyRestored` refusal against an embedded store; this one pins
 //! row-for-row fidelity (every `(signer, verdict, commit, story_id)`
 //! survives the round-trip byte-identical) as a trait-level invariant
-//! story 5's `SurrealStore` mirror will also inherit.
+//! story 5's `SurrealStore` mirror will also inherit. Ancestry flows
+//! through the `stories` table seeded inline — no filesystem, no env
+//! var.
 
 use agentic_store::{MemStore, Store, StoreSnapshot};
 use serde_json::json;
@@ -35,8 +41,30 @@ const LEAF_ID: i64 = 4103;
 
 #[test]
 fn every_snapshot_row_round_trips_byte_for_byte_into_fresh_store() {
-    // Source store with a small two-ancestor chain for the leaf.
+    // Source store with a small two-ancestor chain for the leaf. Ancestry
+    // is declared in the `stories` table per the fixture mechanism pinned
+    // in story 4's guidance.
     let source: Box<dyn Store> = Box::new(MemStore::new());
+
+    source
+        .append(
+            "stories",
+            json!({ "id": ROOT_ID, "depends_on": [] }),
+        )
+        .expect("seed root story row");
+    source
+        .append(
+            "stories",
+            json!({ "id": MID_ID, "depends_on": [ROOT_ID] }),
+        )
+        .expect("seed mid story row");
+    source
+        .append(
+            "stories",
+            json!({ "id": LEAF_ID, "depends_on": [MID_ID] }),
+        )
+        .expect("seed leaf story row");
+
     source
         .append(
             "uat_signings",

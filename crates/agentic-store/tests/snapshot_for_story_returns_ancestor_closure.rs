@@ -1,12 +1,15 @@
 //! Story 4 acceptance test: `snapshot_for_story` returns the transitive-
-//! ancestor closure of `uat_signings` rows, exclusively.
+//! ancestor closure of `uat_signings` rows, exclusively, reading ancestry
+//! from the `stories` table the test seeds in the same `Store`.
 //!
 //! Justification (from stories/4.yml acceptance.tests[5]):
 //!   Proves the snapshot primitive's closure property at the trait level:
-//!   given a `MemStore` seeded with a three-story fixture chain
-//!   (`leaf` depends_on `mid`, `mid` depends_on `root`) where each of
-//!   `mid` and `root` carries a valid `uat_signings` row (and at least
-//!   one unrelated story also has a signing row in the same store),
+//!   given a `MemStore` whose `stories` table is seeded with the three-
+//!   story fixture chain (`leaf` depends_on `mid`, `mid` depends_on
+//!   `root`) per the stories-table fixture mechanism described in
+//!   guidance ("Ancestry fixture mechanism"), and whose `uat_signings`
+//!   table carries one pass row for each of `mid` and `root` (plus at
+//!   least one unrelated story's signing in the same store),
 //!   `Store::snapshot_for_story(leaf_id)` returns a `StoreSnapshot`
 //!   containing exactly the signings for `mid` and `root` — the
 //!   transitive-ancestor closure — and excludes the leaf's own signings
@@ -15,12 +18,14 @@
 //!
 //! Red today: compile-red. The trait does not yet expose
 //! `snapshot_for_story` and the `StoreSnapshot` type is not declared.
-//! Story 4's amendment (triggered by story 20) adds both to the trait;
-//! this scaffold fails `cargo check` until that lands.
+//! Story 4's amendment (triggered by story 20, refined by the
+//! fixture-mechanism follow-up) adds both to the trait; this scaffold
+//! fails `cargo check` until that lands.
 //!
 //! Written against `dyn Store` deliberately: the only line that mentions
 //! `MemStore` is the constructor. Story 5's `SurrealStore` mirror reuses
-//! the same assertions.
+//! the same assertions. Ancestry flows through the `stories` table
+//! seeded inline — no filesystem, no env var.
 
 use agentic_store::{MemStore, Store, StoreSnapshot};
 use serde_json::json;
@@ -33,6 +38,37 @@ const UNRELATED_ID: i64 = 4999;
 #[test]
 fn snapshot_of_leaf_carries_mid_and_root_signings_only() {
     let store: Box<dyn Store> = Box::new(MemStore::new());
+
+    // Seed the ancestry graph as `stories` rows per the fixture
+    // mechanism pinned in story 4's guidance ("Ancestry fixture
+    // mechanism"). Closure walks leaf -> mid -> root via `depends_on`.
+    store
+        .append(
+            "stories",
+            json!({ "id": ROOT_ID, "depends_on": [] }),
+        )
+        .expect("seed root story row");
+    store
+        .append(
+            "stories",
+            json!({ "id": MID_ID, "depends_on": [ROOT_ID] }),
+        )
+        .expect("seed mid story row");
+    store
+        .append(
+            "stories",
+            json!({ "id": LEAF_ID, "depends_on": [MID_ID] }),
+        )
+        .expect("seed leaf story row");
+    // Unrelated fixture row — present in the stories table but not in
+    // the leaf's ancestry closure. Proves the walker does not pick up
+    // unrelated rows just because they exist.
+    store
+        .append(
+            "stories",
+            json!({ "id": UNRELATED_ID, "depends_on": [] }),
+        )
+        .expect("seed unrelated story row");
 
     // Root ancestor: has a pass signing.
     store
@@ -90,9 +126,8 @@ fn snapshot_of_leaf_carries_mid_and_root_signings_only() {
         .expect("seed unrelated signing (must be excluded from snapshot)");
 
     // Take the snapshot for the leaf. The ancestry chain
-    // (leaf -> mid -> root) is the one this scaffold pins; the
-    // implementation is expected to walk `depends_on` the same way
-    // story 11's gate does.
+    // (leaf -> mid -> root) is read from the `stories` table seeded
+    // above; no filesystem, no env var.
     let snapshot: StoreSnapshot = store
         .snapshot_for_story(LEAF_ID)
         .expect("snapshot_for_story must succeed on a populated store");
