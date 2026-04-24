@@ -97,9 +97,12 @@ version = "0.1.0"
 dependencies = [
  "agentic-runtime",
  "agentic-store",
+ "agentic-story",
+ "agentic-uat",
  "git2",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "tokio",
  "uuid",

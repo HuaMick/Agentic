@@ -27,6 +27,15 @@ use std::sync::Arc;
 use agentic_runtime::Runtime;
 use agentic_store::Store;
 
+/// Simple stdout event sink for NDJSON output
+struct StdoutSink;
+
+impl agentic_runtime::EventSink for StdoutSink {
+    fn emit(&mut self, line: &str) {
+        println!("{}", line);
+    }
+}
+
 /// Host-side configuration for `agentic story build <id>`.
 ///
 /// Carries all the resolved paths, image tag, docker binary,
@@ -316,12 +325,7 @@ impl StoryBuild {
         _store: Arc<dyn Store>,
         _runtime: Arc<dyn Runtime>,
     ) -> Result<Outcome, StoryBuildError> {
-        // TODO: Implement container-side orchestration
-        // - Restore snapshot
-        // - Check ancestor gate
-        // - Spawn inner loop
-        // - Write run row + trace
-        // - Return outcome
+        // TODO: Full implementation
         todo!("in-sandbox run orchestration with injected runtime")
     }
 
