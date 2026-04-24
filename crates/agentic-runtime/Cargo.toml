@@ -17,6 +17,21 @@ publish.workspace = true
 # any runtime code runs.
 
 [dependencies]
+# Story 16 runtime: RunRecorder + TraceTee use chrono for RFC3339 timestamps.
+chrono.workspace = true
+
+# Story 16 runtime: RunRecorder uses sha2 for story_yaml_snapshot hashing.
+# Shared with story 14 and the standalone-resilience test.
+sha2 = "0.10"
+
+# Story 16 runtime: start_branch / finish_branch use git2 to capture git state.
+git2 = { version = "0.19", default-features = false }
+
+# Story 16 runtime: Store trait requires serde_json::Value.
+serde_json.workspace = true
+
+# Story 16 runtime: RunRecorder writes to the Store trait from agentic-store.
+agentic-store = { path = "../agentic-store" }
 
 [dev-dependencies]
 # Story 16 scaffolds: tests construct a `MemStore` (the standalone-
