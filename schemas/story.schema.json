@@ -25,8 +25,8 @@
     },
     "status": {
       "type": "string",
-      "enum": ["proposed", "under_construction", "healthy", "unhealthy"],
-      "description": "Lifecycle state. `proposed` and `under_construction` are written by the story-writer or humans. `healthy` is written only by `agentic uat` on a Pass verdict. `unhealthy` is computed by the dashboard from evidence and is never written to disk."
+      "enum": ["proposed", "under_construction", "healthy", "unhealthy", "retired"],
+      "description": "Lifecycle state. `proposed` and `under_construction` are written by the story-writer or humans. `healthy` is written only by `agentic uat` on a Pass verdict. `unhealthy` is computed by the dashboard from evidence and is never written to disk. `retired` is a terminal off-tree state."
     },
     "patterns": {
       "type": "array",
@@ -93,6 +93,36 @@
         "minLength": 1
       },
       "description": "Paths or globs (relative to repo root) whose change since the last UAT pass commit marks this story stale. Absent or empty means no file-based staleness signal — the story is healthy as long as the UAT pass row exists and tests are not red."
+    },
+    "build_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_inner_loop_iterations"],
+      "properties": {
+        "max_inner_loop_iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "models": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "description": "Optional build configuration. Contains max_inner_loop_iterations (positive integer) and models (array of strings). Absent means no opinion; when present, used by story 19's runtime."
+    },
+    "superseded_by": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional edge pointing at the successor when a retired story was superseded. Absent means terminal retirement. Only meaningful when status: retired."
+    },
+    "retired_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional prose documenting why this story was retired. Absent is valid when no reason is known or recorded."
     }
   }
 }

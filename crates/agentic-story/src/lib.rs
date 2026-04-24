@@ -11,9 +11,12 @@
 //!   1. YAML parse.
 //!   2. Structural / schema validation (required fields + no unknown
 //!      fields).
-//!   3. Enum-boundary validation (`status` is one of four values).
-//!   4. Graph validation (directory-load only): `depends_on` edges form
-//!      a DAG — cycles and self-loops are rejected.
+//!   3. Enum-boundary validation (`status` is one of five values).
+//!   4. Semantic validation (build_config iterations are positive,
+//!      id matches filename).
+//!   5. Graph validation (directory-load only): `depends_on` edges form
+//!      a DAG — cycles and self-loops are rejected. `superseded_by`
+//!      edges also form a DAG independently.
 //!
 //! The loader is strictly read-only; it never mutates state or persists
 //! anything. Mutation of `status` is owned by `agentic uat` (story 1).
@@ -26,11 +29,26 @@ use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde_yaml::Value;
 
+/// Default build configuration: max_inner_loop_iterations: 5, models: [].
+/// This is the single source of truth for defaults per story 17.
+pub const DEFAULT_BUILD_CONFIG: BuildConfig = BuildConfig {
+    max_inner_loop_iterations: 5,
+    models: Vec::new(),
+};
+
+/// Build configuration for a story's orchestration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildConfig {
+    pub max_inner_loop_iterations: u32,
+    pub models: Vec<String>,
+}
+
 /// A fully-validated story loaded from disk.
 ///
 /// Constructing a `Story` has already enforced the schema and — when
 /// loaded through [`Story::load_dir`] — the acyclicity of the
-/// `depends_on` graph, so downstream code can assume well-formedness.
+/// `depends_on` and `superseded_by` graphs, so downstream code can
+/// assume well-formedness.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Story {
     pub id: u32,
@@ -42,6 +60,9 @@ pub struct Story {
     pub guidance: String,
     pub depends_on: Vec<u32>,
     pub related_files: Vec<String>,
+    pub build_config: Option<BuildConfig>,
+    pub superseded_by: Option<u32>,
+    pub retired_reason: Option<String>,
 }
 
 /// Acceptance block: one or more tests plus the UAT journey.
@@ -58,7 +79,7 @@ pub struct TestEntry {
     pub justification: String,
 }
 
-/// The four lifecycle states the dashboard understands.
+/// The five lifecycle states the dashboard understands.
 ///
 /// Kept deliberately narrow — any other value loaded from disk becomes
 /// [`StoryError::UnknownStatus`] with the offending string.
@@ -68,6 +89,7 @@ pub enum Status {
     UnderConstruction,
     Healthy,
     Unhealthy,
+    Retired,
 }
 
 /// Typed error surface for the loader. No raw I/O errors leak through;
@@ -77,7 +99,7 @@ pub enum StoryError {
     /// A required field is missing, or the file is otherwise not shaped
     /// like a story. `field` names the offending field.
     SchemaViolation { field: String, message: String },
-    /// `status` parsed but was not one of the four accepted values.
+    /// `status` parsed but was not one of the five accepted values.
     UnknownStatus { value: String },
     /// The file or directory the caller supplied does not exist.
     NotFound { path: PathBuf },
@@ -85,6 +107,20 @@ pub enum StoryError {
     YamlParse { path: PathBuf, message: String },
     /// Cross-story `depends_on` validation failure.
     DependsOnCycle { participants: Vec<u32> },
+    /// A story's `superseded_by` points to a non-existent target id.
+    SupersededByUnknown { source_id: u32, target_id: u32 },
+    /// A cycle was detected in the `superseded_by` edges.
+    SupersededByCycle { participants: Vec<u32> },
+    /// `build_config.max_inner_loop_iterations` is zero, negative, or
+    /// out-of-range. Owned by story 17.
+    BuildConfigInvalidIterations { value: i64 },
+    /// A field in `build_config` has the wrong type (e.g., string where
+    /// integer expected). Owned by story 17.
+    BuildConfigTypeMismatch {
+        field: String,
+        expected: String,
+        found: String,
+    },
 }
 
 impl std::fmt::Display for StoryError {
@@ -96,7 +132,7 @@ impl std::fmt::Display for StoryError {
             StoryError::UnknownStatus { value } => {
                 write!(
                     f,
-                    "status must be one of proposed|under_construction|healthy|unhealthy; got `{value}`"
+                    "status must be one of proposed|under_construction|healthy|unhealthy|retired; got `{value}`"
                 )
             }
             StoryError::NotFound { path } => {
@@ -109,6 +145,39 @@ impl std::fmt::Display for StoryError {
                 write!(
                     f,
                     "depends_on cycle detected; participants include {participants:?}"
+                )
+            }
+            StoryError::SupersededByUnknown {
+                source_id,
+                target_id,
+            } => {
+                write!(
+                    f,
+                    "superseded_by edge from story {source_id} points to non-existent story {target_id}"
+                )
+            }
+            StoryError::SupersededByCycle { participants } => {
+                write!(
+                    f,
+                    "superseded_by cycle detected; participants include {participants:?}"
+                )
+            }
+            StoryError::BuildConfigInvalidIterations { value } => {
+                write!(
+                    f,
+                    "build_config.max_inner_loop_iterations must be a positive \
+                     integer; got {value}"
+                )
+            }
+            StoryError::BuildConfigTypeMismatch {
+                field,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "build_config.{field} type mismatch: expected {expected}, \
+                     found {found}"
                 )
             }
         }
@@ -137,7 +206,8 @@ impl Story {
     }
 
     /// Load every `*.yml` file directly under `dir` and validate the
-    /// collective `depends_on` graph is a DAG (no cycles, no self-loops).
+    /// collective `depends_on` graph is a DAG (no cycles, no self-loops)
+    /// AND the `superseded_by` graph is also a DAG independently.
     pub fn load_dir(dir: &Path) -> Result<Vec<Self>, StoryError> {
         if !dir.exists() {
             return Err(StoryError::NotFound {
@@ -160,6 +230,7 @@ impl Story {
             }
         }
         detect_cycles(&stories)?;
+        detect_superseded_by_cycles(&stories)?;
         Ok(stories)
     }
 }
@@ -214,6 +285,71 @@ struct RawStory {
     depends_on: Vec<u32>,
     #[serde(default, deserialize_with = "deserialize_related_files")]
     related_files: Vec<String>,
+    #[serde(default)]
+    build_config: Option<RawBuildConfig>,
+    #[serde(default)]
+    superseded_by: Option<u32>,
+    #[serde(default)]
+    retired_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBuildConfig {
+    #[serde(deserialize_with = "deserialize_iterations")]
+    max_inner_loop_iterations: u32,
+    #[serde(default)]
+    models: Vec<String>,
+}
+
+/// Custom deserializer for max_inner_loop_iterations that catches type
+/// mismatches (non-integer values) and forwards them as a custom error
+/// message so we can re-wrap them as BuildConfigTypeMismatch.
+fn deserialize_iterations<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    match serde_yaml::Value::deserialize(deserializer) {
+        Ok(v) => match v {
+            serde_yaml::Value::Number(n) => {
+                // Try to parse as i64 first to catch negatives and out-of-range
+                if let Some(i) = n.as_i64() {
+                    if i > 0 && i <= u32::MAX as i64 {
+                        Ok(i as u32)
+                    } else {
+                        Err(Error::custom(format!("BuildConfigInvalidIterations:{}", i)))
+                    }
+                } else if let Some(u) = n.as_u64() {
+                    if u <= u32::MAX as u64 && u > 0 {
+                        Ok(u as u32)
+                    } else {
+                        Err(Error::custom(format!("BuildConfigInvalidIterations:{}", u)))
+                    }
+                } else {
+                    Err(Error::custom(
+                        "BuildConfigTypeMismatch:max_inner_loop_iterations:integer:number"
+                            .to_string(),
+                    ))
+                }
+            }
+            _ => {
+                let type_name = match &v {
+                    serde_yaml::Value::String(_) => "string",
+                    serde_yaml::Value::Bool(_) => "bool",
+                    serde_yaml::Value::Null => "null",
+                    serde_yaml::Value::Sequence(_) => "array",
+                    serde_yaml::Value::Mapping(_) => "object",
+                    _ => "unknown",
+                };
+                Err(Error::custom(format!(
+                    "BuildConfigTypeMismatch:max_inner_loop_iterations:integer:{}",
+                    type_name
+                )))
+            }
+        },
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,6 +397,32 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
     // (`deny_unknown_fields`, type mismatches, acceptance sub-shape).
     let raw: RawStory = serde_yaml::from_value(value).map_err(|e| {
         let msg = e.to_string();
+
+        // Check for custom errors from build_config deserialization.
+        if msg.contains("BuildConfigInvalidIterations:") {
+            if let Some(value_str) = msg.split("BuildConfigInvalidIterations:").nth(1) {
+                if let Ok(value) = value_str.parse::<i64>() {
+                    return StoryError::BuildConfigInvalidIterations { value };
+                }
+            }
+        }
+        if msg.contains("BuildConfigTypeMismatch:") {
+            // Format: BuildConfigTypeMismatch:field:expected:found
+            let parts: Vec<&str> = msg
+                .split("BuildConfigTypeMismatch:")
+                .nth(1)
+                .unwrap_or("")
+                .split(':')
+                .collect();
+            if parts.len() >= 3 {
+                return StoryError::BuildConfigTypeMismatch {
+                    field: parts[0].to_string(),
+                    expected: parts[1].to_string(),
+                    found: parts[2].to_string(),
+                };
+            }
+        }
+
         let field = if msg.contains("related_files") {
             "related_files".to_string()
         } else {
@@ -279,12 +441,19 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
         "under_construction" => Status::UnderConstruction,
         "healthy" => Status::Healthy,
         "unhealthy" => Status::Unhealthy,
+        "retired" => Status::Retired,
         other => {
             return Err(StoryError::UnknownStatus {
                 value: other.to_string(),
             });
         }
     };
+
+    // Convert RawBuildConfig to BuildConfig if present.
+    let build_config = raw.build_config.map(|raw_cfg| BuildConfig {
+        max_inner_loop_iterations: raw_cfg.max_inner_loop_iterations,
+        models: raw_cfg.models,
+    });
 
     Ok(Story {
         id: raw.id,
@@ -307,6 +476,9 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
         guidance: raw.guidance,
         depends_on: raw.depends_on,
         related_files: raw.related_files,
+        build_config,
+        superseded_by: raw.superseded_by,
+        retired_reason: raw.retired_reason,
     })
 }
 
@@ -395,6 +567,93 @@ fn detect_cycles(stories: &[Story]) -> Result<(), StoryError> {
         if color.get(&node).copied() == Some(Color::White) {
             if let Err(participants) = dfs(node, &graph, &mut color, &mut stack) {
                 return Err(StoryError::DependsOnCycle { participants });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate the `superseded_by` edge set: referential integrity check +
+/// cycle detection. Returns `SupersededByUnknown` if any target id does
+/// not exist, or `SupersededByCycle` if a cycle is detected.
+fn detect_superseded_by_cycles(stories: &[Story]) -> Result<(), StoryError> {
+    let ids: HashSet<u32> = stories.iter().map(|s| s.id).collect();
+
+    // First pass: referential integrity. Any superseded_by edge whose
+    // target id is not in the loaded set is an error.
+    for s in stories {
+        if let Some(target_id) = s.superseded_by {
+            if !ids.contains(&target_id) {
+                return Err(StoryError::SupersededByUnknown {
+                    source_id: s.id,
+                    target_id,
+                });
+            }
+        }
+    }
+
+    // Second pass: build the graph and detect cycles. Only stories with
+    // a superseded_by edge have outgoing edges in this graph.
+    let mut graph: HashMap<u32, Option<u32>> = HashMap::new();
+    for s in stories {
+        graph.insert(s.id, s.superseded_by);
+    }
+
+    // Self-loops are easiest to report directly.
+    for (id, target) in &graph {
+        if let Some(t) = target {
+            if *id == *t {
+                return Err(StoryError::SupersededByCycle {
+                    participants: vec![*id],
+                });
+            }
+        }
+    }
+
+    // DFS with three-colour state for multi-hop cycles.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
+
+    fn dfs_superseded(
+        node: u32,
+        graph: &HashMap<u32, Option<u32>>,
+        color: &mut HashMap<u32, Color>,
+        stack: &mut Vec<u32>,
+    ) -> Result<(), Vec<u32>> {
+        color.insert(node, Color::Gray);
+        stack.push(node);
+        if let Some(Some(next)) = graph.get(&node) {
+            match color.get(next).copied().unwrap_or(Color::White) {
+                Color::White => dfs_superseded(*next, graph, color, stack)?,
+                Color::Gray => {
+                    let start = stack.iter().position(|n| *n == *next).unwrap_or(0);
+                    let mut participants: Vec<u32> = stack[start..].to_vec();
+                    participants.push(*next);
+                    return Err(participants);
+                }
+                Color::Black => {}
+            }
+        }
+        stack.pop();
+        color.insert(node, Color::Black);
+        Ok(())
+    }
+
+    let mut color: HashMap<u32, Color> = graph.keys().map(|k| (*k, Color::White)).collect();
+    let mut stack: Vec<u32> = Vec::new();
+
+    // Iterate in a deterministic order so error reports are stable.
+    let mut keys: Vec<u32> = graph.keys().copied().collect();
+    keys.sort_unstable();
+    for node in keys {
+        if color.get(&node).copied() == Some(Color::White) {
+            if let Err(participants) = dfs_superseded(node, &graph, &mut color, &mut stack) {
+                return Err(StoryError::SupersededByCycle { participants });
             }
         }
     }
