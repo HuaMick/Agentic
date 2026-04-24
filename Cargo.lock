@@ -72,9 +72,7 @@ name = "agentic-store"
 version = "0.1.0"
 dependencies = [
  "agentic-runtime",
- "serde",
  "serde_json",
- "serde_yaml",
  "surrealkv",
  "tempfile",
  "tokio",

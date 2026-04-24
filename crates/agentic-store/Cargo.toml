@@ -9,11 +9,6 @@ publish.workspace = true
 # Story 4: document type for the Store trait. See workspace Cargo.toml.
 serde_json.workspace = true
 
-# Story 4 amendment: serde for StoreSnapshot serialization, serde_yaml for
-# reading story YAML to compute snapshot_for_story's ancestor closure.
-serde.workspace = true
-serde_yaml.workspace = true
-
 # Story 5: durable embedded storage engine behind the `Store` trait.
 # See workspace Cargo.toml for why we link against surrealkv directly
 # rather than through the full `surrealdb` crate (compile-time memory
