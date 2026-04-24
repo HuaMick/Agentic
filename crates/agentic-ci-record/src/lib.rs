@@ -215,6 +215,25 @@ impl RunInput {
     }
 }
 
+/// Specifies how to resolve a signer identity for the `test_runs` row.
+///
+/// Per story 18's four-tier chain, `SignerSource::Resolve` means the
+/// recorder should resolve the signer from:
+///   1. An explicit flag (not supported by this crate; passed by the CLI wrapper)
+///   2. The `AGENTIC_SIGNER` environment variable
+///   3. `git config user.email` in the working directory
+///   4. Return `RecordError::SignerMissing` if none of the above yield a non-empty value
+///
+/// For now (story 2's amendment phase), the recorder resolves this enum
+/// to extract the signer via the four-tier chain. Story 18's full resolver
+/// in `agentic-signer` crate will eventually provide the complete implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignerSource {
+    /// Resolve the signer from the four-tier chain. On failure, return
+    /// `RecordError::SignerMissing`.
+    Resolve,
+}
+
 /// Errors the recorder can surface.
 ///
 /// [`RecordError::MalformedInput`] is deliberately the ONLY error a
@@ -242,6 +261,14 @@ pub enum RecordError {
         /// Human-readable description of what was wrong.
         reason: String,
     },
+    /// The signer could not be resolved from any source (flag, env, git config).
+    /// This is distinct from [`RecordError::MalformedInput`] so the CI wrapper
+    /// can distinguish "fix your git config" from "fix your test output."
+    /// On this error, zero rows are written and any existing row is untouched.
+    SignerMissing {
+        /// Human-readable description of which sources were consulted and found empty.
+        reason: String,
+    },
     /// The local git repository could not be discovered, or HEAD could
     /// not be resolved to a commit — so the recorder cannot stamp the
     /// `commit` field on the row.
@@ -258,6 +285,9 @@ impl std::fmt::Display for RecordError {
         match self {
             RecordError::MalformedInput { field, reason } => {
                 write!(f, "malformed test-runner output: {field}: {reason}")
+            }
+            RecordError::SignerMissing { reason } => {
+                write!(f, "signer could not be resolved: {reason}")
             }
             RecordError::Git(msg) => write!(f, "could not resolve git HEAD: {msg}"),
             RecordError::Store(err) => write!(f, "store error while recording: {err}"),
@@ -301,14 +331,33 @@ impl Recorder {
     }
 
     /// Upsert a `test_runs` row built from an already-validated
-    /// [`RunInput`].
+    /// [`RunInput`], with the signer auto-resolved via the four-tier chain.
     ///
     /// This is the entry point the CI hook, a future pre-commit hook,
     /// the orchestrator, and the `record_standalone_resilience` test all
     /// share — hence the "same row shape as the CLI / CI hook path"
     /// clause of the standalone-resilience justification.
+    ///
+    /// The signer is resolved from the four-tier chain (flag → env → git config → error).
+    /// If resolution fails, returns [`RecordError::SignerMissing`] and writes zero rows.
     pub fn record(&self, input: RunInput) -> Result<(), RecordError> {
-        self.record_inner(input)
+        let signer = self.resolve_signer(SignerSource::Resolve)?;
+        self.record_inner(input, Some(signer))
+    }
+
+    /// Upsert a `test_runs` row with an explicit signer source.
+    ///
+    /// This allows the caller to specify how the signer should be resolved.
+    /// When called with [`SignerSource::Resolve`], resolves the signer from the
+    /// four-tier chain: flag → env → git config → error. Returns
+    /// [`RecordError::SignerMissing`] if no signer can be resolved.
+    pub fn record_with_signer(
+        &self,
+        input: RunInput,
+        signer_source: SignerSource,
+    ) -> Result<(), RecordError> {
+        let signer = self.resolve_signer(signer_source)?;
+        self.record_inner(input, Some(signer))
     }
 
     /// Validate a raw test-runner payload (typically JSON bytes captured
@@ -336,10 +385,11 @@ impl Recorder {
     /// `record_malformed_input_preserves_row.rs` pins.
     pub fn record_from_raw(&self, story_id: i64, raw: &[u8]) -> Result<(), RecordError> {
         let input = parse_raw_input(story_id, raw)?;
-        self.record_inner(input)
+        let signer = self.resolve_signer(SignerSource::Resolve)?;
+        self.record_inner(input, Some(signer))
     }
 
-    fn record_inner(&self, input: RunInput) -> Result<(), RecordError> {
+    fn record_inner(&self, input: RunInput, signer: Option<String>) -> Result<(), RecordError> {
         let commit = resolve_head_sha()?;
         let ran_at = rfc3339_utc_now()?;
 
@@ -352,7 +402,7 @@ impl Recorder {
             .collect();
 
         let key = input.story_id.to_string();
-        let doc = json!({
+        let mut doc = json!({
             "story_id": input.story_id,
             "verdict": input.verdict.as_str(),
             "commit": commit,
@@ -360,8 +410,43 @@ impl Recorder {
             "failing_tests": failing_tests,
         });
 
+        // Stamp the signer if provided (story 2/18 amendment).
+        if let Some(s) = signer {
+            doc["signer"] = Value::String(s);
+        }
+
         self.store.upsert(TEST_RUNS_TABLE, &key, doc)?;
         Ok(())
+    }
+
+    /// Resolve a signer identity from the SignerSource.
+    /// Implements the four-tier chain: flag (not used in recorder) → env → git config → error.
+    fn resolve_signer(&self, _source: SignerSource) -> Result<String, RecordError> {
+        // Tier 2: AGENTIC_SIGNER environment variable
+        if let Ok(env_signer) = std::env::var("AGENTIC_SIGNER") {
+            let trimmed = env_signer.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        // Tier 3: git config user.email (read via git2)
+        if let Ok(repo) = git2::Repository::discover(".") {
+            if let Ok(config) = repo.config() {
+                if let Ok(email) = config.get_string("user.email") {
+                    let trimmed = email.trim();
+                    if !trimmed.is_empty() {
+                        return Ok(trimmed.to_string());
+                    }
+                }
+            }
+        }
+
+        // Tier 4: No signer found.
+        Err(RecordError::SignerMissing {
+            reason: "no signer found in AGENTIC_SIGNER env, git config user.email, or CLI flag"
+                .to_string(),
+        })
     }
 }
 
