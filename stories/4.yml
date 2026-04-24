@@ -59,12 +59,14 @@ acceptance:
   - file: crates/agentic-store/tests/snapshot_for_story_returns_ancestor_closure.rs
     justification: |
       Proves the snapshot primitive's closure property at the
-      trait level: given a `MemStore` seeded with a three-story
-      fixture chain (`leaf` depends_on `mid`, `mid` depends_on
-      `root`) where each of `mid` and `root` carries a valid
-      `uat_signings` row (and at least one unrelated story also
-      has a signing row in the same store),
-      `Store::snapshot_for_story(leaf_id)` returns a
+      trait level: given a `MemStore` whose `stories` table is
+      seeded with the three-story fixture chain (`leaf`
+      depends_on `mid`, `mid` depends_on `root`) per the
+      stories-table fixture mechanism described in guidance
+      ("Ancestry fixture mechanism"), and whose `uat_signings`
+      table carries one pass row for each of `mid` and `root`
+      (plus at least one unrelated story's signing in the same
+      store), `Store::snapshot_for_story(leaf_id)` returns a
       `StoreSnapshot` containing exactly the signings for `mid`
       and `root` — the transitive-ancestor closure — and
       excludes the leaf's own signings and the unrelated
@@ -78,35 +80,68 @@ acceptance:
   - file: crates/agentic-store/tests/restore_roundtrips_snapshot.rs
     justification: |
       Proves the restore primitive's round-trip completeness:
-      given a `StoreSnapshot` produced by `snapshot_for_story`
-      on a source `MemStore`, calling `Store::restore(snapshot)`
-      on a second, fresh `MemStore` causes that destination
-      store's ancestor-gate queries (e.g. "is there a Pass
-      verdict for story `mid`?") to return true for every row
-      the snapshot carried, with `signer`, `verdict`, `commit`,
-      and `story_id` preserved byte-for-byte. Without this, the
-      snapshot could serialise selectively but restore into a
-      shape the gate can't read — the container-side embedded
-      Store would be seeded with rows that are present but
-      invisible to the ancestor-gate helper, and story 11's
-      invariant would silently break inside the sandbox.
+      given a source `MemStore` whose `stories` table is seeded
+      with a two-ancestor chain for the leaf per the
+      stories-table fixture mechanism (see guidance, "Ancestry
+      fixture mechanism"), and whose `uat_signings` table
+      carries one row per ancestor, a `StoreSnapshot` produced
+      by `snapshot_for_story` restores into a fresh destination
+      `MemStore` such that the destination's ancestor-gate
+      queries (e.g. "is there a Pass verdict for story `mid`?")
+      return true for every row the snapshot carried, with
+      `signer`, `verdict`, `commit`, and `story_id` preserved
+      byte-for-byte. Without this, the snapshot could serialise
+      selectively but restore into a shape the gate can't read
+      — the container-side embedded Store would be seeded with
+      rows that are present but invisible to the ancestor-gate
+      helper, and story 11's invariant would silently break
+      inside the sandbox.
+  - file: crates/agentic-store/tests/snapshot_reads_ancestry_from_stores_stories_table.rs
+    justification: |
+      Pins the stories-table ancestry fixture mechanism at the
+      trait level in isolation, so the two closure / round-trip
+      tests above (`snapshot_for_story_returns_ancestor_closure`
+      and `restore_roundtrips_snapshot`) inherit a concrete,
+      test-contained contract rather than an implicit one.
+      Given a `MemStore` whose `stories` table carries exactly
+      two rows — `{"id": A, "depends_on": [B]}` and
+      `{"id": B, "depends_on": []}` — and whose `uat_signings`
+      table carries one pass row for story B, calling
+      `Store::snapshot_for_story(A)` returns a `StoreSnapshot`
+      whose `signings` is exactly the B row. Critically, NO
+      `AGENTIC_STORIES_DIR` env var is set, NO files are written
+      under the working directory's `stories/` path during the
+      test, and the subject `MemStore` is constructed with
+      `MemStore::new()` only — all ancestry knowledge flows
+      through the `stories` table seeded by the test. Without
+      this pin, the two closure/round-trip tests above can pass
+      under an env-var fallback or a working-directory read and
+      silently drift away from the test-contained mechanism,
+      which is the whole reason this amendment exists (the
+      earlier scaffold defect: two tests depended on a corpus
+      path the test never seeded). This test is the shortest
+      possible proof that the mechanism is wired through the
+      trait alone.
   - file: crates/agentic-store/tests/snapshot_of_story_with_no_ancestors_is_empty.rs
     justification: |
       Proves the empty-closure edge case: given a fixture story
-      with `depends_on: []` in a store that contains signings
-      for other unrelated stories, `Store::snapshot_for_story`
-      returns an empty `StoreSnapshot` (zero signing rows), and
-      `Store::restore(empty_snapshot)` on a fresh `MemStore`
-      succeeds without error and without writing any rows. A
-      subsequent ancestor-gate query against the destination
-      store returns the empty-ancestor-set answer (the gate is
-      trivially satisfied for a story with no declared
-      ancestors). Without this, story 20's happy-path UAT — a
-      fixture story with no ancestors — either crashes at
-      snapshot time (no ancestors treated as an error) or at
-      restore time (empty bundle treated as malformed), and the
-      simplest possible sandbox invocation fails for reasons
-      unrelated to the inner loop.
+      seeded into the `stories` table as
+      `{"id": T, "depends_on": []}` per the stories-table
+      fixture mechanism (see guidance, "Ancestry fixture
+      mechanism"), in a store that also contains `uat_signings`
+      rows for other unrelated stories, `Store::
+      snapshot_for_story(T)` returns an empty `StoreSnapshot`
+      (zero signing rows), and `Store::restore(empty_snapshot)`
+      on a fresh `MemStore` succeeds without error and without
+      writing any rows. A subsequent ancestor-gate query
+      against the destination store returns the empty-ancestor-
+      set answer (the gate is trivially satisfied for a story
+      with no declared ancestors). Without this, story 20's
+      happy-path UAT — a fixture story with no ancestors —
+      either crashes at snapshot time (no ancestors treated as
+      an error) or at restore time (empty bundle treated as
+      malformed), and the simplest possible sandbox invocation
+      fails for reasons unrelated to the inner loop.
   uat: |
     Goal: convince yourself the `Store` trait's behavioural contract
     holds for the in-memory implementation when driven directly from
@@ -184,13 +219,17 @@ guidance: |
     (possibly empty), and the concrete `MemStore` is `Send +
     Sync` enough to be shared behind `Arc<dyn Store>`.
 
-    Three further tests — added by the story-20 amendment — pin
-    the snapshot/restore primitive: snapshot extracts exactly the
-    transitive-ancestor closure of `uat_signings` rows for a
-    given story id, restore round-trips that bundle into a fresh
-    store in a form the ancestor-gate helper can read, and the
-    no-ancestor edge case (`depends_on: []`) serialises to an
-    empty bundle that restores as a no-op.
+    Four further tests — added by the story-20 amendment and
+    its fixture-mechanism follow-up — pin the snapshot/restore
+    primitive: snapshot extracts exactly the transitive-
+    ancestor closure of `uat_signings` rows for a given story
+    id, restore round-trips that bundle into a fresh store in
+    a form the ancestor-gate helper can read, the no-ancestor
+    edge case (`depends_on: []`) serialises to an empty bundle
+    that restores as a no-op, and the ancestry-fixture
+    mechanism itself is read from a `stories` table inside the
+    same `Store` (the shape documented under "Ancestry fixture
+    mechanism" below).
 
   Snapshot / restore — the story-20 trait extension.
     Purpose. The `Store` trait gains two methods so story 20's
@@ -281,6 +320,66 @@ guidance: |
     (See story 20's guidance, Decision 2, for the full
     derivation.)
 
+  Ancestry fixture mechanism — how `snapshot_for_story` learns
+  the graph.
+    `snapshot_for_story` needs the subject story's `depends_on`
+    graph to compute the transitive-ancestor closure. The
+    contract pins this as a table-shape convention, not a
+    filesystem lookup and not an env-var switch: the `Store`
+    impl reads ancestry from a `stories` table in the same
+    `Store` it is operating on, populated by the caller, with
+    rows shaped:
+
+        { "id": <i64>, "depends_on": [<i64>, ...] }
+
+    Closure computation is the DFS story 11 describes, reading
+    each visited story's row from the `stories` table to
+    discover its direct predecessors. A story whose row is
+    absent from the `stories` table is treated as a no-ancestor
+    story (empty closure) — this is what makes the no-ancestor
+    edge-case test possible without any filesystem setup.
+
+    Why a `stories` table, not the `stories/` directory or an
+    env var. Tests must be self-contained: each acceptance test
+    constructs its own `MemStore`, seeds both `stories` and
+    `uat_signings` from the same test body, and makes no
+    assumption about the process's current working directory,
+    no assumption about a `stories/*.yml` corpus being present
+    on disk, and no assumption about an `AGENTIC_STORIES_DIR`
+    or similar env var. An earlier scaffold pass tried to lean
+    on a filesystem fallback and an env-var fallback; both
+    broke because neither was seeded by the test body. The
+    table-shape convention removes both escape hatches: if the
+    test did not seed the row, the closure is empty, full stop.
+    This also makes the mechanism trivially parity-compatible
+    with story 5's `SurrealStore` — the table behaves
+    identically under both impls because it rides the same
+    `append` / `query` primitives already pinned by tests 2
+    and 4.
+
+    What populates the `stories` table in production. The
+    runtime binary is expected to seed the `stories` table
+    from the `stories/*.yml` corpus at startup (the shape is
+    a one-to-one projection of each story's `id` +
+    `depends_on` fields). How and when that seeding happens is
+    a runtime concern owned by later stories (the CLI binary
+    and the sandbox); story 4's contract only pins the table
+    shape the impl reads from, not the ingestion path that
+    fills it. Story 20's sandbox, in particular, will seed the
+    host's `stories` table before calling
+    `snapshot_for_story` — and will NOT seed the embedded
+    store's `stories` table after restore, because the
+    embedded store only needs to answer ancestor-gate queries
+    against `uat_signings`, not to recompute the closure.
+
+    Scope of this table in story 4. The `stories` table is an
+    ancestry-graph projection, nothing more. Story 4 pins one
+    shape fact about it: rows carry `id` and `depends_on`.
+    Other fields (title, status, patterns, full story body)
+    are NOT in scope here; a later consumer that wants to
+    persist richer story metadata in a store-backed form will
+    pin that shape under its own story.
+
   Behaviours that are deliberately NOT in scope for this story.
     - Transactions across multiple tables. The public API may
       expose a transaction closure later; this story does not
@@ -316,9 +415,10 @@ guidance: |
     presuppose a local filesystem.
 
   Test file locations.
-    All eight tests (the original five plus the three added by
-    the story-20 amendment) live under
-    `crates/agentic-store/tests/` as Rust integration tests.
+    All nine tests (the original five plus the four added by
+    the story-20 amendment and its fixture-mechanism
+    follow-up) live under `crates/agentic-store/tests/` as
+    Rust integration tests.
     They import `agentic-store` and drive `MemStore` directly.
     They do not shell out to the top-level `agentic` binary.
     They do not use any other workspace crate.
