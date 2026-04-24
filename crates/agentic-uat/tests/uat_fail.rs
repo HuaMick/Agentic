@@ -37,7 +37,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{SignerSource, StubExecutor, Uat, Verdict};
+use agentic_uat::{StubExecutor, Uat, Verdict};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4243;
@@ -94,7 +94,7 @@ fn uat_run_returns_fail_writes_signing_row_with_signer_and_leaves_story_status_u
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
     let verdict = uat
-        .run(STORY_ID, SignerSource::Resolve)
+        .run(STORY_ID)
         .expect("Fail is a verdict, not an error; run() must return Ok(Fail)");
     assert!(
         matches!(verdict, Verdict::Fail),

@@ -58,19 +58,14 @@ use uuid::Uuid;
 /// 2. `AGENTIC_SIGNER` environment variable
 /// 3. `git config user.email`
 /// 4. Typed error (`UatError::SignerMissing`)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum SignerSource {
     /// Resolve the signer identity via the four-tier chain starting with
     /// environment and git config. This is the normal path for CLI usage.
+    #[default]
     Resolve,
     /// Use an explicitly provided signer identity, bypassing all resolution.
     Explicit(String),
-}
-
-impl Default for SignerSource {
-    fn default() -> Self {
-        SignerSource::Resolve
-    }
 }
 
 /// The table name for UAT signing records.
@@ -281,7 +276,32 @@ impl<E: UatExecutor> Uat<E> {
         }
     }
 
-    /// Run a UAT for the story with the given id.
+    /// Run a UAT for the story with the given id, resolving the signer identity.
+    ///
+    /// # Arguments
+    ///
+    /// - `story_id`: The story to test and potentially promote.
+    ///
+    /// Returns a `Verdict` on success (Pass or Fail). Returns a typed
+    /// `UatError` if the tree is dirty, the story is not found, the signer
+    /// cannot be resolved, or a backend error occurs.
+    ///
+    /// # Side effects on success
+    ///
+    /// - Always writes one row to `uat_signings` with the verdict, commit
+    ///   SHA, signer identity, and timestamp.
+    /// - If the verdict is Pass, rewrites the story YAML in place to set
+    ///   `status: healthy`, preserving all other fields.
+    /// - If the verdict is Fail, the story YAML is untouched.
+    ///
+    /// # Side effects on error
+    ///
+    /// None. No rows written, no files touched.
+    pub fn run(&self, story_id: u32) -> Result<Verdict, UatError> {
+        self.run_with_signer(story_id, SignerSource::Resolve)
+    }
+
+    /// Run a UAT for the story with the given id and explicit signer source.
     ///
     /// # Arguments
     ///
@@ -303,7 +323,11 @@ impl<E: UatExecutor> Uat<E> {
     /// # Side effects on error
     ///
     /// None. No rows written, no files touched.
-    pub fn run(&self, story_id: u32, signer_source: SignerSource) -> Result<Verdict, UatError> {
+    pub fn run_with_signer(
+        &self,
+        story_id: u32,
+        signer_source: SignerSource,
+    ) -> Result<Verdict, UatError> {
         // Step 1: Dirty-tree check FIRST, before anything else.
         check_tree_clean(&self.stories_dir)?;
 
@@ -551,6 +575,21 @@ fn check_ancestors_healthy(
                 UatError::Io("cycle with no participants".to_string())
             }
         }
+        StoryError::SupersededByCycle { participants } => {
+            // Cycle in the supersession chain. Same error variant as depends_on cycles
+            // because they are both DAG-breaking cycles from the operator's perspective.
+            if participants.len() > 1 {
+                UatError::Cycle {
+                    edge: (participants[0], participants[1]),
+                }
+            } else if participants.len() == 1 {
+                UatError::Cycle {
+                    edge: (participants[0], participants[0]),
+                }
+            } else {
+                UatError::Io("superseded_by cycle with no participants".to_string())
+            }
+        }
         _ => UatError::Io(format!("failed to load stories: {e}")),
     })?;
 
@@ -610,38 +649,92 @@ fn check_ancestor_dfs(
         }
     };
 
-    // First: check if THIS ancestor is healthy on disk.
-    if story.status != Status::Healthy {
-        path.pop();
-        visited.remove(&story_id);
-        return Err(UatError::AncestorNotHealthy {
-            ancestor_id: story_id,
-            reason: AncestorUnhealthyReason::StatusNotHealthy,
-        });
-    }
+    // Check if this ancestor is satisfied, walking the retirement chain if needed.
+    is_ancestor_satisfied(story, stories_by_id, store)?;
 
-    // Second: check if THIS ancestor has a valid signing row.
-    let signing_rows = store
-        .query(UAT_SIGNINGS_TABLE, &|doc| {
-            doc.get("story_id").and_then(|v| v.as_u64()) == Some(story_id as u64)
-                && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
-        })
-        .map_err(UatError::Store)?;
-
-    if signing_rows.is_empty() {
-        path.pop();
-        visited.remove(&story_id);
-        return Err(UatError::AncestorNotHealthy {
-            ancestor_id: story_id,
-            reason: AncestorUnhealthyReason::NoSigningRow,
-        });
-    }
-
-    // Third: recursively check each of this ancestor's ancestors.
+    // Recursively check each of this ancestor's ancestors.
     for &next_ancestor_id in &story.depends_on {
         check_ancestor_dfs(next_ancestor_id, stories_by_id, store, visited, path)?;
     }
 
     path.pop();
     Ok(())
+}
+
+/// Check if a single ancestor is satisfied, walking the `superseded_by` chain
+/// if the ancestor is retired.
+///
+/// This implements the chain-walk algorithm from story 11's guidance:
+/// - If status is healthy with a valid signing row: satisfied.
+/// - If status is healthy without a signing row: error (NoSigningRow).
+/// - If status is retired: follow `superseded_by` chain recursively.
+///   - If chain terminates at a retired story with no successor: satisfied.
+///   - If chain reaches a healthy story with signing: satisfied.
+///   - If chain reaches a non-healthy story: error (naming the terminal link).
+/// - If status is not healthy and not retired: error (StatusNotHealthy).
+///
+/// The function maintains its own `visited` set to detect cycles in the
+/// `superseded_by` chain independently from the outer `depends_on` walk.
+fn is_ancestor_satisfied(
+    story: &Story,
+    stories_by_id: &HashMap<u32, Story>,
+    store: &dyn Store,
+) -> Result<(), UatError> {
+    let mut cursor = story;
+    let mut visited: HashSet<u32> = HashSet::new();
+
+    loop {
+        // Detect cycles in the superseded_by chain.
+        if !visited.insert(cursor.id) {
+            // We've seen this story id before in the chain-walk.
+            return Err(UatError::Cycle {
+                edge: (cursor.id, cursor.id),
+            });
+        }
+
+        match cursor.status {
+            Status::Healthy => {
+                // Check if THIS link has a valid signing row.
+                let signing_rows = store
+                    .query(UAT_SIGNINGS_TABLE, &|doc| {
+                        doc.get("story_id").and_then(|v| v.as_u64()) == Some(cursor.id as u64)
+                            && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
+                    })
+                    .map_err(UatError::Store)?;
+
+                if signing_rows.is_empty() {
+                    return Err(UatError::AncestorNotHealthy {
+                        ancestor_id: cursor.id,
+                        reason: AncestorUnhealthyReason::NoSigningRow,
+                    });
+                }
+                // Healthy with valid signing row: satisfied.
+                return Ok(());
+            }
+            Status::Retired => {
+                // Follow the supersession chain.
+                if let Some(successor_id) = cursor.superseded_by {
+                    // Load the successor.
+                    if let Some(successor) = stories_by_id.get(&successor_id) {
+                        cursor = successor;
+                        continue; // Walk the chain.
+                    } else {
+                        // Successor not found — shouldn't happen if loader validated,
+                        // but treat as satisfied to avoid hard failures.
+                        return Ok(());
+                    }
+                } else {
+                    // Terminal retirement (no successor): satisfied.
+                    return Ok(());
+                }
+            }
+            Status::Proposed | Status::UnderConstruction | Status::Unhealthy => {
+                // Non-healthy, non-retired status: error, naming the terminal link.
+                return Err(UatError::AncestorNotHealthy {
+                    ancestor_id: cursor.id,
+                    reason: AncestorUnhealthyReason::StatusNotHealthy,
+                });
+            }
+        }
+    }
 }

@@ -122,4 +122,17 @@ fn init_repo_without_email(root: &Path) {
     cfg.set_str("user.name", "test-builder")
         .expect("set user.name");
     // user.email intentionally NOT set.
+
+    // Stage and commit all files to make the tree clean for dirty-tree checks.
+    let mut index = repo.index().expect("repo index");
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .expect("stage all");
+    index.write().expect("write index");
+    let tree_oid = index.write_tree().expect("write tree");
+    let tree = repo.find_tree(tree_oid).expect("find tree");
+    let sig = repo.signature().expect("repo signature");
+    let _ = repo
+        .commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+        .expect("commit seed");
 }

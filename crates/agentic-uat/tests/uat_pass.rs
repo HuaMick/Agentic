@@ -38,7 +38,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{SignerSource, StubExecutor, Uat, Verdict};
+use agentic_uat::{StubExecutor, Uat, Verdict};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4242;
@@ -96,7 +96,7 @@ fn uat_run_returns_pass_writes_signing_row_with_signer_and_promotes_story_to_hea
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
     let verdict = uat
-        .run(STORY_ID, SignerSource::Resolve)
+        .run(STORY_ID)
         .expect("Pass path must not error");
     assert!(
         matches!(verdict, Verdict::Pass),

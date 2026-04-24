@@ -31,7 +31,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{SignerSource, StubExecutor, Uat, UatError};
+use agentic_uat::{StubExecutor, Uat, UatError};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4244;
@@ -89,7 +89,7 @@ fn uat_run_refuses_on_dirty_tree_returning_dirty_tree_error_with_no_side_effects
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
     let err = uat
-        .run(STORY_ID, SignerSource::Resolve)
+        .run(STORY_ID)
         .expect_err("dirty tree must surface as an Err, not Ok(Pass/Fail)");
     assert!(
         matches!(err, UatError::DirtyTree),

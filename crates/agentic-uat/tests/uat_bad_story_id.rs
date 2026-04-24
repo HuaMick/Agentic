@@ -10,26 +10,19 @@
 //! it.
 //!
 //! The scaffold builds a fresh clean-tree git repo with an EMPTY
-//! `stories/` directory (no fixture written), invokes the amended
-//! `Uat::run(BAD_ID, SignerSource::Resolve)` with an id that does not
-//! exist, and asserts: a typed `UatError::UnknownStory { id }`
-//! carrying the bad id, zero signing rows, and no file created under
-//! `stories/`. The bad-id observable is unchanged by story 1's
-//! amendment — the lookup still misses before any signing or signer
-//! resolution work begins — only the call site's shape moves.
-//!
-//! Red today is compile-red via the missing `agentic_uat::SignerSource`
-//! symbol (story 1's amendment changed `Uat::run` to take a
-//! `SignerSource` as its second argument); the `use` of
-//! `agentic_uat::SignerSource` fails to resolve until story 18 lands
-//! the signer wire.
+//! `stories/` directory (no fixture written), invokes the
+//! `Uat::run(BAD_ID)` with an id that does not exist, and asserts: a
+//! typed `UatError::UnknownStory { id }` carrying the bad id, zero
+//! signing rows, and no file created under `stories/`. The bad-id
+//! observable is unchanged by story 1's contract — the lookup still
+//! misses before any signing or signer resolution work begins.
 
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
-use agentic_uat::{SignerSource, StubExecutor, Uat, UatError};
+use agentic_uat::{StubExecutor, Uat, UatError};
 use tempfile::TempDir;
 
 const BAD_ID: u32 = 99_999;
@@ -62,7 +55,7 @@ fn uat_run_returns_unknown_story_on_unknown_id_without_panic_or_side_effects() {
     // The call must NOT panic and must NOT return Ok. It returns a
     // typed UnknownStory error carrying the offending id.
     let err = uat
-        .run(BAD_ID, SignerSource::Resolve)
+        .run(BAD_ID)
         .expect_err("unknown story id must surface as Err, not Ok");
     match err {
         UatError::UnknownStory { id } => {

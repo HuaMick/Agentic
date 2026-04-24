@@ -369,7 +369,7 @@ fn main() {
                 None => SignerSource::Resolve,
             };
 
-            match uat.run(id, signer_source) {
+            match uat.run_with_signer(id, signer_source) {
                 Ok(Verdict::Pass) => {
                     // Get the HEAD SHA to include in stdout
                     match get_head_sha() {

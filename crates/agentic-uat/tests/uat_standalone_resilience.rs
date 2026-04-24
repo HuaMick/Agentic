@@ -46,7 +46,7 @@ use std::sync::Arc;
 use agentic_store::{MemStore, Store};
 use agentic_story::Story;
 use agentic_uat::{
-    ExecutionOutcome, SignerSource, StubExecutor, Uat, UatError, UatExecutor, Verdict,
+    ExecutionOutcome, StubExecutor, Uat, UatError, UatExecutor, Verdict,
 };
 use tempfile::TempDir;
 
@@ -109,7 +109,7 @@ fn uat_library_is_driveable_with_only_the_declared_dependency_floor() {
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
     let verdict = uat
-        .run(STORY_ID, SignerSource::Resolve)
+        .run(STORY_ID)
         .expect("standalone uat must produce a verdict");
     assert!(
         matches!(verdict, Verdict::Pass),
