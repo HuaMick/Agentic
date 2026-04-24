@@ -5,7 +5,7 @@ outcome: |
   amended story whose acceptance tests are a mix of red, preserved, and
   re-authored scaffolds receives an atomic evidence JSONL row that
   classifies each scaffold with one of the three sanctioned verdicts.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree

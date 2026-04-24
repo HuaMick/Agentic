@@ -508,6 +508,10 @@ fn main() {
                             eprintln!("ScaffoldNotRed: {} ({})", file.display(), probe);
                             std::process::exit(2);
                         }
+                        Err(TestBuilderError::ClassificationFailed(msg)) => {
+                            eprintln!("ClassificationFailed: {msg}");
+                            std::process::exit(2);
+                        }
                         Err(TestBuilderError::Other(msg)) => {
                             eprintln!("test-build record failed: {msg}");
                             std::process::exit(2);

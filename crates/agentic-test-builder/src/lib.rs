@@ -40,6 +40,17 @@ pub struct PlanEntry {
     pub fixture_preconditions: Vec<String>,
 }
 
+/// Classification of a scaffold under the three-gate amendment rule (ADR-0005).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScaffoldClassification {
+    /// Scaffold is first-authoring: no prior evidence row exists.
+    FirstAuthoring,
+    /// Scaffold qualifies for re-authoring: all three gates pass.
+    ReAuthor,
+    /// Scaffold is preserved: gates fail, or story is healthy, or grandfathered.
+    Preserve,
+}
+
 /// Error variants for test-builder operations.
 #[derive(Debug, PartialEq, Eq)]
 pub enum TestBuilderError {
@@ -55,6 +66,8 @@ pub enum TestBuilderError {
     ScaffoldParseError { file: PathBuf, parse_error: String },
     /// A scaffold parses but probes green (compile or runtime).
     ScaffoldNotRed { file: PathBuf, probe: String },
+    /// Classification failed (git error, store error, etc.).
+    ClassificationFailed(String),
     /// Other errors: story loader failure, I/O, etc.
     Other(String),
 }
@@ -100,9 +113,352 @@ impl TestBuilder {
         entries
     }
 
+    /// Classify a scaffold under the three-gate amendment rule (ADR-0005).
+    ///
+    /// Per the amendment, each scaffold is classified as one of:
+    /// - FirstAuthoring: no prior evidence row exists for this story.
+    /// - ReAuthor: all three gates pass (status under_construction, story YAML
+    ///   newer than evidence commit, tree clean).
+    /// - Preserve: any gate fails, or story is healthy, or grandfathered-bridge case,
+    ///   or scaffold file exists in prior evidence (indicating it was tested before
+    ///   and is unchanged).
+    ///
+    /// This is a pure read operation; no probing, no tree mutation.
+    pub fn classify_scaffold(
+        &self,
+        story: &Story,
+        scaffold_path: &Path,
+        repo: &git2::Repository,
+    ) -> ScaffoldClassification {
+        self.classify_scaffold_internal(story, scaffold_path, repo)
+    }
+
+    /// Internal classification logic to avoid type-checking ICE.
+    fn classify_scaffold_internal(
+        &self,
+        story: &Story,
+        scaffold_path: &Path,
+        repo: &git2::Repository,
+    ) -> ScaffoldClassification {
+        let story_id = story.id;
+        let status = &story.status;
+        let scaffold_file_str = scaffold_path.to_string_lossy();
+
+        // Check if this story has any prior evidence.
+        let evidence_dir = self.repo_root.join(format!("evidence/runs/{story_id}"));
+        let has_prior_evidence = evidence_dir.exists();
+
+        // First-authoring case: no prior evidence at all.
+        if !has_prior_evidence {
+            // Grandfathered-bridge: story is healthy with no prior evidence.
+            if matches!(status, agentic_story::Status::Healthy) {
+                return ScaffoldClassification::Preserve;
+            }
+            // Otherwise: first-authoring (story is proposed or under_construction).
+            return ScaffoldClassification::FirstAuthoring;
+        }
+
+        // Healthy stories never re-author; they preserve.
+        if matches!(status, agentic_story::Status::Healthy) {
+            return ScaffoldClassification::Preserve;
+        }
+
+        // Gate 1: story status must be under_construction.
+        if !matches!(status, agentic_story::Status::UnderConstruction) {
+            return ScaffoldClassification::Preserve;
+        }
+
+        // Gate 2: story YAML must be newer than the most recent evidence row's commit.
+        let most_recent_commit = self.find_most_recent_evidence_commit_in_dir(&evidence_dir);
+        let most_recent_evidence_commit = match most_recent_commit {
+            Some(commit) => commit,
+            None => return ScaffoldClassification::Preserve,
+        };
+
+        // Check if the story YAML has a commit newer than the evidence row.
+        let story_yaml_path = format!("stories/{story_id}.yml");
+        let yaml_is_newer = self.is_yaml_path_newer_than_commit(repo, &story_yaml_path, &most_recent_evidence_commit);
+
+        if yaml_is_newer {
+            // All three gates pass.
+            // Check if the scaffold is in prior evidence AND has an unchanged justification.
+            if self.scaffold_in_prior_evidence_and_unchanged(story, &evidence_dir, &scaffold_file_str, repo) {
+                // Scaffold is in prior evidence with unchanged justification → PRESERVE.
+                ScaffoldClassification::Preserve
+            } else {
+                // Scaffold is new or being re-authored → RE-AUTHOR.
+                ScaffoldClassification::ReAuthor
+            }
+        } else {
+            ScaffoldClassification::Preserve
+        }
+    }
+
+    /// Check if a scaffold file is in the most recent prior evidence row,
+    /// AND its justification hasn't changed in the current story.
+    fn scaffold_in_prior_evidence_and_unchanged(
+        &self,
+        story: &Story,
+        evidence_dir: &Path,
+        scaffold_file: &str,
+        repo: &git2::Repository,
+    ) -> bool {
+        let most_recent = self.find_most_recent_evidence_jsonl(evidence_dir);
+        if let Some(path) = most_recent {
+            if let Ok(body) = fs::read_to_string(&path) {
+                if let Some(line) = body.lines().next() {
+                    if let Ok(row) = serde_json::from_str::<serde_json::Value>(line) {
+                        // Check if this scaffold is in the prior evidence.
+                        let in_prior = if let Some(verdicts) = row.get("verdicts").and_then(|v| v.as_array()) {
+                            verdicts.iter().any(|verdict| {
+                                verdict.get("file").and_then(|f| f.as_str()) == Some(scaffold_file)
+                            })
+                        } else {
+                            false
+                        };
+
+                        if !in_prior {
+                            return false;
+                        }
+
+                        // Get the prior evidence commit.
+                        let evidence_commit = if let Some(commit_str) = row.get("commit").and_then(|c| c.as_str()) {
+                            commit_str.to_string()
+                        } else {
+                            return false;
+                        };
+
+                        // Load the story YAML from the evidence commit and check its justification.
+                        if let Some(prior_justification) = self.get_justification_from_commit(
+                            repo,
+                            story.id,
+                            &evidence_commit,
+                            scaffold_file,
+                        ) {
+                            // Find the current justification in the story.
+                            let current_justification = story
+                                .acceptance
+                                .tests
+                                .iter()
+                                .find(|test| test.file.to_string_lossy() == scaffold_file)
+                                .map(|test| test.justification.trim());
+
+                            if let Some(current) = current_justification {
+                                // Compare: if they're the same, the scaffold is unchanged.
+                                return prior_justification.trim() == current;
+                            }
+                        }
+
+                        false
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Get the justification text for a scaffold from the story YAML at a given commit.
+    fn get_justification_from_commit(
+        &self,
+        repo: &git2::Repository,
+        story_id: u32,
+        commit_hash: &str,
+        scaffold_file: &str,
+    ) -> Option<String> {
+        // Parse the commit hash.
+        let oid = git2::Oid::from_str(commit_hash).ok()?;
+
+        // Get the commit object.
+        let commit = repo.find_commit(oid).ok()?;
+
+        // Get the tree.
+        let tree = commit.tree().ok()?;
+
+        // Get the story file from the tree.
+        let story_yaml_path = format!("stories/{story_id}.yml");
+        let entry = tree.get_path(std::path::Path::new(&story_yaml_path)).ok()?;
+
+        // Get the blob.
+        let blob = entry.to_object(repo).ok()?;
+        let blob = blob.as_blob()?;
+
+        // Parse the YAML.
+        let yaml_content = std::str::from_utf8(blob.content()).ok()?;
+        let parsed: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
+
+        // Extract the justification from the acceptance tests.
+        let acceptance = parsed.get("acceptance")?;
+        let tests = acceptance.get("tests")?.as_sequence()?;
+
+        for test in tests {
+            if let Some(file) = test.get("file").and_then(|f| f.as_str()) {
+                if file == scaffold_file {
+                    return test
+                        .get("justification")
+                        .and_then(|j| j.as_str())
+                        .map(|s| s.to_string());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Find the most recent evidence JSONL file path (without reading its contents).
+    fn find_most_recent_evidence_jsonl(&self, evidence_dir: &Path) -> Option<PathBuf> {
+        let entries = fs::read_dir(evidence_dir).ok()?;
+
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok().map(|d| d.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.ends_with("-red.jsonl"))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        // Sort by filename (timestamp) in reverse order to get the most recent.
+        files.sort_by(|a, b| {
+            let a_name = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let b_name = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            b_name.cmp(a_name)
+        });
+
+        files.into_iter().next()
+    }
+
+    /// Find the most recent evidence commit for a story by reading its latest JSONL.
+    fn find_most_recent_evidence_commit_in_dir(&self, evidence_dir: &Path) -> Option<String> {
+        let entries = fs::read_dir(evidence_dir).ok()?;
+
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok().map(|d| d.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.ends_with("-red.jsonl"))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        // Sort by filename (timestamp) in reverse order to get the most recent.
+        files.sort_by(|a, b| {
+            let a_name = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let b_name = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            b_name.cmp(a_name)
+        });
+
+        if let Some(path) = files.first() {
+            let body = fs::read_to_string(path).ok()?;
+            let line = body.lines().next()?;
+            let row: serde_json::Value = serde_json::from_str(line).ok()?;
+            row.get("commit")?.as_str().map(|s| s.to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Check if story YAML is newer than the given evidence commit.
+    fn is_yaml_path_newer_than_commit(
+        &self,
+        repo: &git2::Repository,
+        story_yaml_path: &str,
+        evidence_commit_hash: &str,
+    ) -> bool {
+        let mut revwalk = match repo.revwalk() {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        if revwalk.push_head().is_err() {
+            return false;
+        }
+
+        for oid_result in revwalk {
+            let oid = match oid_result {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+
+            let commit = match repo.find_commit(oid) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let yaml_oid_str = oid.to_string();
+
+            // Early return if we find the evidence commit.
+            if yaml_oid_str == evidence_commit_hash {
+                return false;
+            }
+
+            // Check if this commit touches the story YAML file.
+            let touches_yaml = if commit.parent_count() == 0 {
+                // Root commit
+                let tree = match commit.tree() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                tree.get_path(std::path::Path::new(story_yaml_path)).is_ok()
+            } else {
+                // Non-root commit
+                let parent = match commit.parent(0) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                let parent_tree = match parent.tree() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let commit_tree = match commit.tree() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+
+                let diff = match repo.diff_tree_to_tree(Some(&parent_tree), Some(&commit_tree), None) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+
+                let mut found = false;
+                for delta in diff.deltas() {
+                    if let Some(path) = delta.new_file().path() {
+                        if path.to_string_lossy() == story_yaml_path {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if let Some(path) = delta.old_file().path() {
+                        if path.to_string_lossy() == story_yaml_path {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                found
+            };
+
+            if touches_yaml {
+                // Found the YAML commit; it's newer than evidence if we got here.
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Record red-state evidence for user-authored scaffolds.
     /// Requires a clean tree. Probes each scaffold and writes an atomic
     /// evidence JSONL on success, or returns a typed refusal on any error.
+    /// Now supports mixed verdicts: red, preserved, and re-authored per scaffold.
     pub fn record(&self, story_id: u32) -> Result<RecordOutcome, TestBuilderError> {
         // Load and validate the story first.
         let story_path = self.repo_root.join(format!("stories/{story_id}.yml"));
@@ -125,10 +481,14 @@ impl TestBuilder {
             return Err(TestBuilderError::DirtyTree);
         }
 
+        // Open the repo for classification.
+        let repo = git2::Repository::open(&self.repo_root)
+            .map_err(|e| TestBuilderError::ClassificationFailed(e.to_string()))?;
+
         // Plan the scaffolds.
         let plan = Self::plan(&story);
 
-        // Probe each scaffold, collecting verdicts.
+        // Classify and probe each scaffold, collecting verdicts.
         let mut verdicts = Vec::new();
         for (_idx, entry) in plan.iter().enumerate() {
             let test_path = self.repo_root.join(&entry.file);
@@ -153,23 +513,48 @@ impl TestBuilder {
                 });
             }
 
-            // Probe the scaffold.
-            let (red_path, diagnostic) = probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
+            // Classify the scaffold.
+            let classification = self.classify_scaffold(&story, Path::new(&entry.file), &repo);
 
-            // Check that the probe actually came back red.
-            if red_path == "green" {
-                return Err(TestBuilderError::ScaffoldNotRed {
-                    file: test_path,
-                    probe: "compile".to_string(),
-                });
-            }
+            // Build the verdict entry based on classification.
+            let verdict_entry = match classification {
+                ScaffoldClassification::Preserve => {
+                    // Preserved scaffolds are not probed; emit the preserved-shape verdict.
+                    json!({
+                        "file": entry.file,
+                        "verdict": "preserved",
+                    })
+                }
+                ScaffoldClassification::FirstAuthoring | ScaffoldClassification::ReAuthor => {
+                    // First-authoring and re-author scaffolds must probe red.
+                    // Determine the verdict string: "re-authored" when re-authoring, "red" for first-authoring.
+                    let verdict_string = if matches!(classification, ScaffoldClassification::ReAuthor) {
+                        "re-authored"
+                    } else {
+                        "red"
+                    };
 
-            verdicts.push(json!({
-                "file": entry.file,
-                "verdict": "red",
-                "red_path": red_path,
-                "diagnostic": diagnostic,
-            }));
+                    // Probe the scaffold.
+                    let (red_path, diagnostic) = probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
+
+                    // Check that the probe actually came back red.
+                    if red_path == "green" {
+                        return Err(TestBuilderError::ScaffoldNotRed {
+                            file: test_path,
+                            probe: "compile".to_string(),
+                        });
+                    }
+
+                    json!({
+                        "file": entry.file,
+                        "verdict": verdict_string,
+                        "red_path": red_path,
+                        "diagnostic": diagnostic,
+                    })
+                }
+            };
+
+            verdicts.push(verdict_entry);
         }
 
         // Write evidence atomically.
@@ -513,3 +898,4 @@ fn get_head_commit(repo_root: &Path) -> Result<String, TestBuilderError> {
         .ok_or_else(|| TestBuilderError::Other("cannot get HEAD commit".to_string()))
         .map(|oid| oid.to_string())
 }
+
