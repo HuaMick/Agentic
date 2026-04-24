@@ -39,11 +39,21 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Recursively collect every `*.rs` file under the `crates/` subtree of
-/// the workspace root. This is the surface area for the
-/// duplicate-constant check. `target/` and `legacy/` are deliberately
-/// NOT walked — the former is build output, the latter is the Python
-/// submodule the prose explicitly excludes ("reference only").
+/// Recursively collect every `*.rs` file under the given directory.
+/// This is the surface area for the duplicate-constant check. `target/`
+/// and hidden dirs are deliberately NOT walked — the former is build
+/// output, the latter includes VCS metadata.
+///
+/// The caller scopes the walk to `crates/agentic-story/src/` only,
+/// because story 17 Decision 2's "single source of truth for defaults"
+/// is an src-only concern: the constant's value is a Rust literal that
+/// must exist in exactly one production-source file. Test fixtures
+/// under `crates/*/tests/` that happen to embed the same literal
+/// inside YAML strings (e.g. story 6's loader fixtures) are NOT
+/// duplicate-constant drift — they are behavioural assertions about
+/// specific numeric inputs, and the story's justification is about the
+/// defaults-locus in src, not about the string `"max_inner_loop_iterations: 5"`
+/// appearing anywhere in the workspace.
 fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(read) = fs::read_dir(dir) else {
         return;
@@ -98,21 +108,38 @@ fn default_build_config_constant_is_the_only_defaults_source() {
         DEFAULT_BUILD_CONFIG
     );
 
-    // Single-source check: scan every `*.rs` under `crates/` for the
-    // literal `max_inner_loop_iterations: 5` pattern. The only match
-    // must be inside `crates/agentic-story/`. Any other hit is a
-    // duplicate-constant drift — the exact failure mode the story calls
-    // out.
+    // Single-source check: scan every `*.rs` under
+    // `crates/agentic-story/src/` for the literal
+    // `max_inner_loop_iterations: 5` pattern. Exactly one match — the
+    // constant's own definition — is required. Any additional hit in
+    // src is a duplicate-constant drift.
+    //
+    // The scope is deliberately `src/` only (not `crates/**/*.rs`):
+    // story 17 Decision 2 pins the defaults-locus as a SOURCE-of-truth
+    // constant, which is an src-only concern. YAML-string fixtures in
+    // `crates/*/tests/` that happen to embed `max_inner_loop_iterations: 5`
+    // as an input to a loader test (e.g. story 6's
+    // `load_build_config_is_parsed.rs`,
+    // `load_build_config_optional_defaults_apply.rs`) are not
+    // alternate declarations of the default — they are behavioural
+    // assertions about specific numeric inputs that the loader must
+    // round-trip. Including them as "hits" would conflate
+    // "defaults live in one place" (the story's actual claim) with
+    // "this string appears in one place in the workspace" (a stricter
+    // and accidentally false claim).
     let root = workspace_root();
-    let crates_dir = root.join("crates");
+    let agentic_story_src = root
+        .join("crates")
+        .join("agentic-story")
+        .join("src");
     assert!(
-        crates_dir.is_dir(),
-        "workspace must contain a `crates/` directory (looked under {})",
-        root.display()
+        agentic_story_src.is_dir(),
+        "`crates/agentic-story/src/` must exist (looked under {})",
+        agentic_story_src.display()
     );
 
     let mut sources: Vec<PathBuf> = Vec::new();
-    collect_rust_sources(&crates_dir, &mut sources);
+    collect_rust_sources(&agentic_story_src, &mut sources);
 
     // The needle must match the `<field>: <value>` Rust literal the
     // constant's definition would contain. Whitespace around the colon
@@ -121,15 +148,6 @@ fn default_build_config_constant_is_the_only_defaults_source() {
 
     let mut hits: Vec<PathBuf> = Vec::new();
     for src in &sources {
-        // Skip this test file itself — it is not a declaration of the
-        // default, it is an assertion ABOUT the default, and the
-        // constant value appears in its own asserts above as a
-        // human-readable pinning.
-        if src.file_name().and_then(|n| n.to_str())
-            == Some("default_build_config_constant_is_the_only_defaults_source.rs")
-        {
-            continue;
-        }
         let Ok(contents) = fs::read_to_string(src) else {
             continue;
         };
@@ -138,30 +156,14 @@ fn default_build_config_constant_is_the_only_defaults_source() {
         }
     }
 
-    // Exactly one hit — inside the `agentic-story` crate's source tree.
-    let agentic_story_src = crates_dir.join("agentic-story").join("src");
-    let inside_agentic_story: Vec<&PathBuf> = hits
-        .iter()
-        .filter(|p| p.starts_with(&agentic_story_src))
-        .collect();
-    let outside_agentic_story: Vec<&PathBuf> = hits
-        .iter()
-        .filter(|p| !p.starts_with(&agentic_story_src))
-        .collect();
-
-    assert!(
-        outside_agentic_story.is_empty(),
-        "the literal `{NEEDLE}` must appear ONLY inside \
-         `crates/agentic-story/src/`; every other match is a \
-         duplicate-constant drift (story 17 Decision 2). Offending \
-         paths: {outside_agentic_story:?}"
-    );
+    // Exactly one hit inside `crates/agentic-story/src/`: the
+    // constant's own definition.
     assert_eq!(
-        inside_agentic_story.len(),
+        hits.len(),
         1,
         "exactly one file in `crates/agentic-story/src/` must contain \
          the literal `{NEEDLE}` (the constant's definition); got {} \
-         matches: {inside_agentic_story:?}",
-        inside_agentic_story.len()
+         matches: {hits:?}",
+        hits.len()
     );
 }

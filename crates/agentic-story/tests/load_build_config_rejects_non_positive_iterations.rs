@@ -29,9 +29,15 @@ use tempfile::TempDir;
 /// takes the supplied literal value. Every other field is a fixed valid
 /// shell so the only reason the loader can fail is the iterations value.
 fn fixture_with_iterations(iterations_literal: &str, id: u32) -> String {
+    // NOTE: do NOT interpolate `iterations_literal` into the `title:`
+    // line — callers pass values like `"five"` (quoted) to exercise the
+    // type-mismatch path, and inlining those inside a double-quoted
+    // YAML scalar would break YAML parsing BEFORE the loader gets to
+    // reject the iterations value on its merits. The title is fixed;
+    // only the iterations value varies.
     format!(
         r#"id: {id}
-title: "Fixture with build_config.max_inner_loop_iterations = {iterations_literal}"
+title: Fixture exercising build_config.max_inner_loop_iterations rejection
 
 outcome: |
   A developer loads this fixture and observes a typed error naming the
