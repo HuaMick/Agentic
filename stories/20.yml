@@ -6,7 +6,7 @@ outcome: |
   directory whose run row either attests the story green (with the sandbox
   branch's diff squash-merged onto main) or records exactly where the
   inner loop stopped.
-status: proposed
+status: under_construction
 patterns:
 - fail-closed-on-dirty-tree
 acceptance:
