@@ -33,6 +33,12 @@ serde_json.workspace = true
 # Story 16 runtime: RunRecorder writes to the Store trait from agentic-store.
 agentic-store = { path = "../agentic-store" }
 
+# Story 19 runtime: async fn in the Runtime trait requires async-trait.
+async-trait = "0.1"
+
+# Story 19 runtime: tokio for async runtime and process management.
+tokio = { workspace = true, features = ["process", "io-util", "rt"] }
+
 [dev-dependencies]
 # Story 16 scaffolds: tests construct a `MemStore` (the standalone-
 # resilient dependency floor) and assert that the recorder writes rows
