@@ -48,6 +48,22 @@ fn surreal_snapshot_of_leaf_carries_mid_and_root_signings_only() {
     let store: Box<dyn Store> =
         Box::new(SurrealStore::open(dir.path()).expect("open SurrealStore at fresh temp dir"));
 
+    // Seed the `stories` table with the ancestry graph per story 4's
+    // "Ancestry fixture mechanism" — SurrealStore's snapshot walker
+    // reads `depends_on` from this table (no filesystem, no env var).
+    store
+        .append("stories", json!({"id": ROOT_ID, "depends_on": []}))
+        .expect("seed root stories row");
+    store
+        .append("stories", json!({"id": MID_ID, "depends_on": [ROOT_ID]}))
+        .expect("seed mid stories row");
+    store
+        .append("stories", json!({"id": LEAF_ID, "depends_on": [MID_ID]}))
+        .expect("seed leaf stories row");
+    store
+        .append("stories", json!({"id": UNRELATED_ID, "depends_on": []}))
+        .expect("seed unrelated stories row");
+
     // Root ancestor: pass signing.
     store
         .append(

@@ -53,6 +53,23 @@ fn restored_signings_survive_surrealstore_drop_and_reopen() {
         let source_dir = TempDir::new().expect("create source temp dir");
         let source: Box<dyn Store> =
             Box::new(SurrealStore::open(source_dir.path()).expect("open source SurrealStore"));
+
+        // Seed `stories` table with ancestry graph (story 4
+        // "Ancestry fixture mechanism"). Diamond: leaf depends on
+        // parent+aunt; parent and aunt both depend on grand.
+        source
+            .append("stories", json!({"id": GRAND_ID, "depends_on": []}))
+            .expect("seed grand stories row");
+        source
+            .append("stories", json!({"id": PARENT_ID, "depends_on": [GRAND_ID]}))
+            .expect("seed parent stories row");
+        source
+            .append("stories", json!({"id": AUNT_ID, "depends_on": [GRAND_ID]}))
+            .expect("seed aunt stories row");
+        source
+            .append("stories", json!({"id": LEAF_ID, "depends_on": [PARENT_ID, AUNT_ID]}))
+            .expect("seed leaf stories row");
+
         source
             .append(
                 "uat_signings",

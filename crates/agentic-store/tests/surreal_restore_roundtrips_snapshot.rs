@@ -46,6 +46,18 @@ fn surreal_restore_roundtrips_signings_and_second_restore_is_already_restored() 
         SurrealStore::open(source_dir.path()).expect("open source SurrealStore at fresh temp dir"),
     );
 
+    // Seed `stories` table with ancestry graph (story 4 "Ancestry
+    // fixture mechanism").
+    source
+        .append("stories", json!({"id": ROOT_ID, "depends_on": []}))
+        .expect("seed root stories row");
+    source
+        .append("stories", json!({"id": MID_ID, "depends_on": [ROOT_ID]}))
+        .expect("seed mid stories row");
+    source
+        .append("stories", json!({"id": LEAF_ID, "depends_on": [MID_ID]}))
+        .expect("seed leaf stories row");
+
     source
         .append(
             "uat_signings",
