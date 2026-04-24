@@ -6,6 +6,7 @@ version = 3
 name = "agentic-ci-record"
 version = "0.1.0"
 dependencies = [
+ "agentic-signer",
  "agentic-store",
  "git2",
  "serde_json",
@@ -123,6 +124,7 @@ dependencies = [
 name = "agentic-uat"
 version = "0.1.0"
 dependencies = [
+ "agentic-signer",
  "agentic-store",
  "agentic-story",
  "git2",

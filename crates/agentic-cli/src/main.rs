@@ -405,7 +405,7 @@ fn main() {
                     std::process::exit(2);
                 }
                 Err(UatError::SignerMissing) => {
-                    eprintln!("signer identity could not be resolved");
+                    eprintln!("SignerMissing: signer identity could not be resolved");
                     std::process::exit(2);
                 }
                 Err(UatError::AncestorNotHealthy {

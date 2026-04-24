@@ -11,6 +11,12 @@ publish.workspace = true
 # `agentic-store` per ADR-0002.
 agentic-store = { path = "../agentic-store" }
 
+# Story 18: canonical signer resolution — resolves identity from the
+# four-tier chain (flag → env → git config → error). Story 18 consolidates
+# the resolver into agentic-signer so it can be shared across agentic-uat,
+# agentic-ci-record, and agentic-runtime without circular dependencies.
+agentic-signer = { path = "../agentic-signer" }
+
 # Story 2: `test_runs` rows are modelled as `serde_json::Value` so the
 # recorder can hand them to `Store::upsert` without a bespoke serializer.
 serde_json.workspace = true

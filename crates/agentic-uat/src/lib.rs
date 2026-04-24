@@ -389,38 +389,31 @@ impl<E: UatExecutor> Uat<E> {
 /// 4. Error
 ///
 /// Returns the resolved signer string or `UatError::SignerMissing` if
-/// no source yields a non-empty value.
+/// no source yields a non-empty value. Uses the canonical resolver from
+/// `agentic-signer` (story 18) to ensure consistency across all signing paths.
 fn resolve_signer(source: SignerSource, from_path: &Path) -> Result<String, UatError> {
-    match source {
+    use agentic_signer::{Resolver, Signer, SignerError};
+
+    let resolver = match source {
         SignerSource::Explicit(s) => {
-            // Tier 1: explicit value takes priority
-            if !s.trim().is_empty() {
-                Ok(s)
-            } else {
-                Err(UatError::SignerMissing)
-            }
+            // Explicit value: use it directly via Resolver::with_flag.
+            Resolver::with_flag(s).at_repo(from_path)
         }
         SignerSource::Resolve => {
-            // Tier 2: check environment variable
-            if let Ok(env_signer) = std::env::var("AGENTIC_SIGNER") {
-                if !env_signer.trim().is_empty() {
-                    return Ok(env_signer);
-                }
-            }
+            // Resolution via the chain: env → git config.
+            Resolver::new().at_repo(from_path)
+        }
+    };
 
-            // Tier 3: check git config user.email
-            if let Ok(repo) = git2::Repository::discover(from_path) {
-                if let Ok(config) = repo.config() {
-                    if let Ok(email) = config.get_string("user.email") {
-                        if !email.trim().is_empty() {
-                            return Ok(email);
-                        }
-                    }
-                }
-            }
-
-            // Tier 4: all sources exhausted
-            Err(UatError::SignerMissing)
+    match Signer::resolve(resolver) {
+        Ok(signer) => Ok(signer.as_str().to_string()),
+        Err(SignerError::SignerMissing { .. }) => Err(UatError::SignerMissing),
+        Err(SignerError::SignerInvalid {
+            source: _,
+            reason: _,
+        }) => Err(UatError::SignerMissing),
+        Err(SignerError::GitConfigRead { source: err }) => {
+            Err(UatError::Io(format!("git config error: {err}")))
         }
     }
 }

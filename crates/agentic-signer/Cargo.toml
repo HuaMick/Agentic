@@ -16,6 +16,7 @@ publish.workspace = true
 # "unresolved import" error before any runtime code runs.
 
 [dependencies]
+git2 = { version = "0.19", default-features = false }
 
 [dev-dependencies]
 # Story 18 scaffolds: the tier-3 scaffold and the standalone-resilience

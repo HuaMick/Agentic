@@ -420,33 +420,29 @@ impl Recorder {
     }
 
     /// Resolve a signer identity from the SignerSource.
-    /// Implements the four-tier chain: flag (not used in recorder) → env → git config → error.
+    /// Uses the canonical resolver from `agentic-signer` (story 18) to ensure
+    /// consistency across all signing paths. Implements the four-tier chain:
+    /// flag (not used in recorder) → env → git config → error.
     fn resolve_signer(&self, _source: SignerSource) -> Result<String, RecordError> {
-        // Tier 2: AGENTIC_SIGNER environment variable
-        if let Ok(env_signer) = std::env::var("AGENTIC_SIGNER") {
-            let trimmed = env_signer.trim();
-            if !trimmed.is_empty() {
-                return Ok(trimmed.to_string());
+        use agentic_signer::{Resolver, Signer, SignerError};
+
+        // The recorder does not accept explicit flags (story 2's contract);
+        // all resolution goes through Resolver::new() which checks env → git.
+        let resolver = Resolver::new().at_repo(".");
+
+        match Signer::resolve(resolver) {
+            Ok(signer) => Ok(signer.as_str().to_string()),
+            Err(SignerError::SignerMissing { .. }) => Err(RecordError::SignerMissing {
+                reason: "no signer found in AGENTIC_SIGNER env, git config user.email, or CLI flag"
+                    .to_string(),
+            }),
+            Err(SignerError::SignerInvalid { .. }) => Err(RecordError::SignerMissing {
+                reason: "signer value was empty or whitespace-only".to_string(),
+            }),
+            Err(SignerError::GitConfigRead { source: err }) => {
+                Err(RecordError::Git(format!("git config read error: {err}")))
             }
         }
-
-        // Tier 3: git config user.email (read via git2)
-        if let Ok(repo) = git2::Repository::discover(".") {
-            if let Ok(config) = repo.config() {
-                if let Ok(email) = config.get_string("user.email") {
-                    let trimmed = email.trim();
-                    if !trimmed.is_empty() {
-                        return Ok(trimmed.to_string());
-                    }
-                }
-            }
-        }
-
-        // Tier 4: No signer found.
-        Err(RecordError::SignerMissing {
-            reason: "no signer found in AGENTIC_SIGNER env, git config user.email, or CLI flag"
-                .to_string(),
-        })
     }
 }
 
