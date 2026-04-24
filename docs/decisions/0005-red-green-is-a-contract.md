@@ -104,4 +104,41 @@ Phase 0's seven amendments (stories 1, 2, 3, 4, 5, 6, 11) each extended justific
 
 ### Relationship to story 15
 
-Story 15 (`agentic test-build plan|record`) owns the CLI that records red-state evidence. The CLI itself requires no change — it already writes a new evidence row per invocation, commit-stamped, append-only. This amendment is a spec/agent-boundary change, not a CLI change. The per-commit atomicity was always latent in the evidence shape; the amendment names it as the invariant and removes the blanket rule that contradicted it.
+Story 15 (`agentic test-build plan|record`) owns the CLI that records red-state evidence. The CLI itself requires no change **for the three-gate edit rule** — it already writes a new evidence row per invocation, commit-stamped, append-only. This amendment is a spec/agent-boundary change, not a CLI change. The per-commit atomicity was always latent in the evidence shape; the amendment names it as the invariant and removes the blanket rule that contradicted it.
+
+A *separate* CLI capability — PRESERVE / RE-AUTHOR verdict shapes in the evidence output — is required by the new classification path and is tracked separately (see sub-amendment below).
+
+## Sub-amendment (evidence shape: PRESERVE + RE-AUTHOR verdicts, 2026-04-24)
+
+When test-builder ran the Phase 0 amendment pipeline under the three-gate edit rule above, six of seven amended-story scaffolding passes hit the same CLI gap: `agentic test-build record` refuses to emit an evidence row when any `acceptance.tests[].file` probes non-red, even if that file is legitimately classified as PRESERVE or RE-AUTHOR under the new rule. Each pass fell back to test-builder authoring the evidence JSONL directly, which works but routes around the sanctioned writer.
+
+Two shape clarifications land here so the CLI and the gate semantics line up.
+
+### Evidence-row verdict shape is extended
+
+The evidence JSONL under `evidence/runs/<id>/<timestamp>-red.jsonl` carries, per test file, one of three verdict values:
+
+- `"verdict": "red"` — scaffold is red at the stamped commit. `red_path` (`compile` | `runtime`) and `diagnostic` required.
+- `"verdict": "preserved"` — file exists, classification is PRESERVE (gates didn't all pass, or justification is unchanged). No probe was run. `red_path` and `diagnostic` absent.
+- `"verdict": "re-authored"` — optional refinement of `"red"` when test-builder re-authored an existing file under the three-gate carve-out. The shape is otherwise identical to `"red"`; the distinction is audit-trail-only. Agents MAY use `"red"` for both cases and capture the re-authoring in the commit message instead.
+
+`agentic-verify` and `agentic-uat` treat `"preserved"` as satisfied for the per-commit-atomicity invariant. The test file's contract is proven by the **most recent** evidence row in which it appears as `"red"` at or before the current commit; PRESERVE rows merely confirm the file is still present and unchanged since its last red record. Absence of any `"red"` row anywhere in the file's evidence chain is the defect.
+
+### Pre-ADR-0005 bridge
+
+Stories that reached `healthy` before ADR-0005 was accepted (2026-04-18) may carry acceptance test files that were never recorded under the evidence-run shape this ADR introduced — they were authored, made green, and signed by an early `agentic uat` invocation, all before the evidence chain existed. Stories 4 and 5 are the documented cases (their `memstore_*` and `surrealstore_*` tests ship green against the existing trait impl; no `evidence/runs/<id>/*.jsonl` exists from their first green cycle).
+
+Rather than retrofit synthetic red rows into the evidence chain (which would forge the artefact the ADR is designed to make unforgeable), the bridge rule is:
+
+> A test file whose first `evidence/runs/<id>/*.jsonl` row carries `verdict: "preserved"` — not `"red"` — is **grandfathered**. Its contract is considered proven by the story's pre-ADR-0005 `healthy` signing. Subsequent amendments that move the test's contract (detected by the three-gate rule) trigger normal RE-AUTHOR and produce a fresh `"red"` row, retiring the grandfather status.
+
+Concretely: stories 4 and 5 remain amendable; their pre-existing tests stay PRESERVED until an amendment tightens their justification, at which point test-builder RE-AUTHORs under the three gates and the normal red-green loop takes over. No backfill operation is required.
+
+### Out of scope for this sub-amendment
+
+- Whether `agentic uat` should display PRESERVED-grandfathered tests differently in its verdict output (a UX question for story 1 or story 3, not a correctness question for this ADR).
+- Whether the evidence schema should grow a `grandfathered: true` flag or derive the status from "first row is PRESERVED, no prior row exists" (implementation detail for the CLI story; either works).
+
+### Forward work
+
+A new story (tracked alongside this sub-amendment) amends `agentic test-build record` to emit the three-verdict-shape directly instead of refusing on non-red scaffolds. Until that story ships, test-builder authors evidence rows directly per its process.yml evidence-shape spec; the routed artefact shape is identical.
