@@ -21,13 +21,17 @@
 //!    `agentic_story::Story::load`. If not found, return
 //!    `UatError::UnknownStory { id }`, write no rows, touch no files.
 //!
-//! 3. **Executor invocation:** Call `executor.execute(&story)`, get a
+//! 3. **Signer resolution:** Resolve the signer identity via a four-tier
+//!    chain (explicit flag → env → git config → error). If unresolvable,
+//!    return `UatError::SignerMissing`.
+//!
+//! 4. **Executor invocation:** Call `executor.execute(&story)`, get a
 //!    `Verdict` (Pass or Fail).
 //!
-//! 4. **Signing:** Write one row to `uat_signings` with the verdict,
-//!    current commit SHA, and RFC3339 UTC timestamp.
+//! 5. **Signing:** Write one row to `uat_signings` with the verdict,
+//!    current commit SHA, signer identity, and RFC3339 UTC timestamp.
 //!
-//! 5. **Promotion (Pass only):** If the verdict is Pass, rewrite the
+//! 6. **Promotion (Pass only):** If the verdict is Pass, rewrite the
 //!    story YAML in place to set `status: healthy`. On Fail, the YAML
 //!    is untouched.
 //!
@@ -46,6 +50,28 @@ use agentic_story::{Status, Story, StoryError};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+
+/// Specifies how the signer identity should be resolved.
+///
+/// The signer is resolved through a four-tier chain:
+/// 1. Explicit flag/value (`SignerSource::Explicit`)
+/// 2. `AGENTIC_SIGNER` environment variable
+/// 3. `git config user.email`
+/// 4. Typed error (`UatError::SignerMissing`)
+#[derive(Debug, Clone)]
+pub enum SignerSource {
+    /// Resolve the signer identity via the four-tier chain starting with
+    /// environment and git config. This is the normal path for CLI usage.
+    Resolve,
+    /// Use an explicitly provided signer identity, bypassing all resolution.
+    Explicit(String),
+}
+
+impl Default for SignerSource {
+    fn default() -> Self {
+        SignerSource::Resolve
+    }
+}
 
 /// The table name for UAT signing records.
 const UAT_SIGNINGS_TABLE: &str = "uat_signings";
@@ -160,6 +186,9 @@ pub enum UatError {
     /// The story file was not found or could not be loaded. Carries the
     /// offending story id.
     UnknownStory { id: u32 },
+    /// The signer identity could not be resolved from any of the four tiers
+    /// (explicit flag, AGENTIC_SIGNER env, git config user.email, or error).
+    SignerMissing,
     /// File I/O error (other than "file not found", which surfaces as
     /// UnknownStory).
     Io(String),
@@ -187,6 +216,10 @@ impl std::fmt::Display for UatError {
             UatError::UnknownStory { id } => {
                 write!(f, "could not produce a verdict: story {id} not found")
             }
+            UatError::SignerMissing => write!(
+                f,
+                "could not produce a verdict: signer identity could not be resolved"
+            ),
             UatError::Io(msg) => write!(f, "io error while running uat: {msg}"),
             UatError::Store(err) => write!(f, "store error while running uat: {err}"),
             UatError::AncestorNotHealthy {
@@ -250,14 +283,19 @@ impl<E: UatExecutor> Uat<E> {
 
     /// Run a UAT for the story with the given id.
     ///
+    /// # Arguments
+    ///
+    /// - `story_id`: The story to test and potentially promote.
+    /// - `signer_source`: How to resolve the signer identity (explicit or via chain).
+    ///
     /// Returns a `Verdict` on success (Pass or Fail). Returns a typed
-    /// `UatError` if the tree is dirty, the story is not found, or a
-    /// backend error occurs.
+    /// `UatError` if the tree is dirty, the story is not found, the signer
+    /// cannot be resolved, or a backend error occurs.
     ///
     /// # Side effects on success
     ///
     /// - Always writes one row to `uat_signings` with the verdict, commit
-    ///   SHA, and timestamp.
+    ///   SHA, signer identity, and timestamp.
     /// - If the verdict is Pass, rewrites the story YAML in place to set
     ///   `status: healthy`, preserving all other fields.
     /// - If the verdict is Fail, the story YAML is untouched.
@@ -265,7 +303,7 @@ impl<E: UatExecutor> Uat<E> {
     /// # Side effects on error
     ///
     /// None. No rows written, no files touched.
-    pub fn run(&self, story_id: u32) -> Result<Verdict, UatError> {
+    pub fn run(&self, story_id: u32, signer_source: SignerSource) -> Result<Verdict, UatError> {
         // Step 1: Dirty-tree check FIRST, before anything else.
         check_tree_clean(&self.stories_dir)?;
 
@@ -275,6 +313,9 @@ impl<E: UatExecutor> Uat<E> {
             StoryError::NotFound { .. } => UatError::UnknownStory { id: story_id },
             _ => UatError::Io(e.to_string()),
         })?;
+
+        // Step 2.5: Resolve the signer identity.
+        let signer = resolve_signer(signer_source, &self.stories_dir)?;
 
         // Step 3: Execute the UAT.
         let outcome = self.executor.execute(&story);
@@ -300,6 +341,7 @@ impl<E: UatExecutor> Uat<E> {
             "story_id": story_id,
             "verdict": verdict.as_str(),
             "commit": commit,
+            "signer": signer,
             "signed_at": signed_at,
         });
 
@@ -313,6 +355,49 @@ impl<E: UatExecutor> Uat<E> {
         }
 
         Ok(verdict)
+    }
+}
+
+/// Resolve the signer identity from the given source via the four-tier chain:
+/// 1. Explicit flag/value
+/// 2. `AGENTIC_SIGNER` environment variable
+/// 3. `git config user.email`
+/// 4. Error
+///
+/// Returns the resolved signer string or `UatError::SignerMissing` if
+/// no source yields a non-empty value.
+fn resolve_signer(source: SignerSource, from_path: &Path) -> Result<String, UatError> {
+    match source {
+        SignerSource::Explicit(s) => {
+            // Tier 1: explicit value takes priority
+            if !s.trim().is_empty() {
+                Ok(s)
+            } else {
+                Err(UatError::SignerMissing)
+            }
+        }
+        SignerSource::Resolve => {
+            // Tier 2: check environment variable
+            if let Ok(env_signer) = std::env::var("AGENTIC_SIGNER") {
+                if !env_signer.trim().is_empty() {
+                    return Ok(env_signer);
+                }
+            }
+
+            // Tier 3: check git config user.email
+            if let Ok(repo) = git2::Repository::discover(from_path) {
+                if let Ok(config) = repo.config() {
+                    if let Ok(email) = config.get_string("user.email") {
+                        if !email.trim().is_empty() {
+                            return Ok(email);
+                        }
+                    }
+                }
+            }
+
+            // Tier 4: all sources exhausted
+            Err(UatError::SignerMissing)
+        }
     }
 }
 

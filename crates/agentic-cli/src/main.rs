@@ -6,7 +6,7 @@ use agentic_dashboard::Dashboard;
 use agentic_store::SurrealStore;
 use agentic_story::Story;
 use agentic_test_builder::{TestBuilder, TestBuilderError};
-use agentic_uat::{StubExecutor, Uat, UatError, Verdict};
+use agentic_uat::{SignerSource, StubExecutor, Uat, UatError, Verdict};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -32,6 +32,10 @@ enum Commands {
         /// Verdict: pass or fail
         #[arg(long, value_parser = parse_verdict)]
         verdict: Option<Verdict>,
+
+        /// Signer identity (overrides env var and git config)
+        #[arg(long)]
+        signer: Option<String>,
 
         /// Path to the store
         #[arg(long)]
@@ -324,7 +328,12 @@ fn main() {
                 }
             }
         },
-        Commands::Uat { id, verdict, store } => {
+        Commands::Uat {
+            id,
+            verdict,
+            signer,
+            store,
+        } => {
             // Verdict is required — exit 2 if missing
             let verdict = match verdict {
                 Some(v) => v,
@@ -354,7 +363,13 @@ fn main() {
 
             let uat = Uat::new(Arc::new(store), executor, stories_dir);
 
-            match uat.run(id) {
+            // Resolve the signer: explicit flag takes priority, else resolve via chain
+            let signer_source = match signer {
+                Some(s) => SignerSource::Explicit(s),
+                None => SignerSource::Resolve,
+            };
+
+            match uat.run(id, signer_source) {
                 Ok(Verdict::Pass) => {
                     // Get the HEAD SHA to include in stdout
                     match get_head_sha() {
@@ -387,6 +402,10 @@ fn main() {
                 }
                 Err(UatError::UnknownStory { id }) => {
                     eprintln!("unknown story id: {id}");
+                    std::process::exit(2);
+                }
+                Err(UatError::SignerMissing) => {
+                    eprintln!("signer identity could not be resolved");
                     std::process::exit(2);
                 }
                 Err(UatError::AncestorNotHealthy {
