@@ -62,13 +62,16 @@ acceptance:
       Proves the snapshot primitive's closure property holds
       for `SurrealStore` with the same semantics story 4
       pins for `MemStore`: given a `SurrealStore` rooted at a
-      temp directory and seeded with `uat_signings` rows for a
-      three-story fixture chain (`leaf` depends_on `mid`, `mid`
-      depends_on `root`), each ancestor carrying a valid
-      `verdict=pass` row, `Store::snapshot_for_story(leaf_id)`
-      returns a `StoreSnapshot` containing exactly the two
-      ancestor signings (`root` and `mid`) and does NOT contain
-      the leaf's own signing nor signings for unrelated stories
+      temp directory whose ancestry fixture is seeded via the
+      stores-table mechanism (see story 4, "Ancestry fixture
+      mechanism") — three `stories` rows shaped
+      `{id, depends_on}` describing the chain `leaf` ->
+      `mid` -> `root` — and whose `uat_signings` table
+      carries one `verdict=pass` row for each ancestor,
+      `Store::snapshot_for_story(leaf_id)` returns a
+      `StoreSnapshot` containing exactly the two ancestor
+      signings (`root` and `mid`) and does NOT contain the
+      leaf's own signing nor signings for unrelated stories
       present in the same store. Two calls against the same
       store state return byte-identical JSON when serialised
       with sorted keys. Without this, the trait-parity claim
@@ -79,35 +82,48 @@ acceptance:
       `Arc<dyn Store>` would hit backend-specific surprises at
       the seeding boundary. This test mirrors story 4's
       amendment test of the same shape against the production
-      backend.
+      backend, including the same stores-table ancestry
+      seeding — no env var, no filesystem `stories/` lookup.
   - file: crates/agentic-store/tests/surreal_restore_roundtrips_snapshot.rs
     justification: |
       Proves the restore primitive's idempotence and
-      completeness hold for `SurrealStore`: given a
-      `StoreSnapshot` produced by `snapshot_for_story` on a
-      seeded source store, a fresh `SurrealStore` rooted at a
-      distinct temp directory whose `runs` and `uat_signings`
-      tables are empty, and a call to `Store::restore(snapshot)`,
-      the destination store's `uat_signings` table ends with
-      exactly the rows the snapshot carried (same `signer`,
-      `verdict`, `commit`, and `story_id` values), and a
-      subsequent ancestor-gate query (e.g.
-      `has_pass_verdict(mid_id)`) returns true. A second
-      `restore` call with the same snapshot is rejected with
-      `StoreError::AlreadyRestored` rather than silently
-      double-writing. Without this, story 20's container-side
-      seeding step (which constructs a `SurrealStore` and
-      restores the host-computed snapshot into it) has no
-      trait-level guarantee that the ancestor gate fires
-      correctly inside the sandbox — and a backend-specific
-      divergence would surface as either a spurious gate refusal
-      or a silent double-seed on retry.
+      completeness hold for `SurrealStore`: given a source
+      `SurrealStore` whose ancestry fixture is seeded via
+      the stores-table mechanism (see story 4, "Ancestry
+      fixture mechanism") — `stories` rows for the ancestor
+      chain alongside the corresponding `uat_signings` pass
+      rows — a `StoreSnapshot` produced by
+      `snapshot_for_story` on that source, a fresh
+      `SurrealStore` rooted at a distinct temp directory
+      whose `runs` and `uat_signings` tables are empty, and
+      a call to `Store::restore(snapshot)`, the destination
+      store's `uat_signings` table ends with exactly the
+      rows the snapshot carried (same `signer`, `verdict`,
+      `commit`, and `story_id` values), and a subsequent
+      ancestor-gate query (e.g. `has_pass_verdict(mid_id)`)
+      returns true. A second `restore` call with the same
+      snapshot is rejected with `StoreError::AlreadyRestored`
+      rather than silently double-writing. Without this,
+      story 20's container-side seeding step (which
+      constructs a `SurrealStore` and restores the
+      host-computed snapshot into it) has no trait-level
+      guarantee that the ancestor gate fires correctly inside
+      the sandbox — and a backend-specific divergence would
+      surface as either a spurious gate refusal or a silent
+      double-seed on retry. The stores-table seeding on the
+      source mirrors story 4's amendment test so the snapshot
+      bundle this test restores is produced from the exact
+      same closure-input shape `MemStore` exercises.
   - file: crates/agentic-store/tests/surreal_snapshot_survives_drop_and_reopen.rs
     justification: |
       Proves the snapshot/restore primitives compose with
-      `SurrealStore`'s durability contract: given a fresh
-      `SurrealStore` rooted at a temp directory, a call to
-      `Store::restore(snapshot)` carrying three ancestor
+      `SurrealStore`'s durability contract: given a snapshot
+      whose source ancestry was seeded via the stores-table
+      mechanism (see story 4, "Ancestry fixture mechanism")
+      so the carried signings correspond to a real
+      closure-computed chain rather than hand-crafted rows, a
+      fresh `SurrealStore` rooted at a temp directory, a call
+      to `Store::restore(snapshot)` carrying three ancestor
       signings, followed by a drop of the store and a fresh
       `SurrealStore::open` against the same root, the three
       restored rows are still present with byte-identical
@@ -222,6 +238,31 @@ guidance: |
       the same document shape we wrote; we do not pin field
       ordering because that is a schemaless DB contract, not
       a consumer-observable property.
+
+  Ancestry fixture mechanism — parity with story 4.
+    The three snapshot/restore acceptance tests
+    (`surreal_snapshot_for_story_returns_ancestor_closure`,
+    `surreal_restore_roundtrips_snapshot`,
+    `surreal_snapshot_survives_drop_and_reopen`) mirror story
+    4's amendment tests shape-for-shape, and therefore use
+    the SAME ancestry fixture mechanism story 4 pins: each
+    test seeds a `stories` table alongside `uat_signings` on
+    the `SurrealStore` under test, with rows shaped
+    `{"id": <i64>, "depends_on": [<i64>, ...]}`, and relies
+    on `snapshot_for_story` to read the ancestry graph from
+    that table (NOT from an `AGENTIC_STORIES_DIR` env var,
+    NOT from a `stories/*.yml` directory lookup, NOT from any
+    ambient process state). See story 4's guidance section
+    "Ancestry fixture mechanism — how `snapshot_for_story`
+    learns the graph" for the full shape contract and the
+    rationale. Story 5 inherits that contract unchanged;
+    authoring these three tests without the stores-table
+    seeding would leave `snapshot_for_story` with no ancestry
+    graph to walk and the assertions unsatisfiable — which is
+    the exact scaffold defect this cross-reference exists to
+    prevent. The trait-parity claim requires the fixture
+    mechanism to be identical across impls, not just the
+    method signatures.
 
   Snapshot / restore on top of surrealkv (story 20's
   prerequisite, added via this story's amendment).
