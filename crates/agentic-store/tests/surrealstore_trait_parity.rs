@@ -77,7 +77,11 @@ fn append_preserves_writes_against_surrealstore() {
         .query("signings", &|_| true)
         .expect("query should succeed");
 
-    assert_eq!(rows.len(), 3, "three appends must yield three rows; got {rows:?}");
+    assert_eq!(
+        rows.len(),
+        3,
+        "three appends must yield three rows; got {rows:?}"
+    );
     assert_eq!(rows[0]["seq"], json!(1));
     assert_eq!(rows[1]["seq"], json!(2));
     assert_eq!(rows[2]["seq"], json!(3));
@@ -121,12 +125,18 @@ fn empty_filter_returns_empty_collection_against_surrealstore() {
             doc["kind"] == json!("this-value-never-appears")
         })
         .expect("empty-result query must NOT be an error");
-    assert!(none.is_empty(), "filter matching nothing must return empty Vec; got {none:?}");
+    assert!(
+        none.is_empty(),
+        "filter matching nothing must return empty Vec; got {none:?}"
+    );
 
     let unknown = store
         .query("table_never_written", &|_| true)
         .expect("query on unknown table must NOT be an error");
-    assert!(unknown.is_empty(), "query on unknown table must return empty; got {unknown:?}");
+    assert!(
+        unknown.is_empty(),
+        "query on unknown table must return empty; got {unknown:?}"
+    );
 }
 
 #[test]
@@ -159,7 +169,11 @@ fn arc_dyn_surrealstore_is_send_sync_and_shared_across_threads() {
 
     let mut thread_ids: Vec<i64> = rows
         .iter()
-        .map(|r| r["thread"].as_i64().expect("thread field must be an integer"))
+        .map(|r| {
+            r["thread"]
+                .as_i64()
+                .expect("thread field must be an integer")
+        })
         .collect();
     thread_ids.sort();
     assert_eq!(thread_ids, vec![1, 2]);

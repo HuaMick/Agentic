@@ -81,11 +81,7 @@ fn looks_like_relative_age(s: &str) -> bool {
                 break;
             }
         }
-        saw_digit
-            && chars
-                .next()
-                .map(looks_like_unit)
-                .unwrap_or(false)
+        saw_digit && chars.next().map(looks_like_unit).unwrap_or(false)
     }) && s.contains("ago")
 }
 
@@ -137,9 +133,7 @@ fn story_healthy_at_head_with_passing_tests_renders_healthy_with_short_sha_and_r
         .lines()
         .find(|line| line.contains(&STORY_ID.to_string()))
         .unwrap_or_else(|| {
-            panic!(
-                "rendered table must contain a row for story {STORY_ID}; got:\n{rendered}"
-            )
+            panic!("rendered table must contain a row for story {STORY_ID}; got:\n{rendered}")
         });
 
     // (a) Health classification.

@@ -95,7 +95,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -128,7 +129,8 @@ fn head_sha(repo: &git2::Repository) -> String {
 }
 
 #[test]
-fn leaf_with_own_tests_fail_own_files_stale_and_two_ancestor_offenders_emits_locked_four_token_reason() {
+fn leaf_with_own_tests_fail_own_files_stale_and_two_ancestor_offenders_emits_locked_four_token_reason(
+) {
     let tmp = TempDir::new().expect("tempdir");
     let repo_root = tmp.path();
     let repo = init_repo(repo_root);
@@ -178,8 +180,7 @@ fn leaf_with_own_tests_fail_own_files_stale_and_two_ancestor_offenders_emits_loc
     let c0 = commit_all(&repo, "C0 seed", &[]);
 
     // C1: edit the watched file — triggers file-staleness for L.
-    fs::write(&watched_file, b"// seed\n// edited at C1\n")
-        .expect("rewrite watched file at C1");
+    fs::write(&watched_file, b"// seed\n// edited at C1\n").expect("rewrite watched file at C1");
     let c0_commit = repo
         .find_commit(git2::Oid::from_str(&c0).expect("parse C0 oid"))
         .expect("find C0 commit");
@@ -245,11 +246,8 @@ fn leaf_with_own_tests_fail_own_files_stale_and_two_ancestor_offenders_emits_loc
 
     // A and C carry no UAT signing — classify `under_construction`.
 
-    let dashboard = Dashboard::with_repo(
-        store.clone(),
-        stories_dir.clone(),
-        PathBuf::from(repo_root),
-    );
+    let dashboard =
+        Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
     let rendered = dashboard
         .render_json()
         .expect("render_json should succeed on the four-story fixture");
@@ -287,9 +285,9 @@ fn leaf_with_own_tests_fail_own_files_stale_and_two_ancestor_offenders_emits_loc
              listing each active reason as a token; got: {l_row}"
         )
     });
-    let reason_arr = reason.as_array().unwrap_or_else(|| {
-        panic!("`not_healthy_reason` must be a JSON array; got {reason:?}")
-    });
+    let reason_arr = reason
+        .as_array()
+        .unwrap_or_else(|| panic!("`not_healthy_reason` must be a JSON array; got {reason:?}"));
     let reason_tokens: Vec<String> = reason_arr
         .iter()
         .map(|v| {

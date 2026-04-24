@@ -111,7 +111,10 @@ fn record_refuses_with_dirty_tree_when_untracked_file_exists_outside_scaffold_pa
     );
 
     // Belt-and-braces: the dirt we planted is still there untouched.
-    assert!(dirt_path.exists(), "pre-existing dirt must still be present");
+    assert!(
+        dirt_path.exists(),
+        "pre-existing dirt must still be present"
+    );
 }
 
 fn listing(root: &Path) -> String {
@@ -150,7 +153,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

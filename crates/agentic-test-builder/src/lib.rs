@@ -177,12 +177,21 @@ impl TestBuilder {
 
         // Check if the story YAML has a commit newer than the evidence row.
         let story_yaml_path = format!("stories/{story_id}.yml");
-        let yaml_is_newer = self.is_yaml_path_newer_than_commit(repo, &story_yaml_path, &most_recent_evidence_commit);
+        let yaml_is_newer = self.is_yaml_path_newer_than_commit(
+            repo,
+            &story_yaml_path,
+            &most_recent_evidence_commit,
+        );
 
         if yaml_is_newer {
             // All three gates pass.
             // Check if the scaffold is in prior evidence AND has an unchanged justification.
-            if self.scaffold_in_prior_evidence_and_unchanged(story, &evidence_dir, &scaffold_file_str, repo) {
+            if self.scaffold_in_prior_evidence_and_unchanged(
+                story,
+                &evidence_dir,
+                &scaffold_file_str,
+                repo,
+            ) {
                 // Scaffold is in prior evidence with unchanged justification → PRESERVE.
                 ScaffoldClassification::Preserve
             } else {
@@ -209,7 +218,9 @@ impl TestBuilder {
                 if let Some(line) = body.lines().next() {
                     if let Ok(row) = serde_json::from_str::<serde_json::Value>(line) {
                         // Check if this scaffold is in the prior evidence.
-                        let in_prior = if let Some(verdicts) = row.get("verdicts").and_then(|v| v.as_array()) {
+                        let in_prior = if let Some(verdicts) =
+                            row.get("verdicts").and_then(|v| v.as_array())
+                        {
                             verdicts.iter().any(|verdict| {
                                 verdict.get("file").and_then(|f| f.as_str()) == Some(scaffold_file)
                             })
@@ -222,11 +233,12 @@ impl TestBuilder {
                         }
 
                         // Get the prior evidence commit.
-                        let evidence_commit = if let Some(commit_str) = row.get("commit").and_then(|c| c.as_str()) {
-                            commit_str.to_string()
-                        } else {
-                            return false;
-                        };
+                        let evidence_commit =
+                            if let Some(commit_str) = row.get("commit").and_then(|c| c.as_str()) {
+                                commit_str.to_string()
+                            } else {
+                                return false;
+                            };
 
                         // Load the story YAML from the evidence commit and check its justification.
                         if let Some(prior_justification) = self.get_justification_from_commit(
@@ -423,10 +435,11 @@ impl TestBuilder {
                     Err(_) => continue,
                 };
 
-                let diff = match repo.diff_tree_to_tree(Some(&parent_tree), Some(&commit_tree), None) {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
+                let diff =
+                    match repo.diff_tree_to_tree(Some(&parent_tree), Some(&commit_tree), None) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
 
                 let mut found = false;
                 for delta in diff.deltas() {
@@ -528,14 +541,16 @@ impl TestBuilder {
                 ScaffoldClassification::FirstAuthoring | ScaffoldClassification::ReAuthor => {
                     // First-authoring and re-author scaffolds must probe red.
                     // Determine the verdict string: "re-authored" when re-authoring, "red" for first-authoring.
-                    let verdict_string = if matches!(classification, ScaffoldClassification::ReAuthor) {
-                        "re-authored"
-                    } else {
-                        "red"
-                    };
+                    let verdict_string =
+                        if matches!(classification, ScaffoldClassification::ReAuthor) {
+                            "re-authored"
+                        } else {
+                            "red"
+                        };
 
                     // Probe the scaffold.
-                    let (red_path, diagnostic) = probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
+                    let (red_path, diagnostic) =
+                        probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
 
                     // Check that the probe actually came back red.
                     if red_path == "green" {
@@ -769,7 +784,15 @@ fn probe_scaffold(
         .and_then(|s| s.to_str())
         .unwrap_or("*");
     let test_output = Command::new("cargo")
-        .args(["test", "--package", crate_name, "--test", test_name, "--", "--nocapture"])
+        .args([
+            "test",
+            "--package",
+            crate_name,
+            "--test",
+            test_name,
+            "--",
+            "--nocapture",
+        ])
         .current_dir(repo_root)
         .output()
         .map_err(|e| TestBuilderError::Other(format!("failed to run cargo test: {e}")))?;
@@ -898,4 +921,3 @@ fn get_head_commit(repo_root: &Path) -> Result<String, TestBuilderError> {
         .ok_or_else(|| TestBuilderError::Other("cannot get HEAD commit".to_string()))
         .map(|oid| oid.to_string())
 }
-

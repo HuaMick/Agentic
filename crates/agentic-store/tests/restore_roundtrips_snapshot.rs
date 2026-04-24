@@ -47,22 +47,13 @@ fn every_snapshot_row_round_trips_byte_for_byte_into_fresh_store() {
     let source: Box<dyn Store> = Box::new(MemStore::new());
 
     source
-        .append(
-            "stories",
-            json!({ "id": ROOT_ID, "depends_on": [] }),
-        )
+        .append("stories", json!({ "id": ROOT_ID, "depends_on": [] }))
         .expect("seed root story row");
     source
-        .append(
-            "stories",
-            json!({ "id": MID_ID, "depends_on": [ROOT_ID] }),
-        )
+        .append("stories", json!({ "id": MID_ID, "depends_on": [ROOT_ID] }))
         .expect("seed mid story row");
     source
-        .append(
-            "stories",
-            json!({ "id": LEAF_ID, "depends_on": [MID_ID] }),
-        )
+        .append("stories", json!({ "id": LEAF_ID, "depends_on": [MID_ID] }))
         .expect("seed leaf story row");
 
     source

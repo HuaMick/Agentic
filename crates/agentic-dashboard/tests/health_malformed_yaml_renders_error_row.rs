@@ -78,8 +78,7 @@ fn render_table_emits_error_row_for_malformed_yaml_and_still_renders_good_siblin
     fs::create_dir_all(&stories_dir).expect("stories dir");
     fs::write(stories_dir.join(format!("{GOOD_ID}.yml")), GOOD_FIXTURE)
         .expect("write good fixture");
-    fs::write(stories_dir.join(format!("{BAD_ID}.yml")), BAD_FIXTURE)
-        .expect("write bad fixture");
+    fs::write(stories_dir.join(format!("{BAD_ID}.yml")), BAD_FIXTURE).expect("write bad fixture");
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let dashboard = Dashboard::new(store.clone(), stories_dir.clone(), HEAD_SHA.to_string());
@@ -128,9 +127,8 @@ fn render_table_emits_error_row_for_malformed_yaml_and_still_renders_good_siblin
     // example reasons; for this fixture (unbalanced quote) the reason
     // will reference parsing. We accept any of those substrings so the
     // implementation is free to choose its exact wording.
-    let has_short_reason = bad_row.contains("yaml")
-        || bad_row.contains("parse")
-        || bad_row.contains("schema");
+    let has_short_reason =
+        bad_row.contains("yaml") || bad_row.contains("parse") || bad_row.contains("schema");
     assert!(
         has_short_reason,
         "Failing tests cell for malformed story {BAD_ID} must carry a short \

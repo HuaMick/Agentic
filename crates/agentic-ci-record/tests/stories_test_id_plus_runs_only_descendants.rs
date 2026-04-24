@@ -78,9 +78,7 @@ fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file = format!(
-        "crates/agentic-ci-record/tests/fixture_story_{id}.rs"
-    );
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     let body = format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 descendant-selector scaffold"
@@ -139,10 +137,7 @@ fn id_plus_selector_invokes_executor_only_for_target_and_transitive_descendants(
         .run(&selector)
         .expect("runner must succeed across descendant set on a clean stub corpus");
 
-    let invocations = &calls
-        .lock()
-        .expect("calls mutex poisoned")
-        .invocations;
+    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
     let invoked: Vec<u32> = invocations.iter().map(|(id, _)| *id).collect();
 
     // EXACTLY {target, all transitive descendants}, once each.

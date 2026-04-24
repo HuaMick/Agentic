@@ -59,7 +59,8 @@ fn init_repo_and_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -76,7 +77,8 @@ fn init_repo_and_seed(root: &Path) {
 }
 
 #[test]
-fn stories_health_all_via_binary_emits_one_row_per_story_including_frontier_descendants_and_error_class() {
+fn stories_health_all_via_binary_emits_one_row_per_story_including_frontier_descendants_and_error_class(
+) {
     let repo_tmp = TempDir::new().expect("repo tempdir");
     let repo_root = repo_tmp.path();
     let stories_dir = repo_root.join("stories");
@@ -94,7 +96,11 @@ fn stories_health_all_via_binary_emits_one_row_per_story_including_frontier_desc
     .expect("write PROPOSED");
     fs::write(
         stories_dir.join(format!("{ID_UNDER_CONSTRUCTION_DESC}.yml")),
-        fixture_yaml(ID_UNDER_CONSTRUCTION_DESC, "under_construction", &[ID_PROPOSED]),
+        fixture_yaml(
+            ID_UNDER_CONSTRUCTION_DESC,
+            "under_construction",
+            &[ID_PROPOSED],
+        ),
     )
     .expect("write UC_DESC");
     fs::write(

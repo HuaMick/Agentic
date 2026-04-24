@@ -111,7 +111,8 @@ fn seed_healthy(store: &Arc<dyn Store>, story_id: u32, uuid_suffix: &str) {
 }
 
 #[test]
-fn leaf_with_mixed_direct_parents_lists_every_direct_offender_and_no_healthy_or_transitive_parent() {
+fn leaf_with_mixed_direct_parents_lists_every_direct_offender_and_no_healthy_or_transitive_parent()
+{
     let tmp = TempDir::new().expect("tempdir");
     let stories_dir = tmp.path().join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
@@ -179,13 +180,11 @@ fn leaf_with_mixed_direct_parents_lists_every_direct_offender_and_no_healthy_or_
     );
 
     let reason = l_row.get("not_healthy_reason").unwrap_or_else(|| {
-        panic!(
-            "L's unhealthy row must carry `not_healthy_reason`; got: {l_row}"
-        )
+        panic!("L's unhealthy row must carry `not_healthy_reason`; got: {l_row}")
     });
-    let reason_arr = reason.as_array().unwrap_or_else(|| {
-        panic!("`not_healthy_reason` must be a JSON array; got {reason:?}")
-    });
+    let reason_arr = reason
+        .as_array()
+        .unwrap_or_else(|| panic!("`not_healthy_reason` must be a JSON array; got {reason:?}"));
     let tokens: Vec<String> = reason_arr
         .iter()
         .map(|v| {

@@ -61,7 +61,8 @@ fn init_repo_and_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -135,7 +136,9 @@ fn run(selector: &str, repo_root: &Path, store_path: &Path) -> (bool, Vec<u64>, 
             .get("stories")
             .and_then(|v| v.as_array())
             .unwrap_or_else(|| {
-                panic!("top-level `stories` must be an array for selector `{selector}`; got: {parsed}")
+                panic!(
+                    "top-level `stories` must be an array for selector `{selector}`; got: {parsed}"
+                )
             })
             .iter()
             .filter_map(|s| s.get("id").and_then(|v| v.as_u64()))
@@ -150,11 +153,7 @@ fn run(selector: &str, repo_root: &Path, store_path: &Path) -> (bool, Vec<u64>, 
 #[test]
 fn plus_id_selector_via_binary_emits_target_plus_ancestors_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (ok, ids, stderr, _code) = run(
-        &format!("+{ID_TARGET}"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (ok, ids, stderr, _code) = run(&format!("+{ID_TARGET}"), repo_tmp.path(), store_tmp.path());
     assert!(ok, "`+{ID_TARGET}` must exit 0; stderr:\n{stderr}");
     assert!(
         ids.contains(&(ID_TARGET as u64)),
@@ -173,11 +172,7 @@ fn plus_id_selector_via_binary_emits_target_plus_ancestors_and_exits_0() {
 #[test]
 fn id_plus_selector_via_binary_emits_target_plus_descendants_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (ok, ids, stderr, _code) = run(
-        &format!("{ID_TARGET}+"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (ok, ids, stderr, _code) = run(&format!("{ID_TARGET}+"), repo_tmp.path(), store_tmp.path());
     assert!(ok, "`{ID_TARGET}+` must exit 0; stderr:\n{stderr}");
     assert!(
         ids.contains(&(ID_TARGET as u64)),
@@ -196,11 +191,8 @@ fn id_plus_selector_via_binary_emits_target_plus_descendants_and_exits_0() {
 #[test]
 fn plus_id_plus_selector_via_binary_emits_full_subtree_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (ok, ids, stderr, _code) = run(
-        &format!("+{ID_TARGET}+"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (ok, ids, stderr, _code) =
+        run(&format!("+{ID_TARGET}+"), repo_tmp.path(), store_tmp.path());
     assert!(ok, "`+{ID_TARGET}+` must exit 0; stderr:\n{stderr}");
     for expected in [ID_ANC, ID_TARGET, ID_DESC] {
         assert!(
@@ -213,11 +205,8 @@ fn plus_id_plus_selector_via_binary_emits_full_subtree_and_exits_0() {
 #[test]
 fn plus_unknown_id_selector_via_binary_exits_nonzero_naming_the_missing_id() {
     let (repo_tmp, store_tmp) = setup();
-    let (ok, _ids, stderr, code) = run(
-        &format!("+{ID_MISSING}"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (ok, _ids, stderr, code) =
+        run(&format!("+{ID_MISSING}"), repo_tmp.path(), store_tmp.path());
     assert!(
         !ok,
         "`+{ID_MISSING}` (unknown id) must exit non-zero; got code={code}\nstderr:\n{stderr}"

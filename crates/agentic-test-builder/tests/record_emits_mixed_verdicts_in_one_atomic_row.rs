@@ -288,12 +288,30 @@ fn record_writes_one_row_with_mixed_verdicts_in_declaration_order() {
     );
 
     // Declaration order is the story's `acceptance.tests[]` order.
-    let file0 = verdicts[0].get("file").and_then(|v| v.as_str()).unwrap_or("");
-    let file1 = verdicts[1].get("file").and_then(|v| v.as_str()).unwrap_or("");
-    let file2 = verdicts[2].get("file").and_then(|v| v.as_str()).unwrap_or("");
-    assert_eq!(file0, RED_FILE, "declaration order: entry 0 must be red scaffold");
-    assert_eq!(file1, PRESERVED_FILE, "declaration order: entry 1 must be preserved scaffold");
-    assert_eq!(file2, REAUTHORED_FILE, "declaration order: entry 2 must be re-authored scaffold");
+    let file0 = verdicts[0]
+        .get("file")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let file1 = verdicts[1]
+        .get("file")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let file2 = verdicts[2]
+        .get("file")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(
+        file0, RED_FILE,
+        "declaration order: entry 0 must be red scaffold"
+    );
+    assert_eq!(
+        file1, PRESERVED_FILE,
+        "declaration order: entry 1 must be preserved scaffold"
+    );
+    assert_eq!(
+        file2, REAUTHORED_FILE,
+        "declaration order: entry 2 must be re-authored scaffold"
+    );
 
     // Entry 1 (preserved): verdict "preserved", shape {file, verdict} only.
     let v1 = verdicts[1].as_object().expect("preserved entry is object");
@@ -344,7 +362,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

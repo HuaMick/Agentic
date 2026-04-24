@@ -66,7 +66,10 @@ fn record_writes_resolved_signer_onto_pass_and_fail_rows() {
         "Pass row must still carry commit; got row={row_pass}"
     );
     assert!(
-        row_pass.get("failing_tests").and_then(|v| v.as_array()).is_some(),
+        row_pass
+            .get("failing_tests")
+            .and_then(|v| v.as_array())
+            .is_some(),
         "Pass row must still carry failing_tests; got row={row_pass}"
     );
     assert!(
@@ -82,10 +85,7 @@ fn record_writes_resolved_signer_onto_pass_and_fail_rows() {
 
     recorder_fail
         .record_with_signer(
-            RunInput::fail(
-                STORY_ID_FAIL,
-                vec!["crates/foo/tests/a.rs".to_string()],
-            ),
+            RunInput::fail(STORY_ID_FAIL, vec!["crates/foo/tests/a.rs".to_string()]),
             SignerSource::Resolve,
         )
         .expect("fail record must succeed with resolvable signer");
@@ -109,7 +109,11 @@ fn record_writes_resolved_signer_onto_pass_and_fail_rows() {
         .get("failing_tests")
         .and_then(|v| v.as_array())
         .expect("Fail row must carry failing_tests array");
-    assert_eq!(failing.len(), 1, "Fail row must carry the failing test; got {failing:?}");
+    assert_eq!(
+        failing.len(),
+        1,
+        "Fail row must carry the failing test; got {failing:?}"
+    );
 
     // Cleanup.
     std::env::remove_var("AGENTIC_SIGNER");

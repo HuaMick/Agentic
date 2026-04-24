@@ -103,7 +103,9 @@ fn story_yaml_snapshot_equals_sha256_hex_at_launch_and_does_not_drift_after_disk
     // Defensive: lowercase and length (the justification names both).
     assert_eq!(snapshot.len(), 64);
     assert!(
-        snapshot.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        snapshot
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
         "snapshot must be lowercase hex; got {snapshot:?}"
     );
 }

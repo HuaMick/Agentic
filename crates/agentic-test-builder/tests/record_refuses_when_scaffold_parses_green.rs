@@ -120,7 +120,8 @@ fn record_refuses_with_scaffold_not_red_when_probe_exits_zero() {
     match result {
         Err(TestBuilderError::ScaffoldNotRed { file, probe }) => {
             assert_eq!(
-                file, scaffold_path,
+                file,
+                scaffold_path,
                 "ScaffoldNotRed must name the green scaffold path; got {}",
                 file.display()
             );
@@ -189,7 +190,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

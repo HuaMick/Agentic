@@ -99,9 +99,8 @@ fn load_build_config_with_explicit_empty_models_is_some_with_empty_vec() {
     let path = dir.path().join("1706.yml");
     fs::write(&path, EXPLICIT_EMPTY_YAML).expect("write fixture");
 
-    let story: Story = Story::load(&path).expect(
-        "a story whose build_config.models is an explicit empty array must load",
-    );
+    let story: Story = Story::load(&path)
+        .expect("a story whose build_config.models is an explicit empty array must load");
 
     // The outcome: Some(...) with empty models, distinct from None.
     let bc = story.build_config.as_ref().unwrap_or_else(|| {

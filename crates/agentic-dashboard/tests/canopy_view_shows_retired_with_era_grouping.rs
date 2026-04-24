@@ -214,9 +214,7 @@ fn canopy_lens_clusters_retired_stories_under_era_head_with_terminal_retirement_
 
     // (c) A, B, C cluster under era head C.
     let abc_group = by_era.get(&(ID_C_HEALTHY as u64)).unwrap_or_else(|| {
-        panic!(
-            "canopy must group A/B/C under era_head={ID_C_HEALTHY}; got by_era={by_era:?}"
-        )
+        panic!("canopy must group A/B/C under era_head={ID_C_HEALTHY}; got by_era={by_era:?}")
     });
     for expected in [ID_A_RETIRED, ID_B_RETIRED, ID_C_HEALTHY] {
         assert!(

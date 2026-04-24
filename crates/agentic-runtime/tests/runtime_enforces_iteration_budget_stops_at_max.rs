@@ -70,10 +70,9 @@ async fn runtime_stops_at_max_inner_loop_iterations_and_trace_is_truncated() {
         event_sink: Box::new(sink),
     };
 
-    let outcome = runtime
-        .spawn_claude_session(cfg)
-        .await
-        .expect("spawn_claude_session must return Ok even on budget exhaustion (Err is for pre-spawn only)");
+    let outcome = runtime.spawn_claude_session(cfg).await.expect(
+        "spawn_claude_session must return Ok even on budget exhaustion (Err is for pre-spawn only)",
+    );
 
     // Outcome variant is InnerLoopExhausted.
     assert!(
@@ -112,7 +111,9 @@ async fn runtime_stops_at_max_inner_loop_iterations_and_trace_is_truncated() {
     let trace_file = trace_candidates
         .iter()
         .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("trace.ndjson"))
-        .unwrap_or_else(|| panic!("expected a trace.ndjson under {runs_root:?}; found {trace_candidates:?}"));
+        .unwrap_or_else(|| {
+            panic!("expected a trace.ndjson under {runs_root:?}; found {trace_candidates:?}")
+        });
     let body = std::fs::read_to_string(trace_file).expect("read trace file");
     let trace_lines: Vec<&str> = body.lines().collect();
     assert!(

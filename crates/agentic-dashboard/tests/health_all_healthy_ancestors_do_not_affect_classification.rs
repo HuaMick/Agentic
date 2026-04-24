@@ -227,9 +227,9 @@ fn all_healthy_chain_stays_healthy_while_parallel_broken_chain_still_cites_ances
              array; got: {l_bad_row}"
         )
     });
-    let reason_arr = reason.as_array().unwrap_or_else(|| {
-        panic!("`not_healthy_reason` must be a JSON array; got {reason:?}")
-    });
+    let reason_arr = reason
+        .as_array()
+        .unwrap_or_else(|| panic!("`not_healthy_reason` must be a JSON array; got {reason:?}"));
     let tokens: Vec<String> = reason_arr
         .iter()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))

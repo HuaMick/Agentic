@@ -73,7 +73,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -114,11 +115,7 @@ fn story_whose_related_files_did_not_change_stays_healthy_despite_newer_head() {
 
     let stories_dir = repo_root.join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(
-        stories_dir.join(format!("{STORY_ID}.yml")),
-        fixture_yaml(),
-    )
-    .expect("write fixture");
+    fs::write(stories_dir.join(format!("{STORY_ID}.yml")), fixture_yaml()).expect("write fixture");
 
     // C0: the seed commit. This is what the UAT signing will reference.
     let c0 = commit_all(&repo, "C0 seed", &[]);
@@ -166,11 +163,8 @@ fn story_whose_related_files_did_not_change_stays_healthy_despite_newer_head() {
     // Construct the repo-aware dashboard. The repo_root carries enough
     // information for the dashboard to discover HEAD AND compute the
     // C0..HEAD file diff internally.
-    let dashboard = Dashboard::with_repo(
-        store.clone(),
-        stories_dir.clone(),
-        PathBuf::from(repo_root),
-    );
+    let dashboard =
+        Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
 
     let rendered = dashboard
         .render_table()
@@ -180,9 +174,7 @@ fn story_whose_related_files_did_not_change_stays_healthy_despite_newer_head() {
         .lines()
         .find(|line| line.contains(&STORY_ID.to_string()))
         .unwrap_or_else(|| {
-            panic!(
-                "rendered table must contain a row for story {STORY_ID}; got:\n{rendered}"
-            )
+            panic!("rendered table must contain a row for story {STORY_ID}; got:\n{rendered}")
         });
 
     // The core assertion of story 9: legacy strict-equality is gone,

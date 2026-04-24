@@ -111,17 +111,20 @@ async fn runtime_records_branch_state_and_never_writes_to_main() {
         .unwrap_or_else(|| panic!("row must carry branch_state; got {}", rows[0]));
 
     assert_eq!(
-        branch_state["start_sha"], json!(baseline_sha),
+        branch_state["start_sha"],
+        json!(baseline_sha),
         "branch_state.start_sha must equal the baseline SHA; got {:?}",
         branch_state["start_sha"]
     );
     assert_eq!(
-        branch_state["merged"], json!(false),
+        branch_state["merged"],
+        json!(false),
         "branch_state.merged must be false; got {:?}",
         branch_state["merged"]
     );
     assert_eq!(
-        branch_state["merge_shas"], json!([]),
+        branch_state["merge_shas"],
+        json!([]),
         "branch_state.merge_shas must be an empty array; got {:?}",
         branch_state["merge_shas"]
     );

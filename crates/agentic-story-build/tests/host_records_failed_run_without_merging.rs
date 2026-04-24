@@ -167,21 +167,15 @@ fn three_sequential_runs_two_exhausted_one_green_produces_one_squash_three_rows(
         .map(|r| (r["run_id"].as_str().unwrap().to_string(), r))
         .collect();
     assert_eq!(
-        by_id
-            .remove("run-8115-a")
-            .expect("run-8115-a row")["branch_state"]["merged"],
+        by_id.remove("run-8115-a").expect("run-8115-a row")["branch_state"]["merged"],
         json!(false)
     );
     assert_eq!(
-        by_id
-            .remove("run-8115-b")
-            .expect("run-8115-b row")["branch_state"]["merged"],
+        by_id.remove("run-8115-b").expect("run-8115-b row")["branch_state"]["merged"],
         json!(false)
     );
     assert_eq!(
-        by_id
-            .remove("run-8115-c")
-            .expect("run-8115-c row")["branch_state"]["merged"],
+        by_id.remove("run-8115-c").expect("run-8115-c row")["branch_state"]["merged"],
         json!(true)
     );
 }

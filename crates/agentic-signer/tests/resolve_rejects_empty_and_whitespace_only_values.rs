@@ -34,18 +34,18 @@ use agentic_signer::{InvalidReason, Resolver, Signer, SignerError, Source};
 fn resolve_rejects_empty_and_whitespace_only_values_and_accepts_any_non_whitespace() {
     // The minimum rejection set from story 18's guidance.
     let rejected_values = [
-        "",       // empty
-        " ",      // single space
-        "\t",     // single tab
-        "\n",     // single newline
-        "\r\n",   // CRLF
+        "",        // empty
+        " ",       // single space
+        "\t",      // single tab
+        "\n",      // single newline
+        "\r\n",    // CRLF
         " \t \n ", // mixed whitespace
     ];
     for value in rejected_values {
         let resolver = Resolver::with_flag(value);
-        let err = Signer::resolve(resolver).expect_err(
-            &format!("whitespace-only flag {value:?} must be rejected, not silently accepted"),
-        );
+        let err = Signer::resolve(resolver).expect_err(&format!(
+            "whitespace-only flag {value:?} must be rejected, not silently accepted"
+        ));
         match err {
             SignerError::SignerInvalid { source, reason } => {
                 assert_eq!(
@@ -77,9 +77,9 @@ fn resolve_rejects_empty_and_whitespace_only_values_and_accepts_any_non_whitespa
     ];
     for value in accepted_values {
         let resolver = Resolver::with_flag(value);
-        let signer = Signer::resolve(resolver).expect(
-            &format!("non-whitespace flag {value:?} must be accepted verbatim"),
-        );
+        let signer = Signer::resolve(resolver).expect(&format!(
+            "non-whitespace flag {value:?} must be accepted verbatim"
+        ));
         assert_eq!(
             signer.as_str(),
             value,

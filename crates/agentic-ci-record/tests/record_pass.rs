@@ -38,7 +38,9 @@ fn record_upserts_pass_row_with_expected_shape() {
     // before and after, and asserts the recorded ran_at falls inside that
     // window after parsing the RFC3339 string.
     let before = unix_now();
-    recorder.record(input).expect("record should succeed on valid pass input");
+    recorder
+        .record(input)
+        .expect("record should succeed on valid pass input");
     let after = unix_now();
 
     // Exactly one row lands in `test_runs` keyed by story_id.
@@ -106,8 +108,8 @@ fn record_upserts_pass_row_with_expected_shape() {
 
     // Year / month / day / hour / minute / second parse as integers and
     // combine into a UNIX timestamp that falls inside [before, after].
-    let ran_at_unix = parse_rfc3339_utc_to_unix(ran_at_str)
-        .expect("ran_at must parse as RFC3339 UTC");
+    let ran_at_unix =
+        parse_rfc3339_utc_to_unix(ran_at_str).expect("ran_at must parse as RFC3339 UTC");
     assert!(
         ran_at_unix >= before && ran_at_unix <= after,
         "ran_at must fall within the record call; before={before}, ran_at={ran_at_unix}, after={after}"

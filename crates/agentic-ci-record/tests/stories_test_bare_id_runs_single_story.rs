@@ -53,8 +53,7 @@ fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     let body = format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 bare-id scaffold"
@@ -113,10 +112,7 @@ fn bare_id_selector_invokes_executor_only_for_the_exact_story() {
         .run(&selector)
         .expect("runner must succeed on bare-id selector");
 
-    let invocations = &calls
-        .lock()
-        .expect("calls mutex poisoned")
-        .invocations;
+    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
     let invoked: Vec<u32> = invocations.iter().map(|(id, _)| *id).collect();
 
     // Exactly one invocation, for the exact target.

@@ -83,9 +83,7 @@ fn record_refuses_when_signer_cannot_be_resolved_and_is_distinct_from_malformed_
     );
 
     // Zero rows for the refused story id.
-    let refused = store
-        .get("test_runs", &STORY_ID.to_string())
-        .expect("get");
+    let refused = store.get("test_runs", &STORY_ID.to_string()).expect("get");
     assert!(
         refused.is_none(),
         "refusal must write zero rows for the refused story id; got {refused:?}"
@@ -107,7 +105,8 @@ fn record_refuses_when_signer_cannot_be_resolved_and_is_distinct_from_malformed_
 fn init_repo_without_email(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     let mut cfg = repo.config().expect("repo config");
-    cfg.set_str("user.name", "test-builder").expect("set user.name");
+    cfg.set_str("user.name", "test-builder")
+        .expect("set user.name");
     // user.email intentionally NOT set.
     let _ = cfg;
 }

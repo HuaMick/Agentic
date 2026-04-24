@@ -172,10 +172,9 @@ fn default_frontier_lens_excludes_retired_stories_from_rows_and_summary_denomina
     let denom: u64 = ["healthy", "unhealthy", "proposed", "under_construction"]
         .iter()
         .map(|k| {
-            summary
-                .get(*k)
-                .and_then(|v| v.as_u64())
-                .unwrap_or_else(|| panic!("summary.{k} must be a non-negative integer; got {summary}"))
+            summary.get(*k).and_then(|v| v.as_u64()).unwrap_or_else(|| {
+                panic!("summary.{k} must be a non-negative integer; got {summary}")
+            })
         })
         .sum();
     assert_eq!(

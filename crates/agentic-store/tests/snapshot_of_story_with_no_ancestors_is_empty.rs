@@ -49,16 +49,10 @@ fn no_ancestor_story_snapshots_to_empty_bundle_and_restores_as_noop() {
     // of the target's closure. Proves the walker does not vacuum up
     // unrelated story rows just because they exist.
     source
-        .append(
-            "stories",
-            json!({ "id": UNRELATED_A, "depends_on": [] }),
-        )
+        .append("stories", json!({ "id": UNRELATED_A, "depends_on": [] }))
         .expect("seed unrelated A story row");
     source
-        .append(
-            "stories",
-            json!({ "id": UNRELATED_B, "depends_on": [] }),
-        )
+        .append("stories", json!({ "id": UNRELATED_B, "depends_on": [] }))
         .expect("seed unrelated B story row");
 
     source

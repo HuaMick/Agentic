@@ -104,9 +104,9 @@ fn uat_run_pass_refuses_when_ancestor_yaml_says_healthy_but_no_signing_row_exist
     let executor = StubExecutor::always_pass();
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
-    let err = uat
-        .run(LEAF_ID)
-        .expect_err("Pass when ancestor YAML claims healthy but has no signing row must be refused");
+    let err = uat.run(LEAF_ID).expect_err(
+        "Pass when ancestor YAML claims healthy but has no signing row must be refused",
+    );
 
     match err {
         UatError::AncestorNotHealthy {
@@ -153,7 +153,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

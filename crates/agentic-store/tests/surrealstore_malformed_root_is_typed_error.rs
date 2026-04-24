@@ -23,8 +23,7 @@ use tempfile::TempDir;
 fn open_on_a_file_path_returns_typed_open_error() {
     let dir = TempDir::new().expect("create temp dir");
     let file_path = dir.path().join("not-a-directory.txt");
-    fs::write(&file_path, b"this is a file, not a SurrealDB data dir")
-        .expect("write decoy file");
+    fs::write(&file_path, b"this is a file, not a SurrealDB data dir").expect("write decoy file");
 
     let result = SurrealStore::open(&file_path);
     let err = result.expect_err("opening a file path as a store root must fail");
@@ -36,9 +35,7 @@ fn open_on_a_file_path_returns_typed_open_error() {
                 "Open error must name the offending path; got path={path:?}"
             );
         }
-        other => panic!(
-            "expected StoreError::Open for a file path, got {other:?}"
-        ),
+        other => panic!("expected StoreError::Open for a file path, got {other:?}"),
     }
 }
 
@@ -57,9 +54,7 @@ fn open_on_nonexistent_parent_returns_typed_open_error_not_panic() {
                 "Open error must name the offending path; got path={path:?}"
             );
         }
-        other => panic!(
-            "expected StoreError::Open for a nonexistent parent, got {other:?}"
-        ),
+        other => panic!("expected StoreError::Open for a nonexistent parent, got {other:?}"),
     }
 }
 
@@ -69,7 +64,10 @@ fn open_failure_does_not_partially_initialise_a_subsequent_open() {
     // must succeed cleanly — i.e. the failed open did not leave global
     // state behind.
     let bad_parent = TempDir::new().expect("create bad temp dir");
-    let bad = bad_parent.path().join("missing-grandparent").join("missing-parent");
+    let bad = bad_parent
+        .path()
+        .join("missing-grandparent")
+        .join("missing-parent");
     let _ = SurrealStore::open(&bad).expect_err("first open must fail");
 
     let good_dir = TempDir::new().expect("create good temp dir");

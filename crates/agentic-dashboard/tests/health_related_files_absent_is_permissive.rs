@@ -99,7 +99,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -147,19 +148,14 @@ fn assert_permissive_shape_stays_healthy(fixture_yaml: &str, story_id: u32, tag:
 
     let stories_dir = repo_root.join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(
-        stories_dir.join(format!("{story_id}.yml")),
-        fixture_yaml,
-    )
-    .expect("write fixture");
+    fs::write(stories_dir.join(format!("{story_id}.yml")), fixture_yaml).expect("write fixture");
 
     let c0 = commit_all(&repo, "C0 seed", &[]);
 
     // C1: edit a file that would have been covered by a
     // `crates/agentic-uat/src/**` glob — so the test is meaningful
     // (the absent-field behaviour is NOT a strict-equality fallback).
-    fs::write(&target_file, b"// seed\n// edited at C1\n")
-        .expect("rewrite target lib.rs at C1");
+    fs::write(&target_file, b"// seed\n// edited at C1\n").expect("rewrite target lib.rs at C1");
     let c0_commit = repo
         .find_commit(git2::Oid::from_str(&c0).expect("parse C0 oid"))
         .expect("find C0 commit");
@@ -192,11 +188,8 @@ fn assert_permissive_shape_stays_healthy(fixture_yaml: &str, story_id: u32, tag:
         )
         .expect("seed test_runs pass at HEAD");
 
-    let dashboard = Dashboard::with_repo(
-        store.clone(),
-        stories_dir.clone(),
-        PathBuf::from(repo_root),
-    );
+    let dashboard =
+        Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
 
     let rendered = dashboard
         .render_table()
@@ -225,16 +218,8 @@ fn assert_permissive_shape_stays_healthy(fixture_yaml: &str, story_id: u32, tag:
 #[test]
 fn story_whose_related_files_is_absent_or_empty_is_permissive_not_strict_equality() {
     // Shape 1: related_files OMITTED entirely.
-    assert_permissive_shape_stays_healthy(
-        &fixture_omit_yaml(9903),
-        9903,
-        "omit",
-    );
+    assert_permissive_shape_stays_healthy(&fixture_omit_yaml(9903), 9903, "omit");
 
     // Shape 2: related_files: [] explicitly.
-    assert_permissive_shape_stays_healthy(
-        &fixture_empty_array_yaml(9904),
-        9904,
-        "empty-array",
-    );
+    assert_permissive_shape_stays_healthy(&fixture_empty_array_yaml(9904), 9904, "empty-array");
 }

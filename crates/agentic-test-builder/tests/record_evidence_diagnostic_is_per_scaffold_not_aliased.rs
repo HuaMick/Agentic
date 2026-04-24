@@ -167,11 +167,7 @@ fn record_evidence_diagnostic_is_per_scaffold_not_aliased() {
         .get("verdicts")
         .and_then(|v| v.as_array())
         .expect("verdicts must be a JSON array");
-    assert_eq!(
-        verdicts.len(),
-        3,
-        "three scaffolds -> three verdict rows"
-    );
+    assert_eq!(verdicts.len(), 3, "three scaffolds -> three verdict rows");
 
     // Locate each verdict by its scaffold filename.
     let mut alpha_diag: Option<String> = None;
@@ -246,7 +242,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

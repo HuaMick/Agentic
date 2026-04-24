@@ -48,20 +48,19 @@ fn signer_can_be_driven_end_to_end_from_the_allowed_dependency_floor() {
 
     // Tier 2: env wins when no flag.
     std::env::set_var("AGENTIC_SIGNER", "env-val@example.com");
-    let s2 =
-        Signer::resolve(Resolver::new().at_repo(repo_path)).expect("env resolve");
+    let s2 = Signer::resolve(Resolver::new().at_repo(repo_path)).expect("env resolve");
     assert_eq!(s2.as_str(), "env-val@example.com");
 
     // Tier 3: git wins when no flag and no env.
     std::env::remove_var("AGENTIC_SIGNER");
-    let s3 =
-        Signer::resolve(Resolver::new().at_repo(repo_path)).expect("git resolve");
+    let s3 = Signer::resolve(Resolver::new().at_repo(repo_path)).expect("git resolve");
     assert_eq!(s3.as_str(), "floor-test@example.com");
 }
 
 fn init_repo_with_email(root: &Path, email: &str) {
     let repo = git2::Repository::init(root).expect("git init");
     let mut cfg = repo.config().expect("repo config");
-    cfg.set_str("user.name", "test-builder").expect("set user.name");
+    cfg.set_str("user.name", "test-builder")
+        .expect("set user.name");
     cfg.set_str("user.email", email).expect("set user.email");
 }

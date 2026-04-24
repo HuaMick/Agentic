@@ -65,23 +65,23 @@ fn load_cycle_in_depends_on_is_rejected() {
 
     // Act: load the whole directory — cycle detection is directory-scope.
     let result = Story::load_dir(tmp.path());
-    let err = result.expect_err(
-        "a directory whose depends_on edges form a cycle must be rejected",
-    );
+    let err = result.expect_err("a directory whose depends_on edges form a cycle must be rejected");
 
     // Assert: the error is the typed cycle variant, and names at least
     // one of the three participating ids.
     match err {
         StoryError::DependsOnCycle { ref participants } => {
-            let hit = participants.iter().any(|id| *id == 10 || *id == 11 || *id == 12);
+            let hit = participants
+                .iter()
+                .any(|id| *id == 10 || *id == 11 || *id == 12);
             assert!(
                 hit,
                 "DependsOnCycle must name at least one of {{10,11,12}}; got {participants:?}"
             );
         }
-        other => panic!(
-            "expected StoryError::DependsOnCycle naming one of 10/11/12, got {other:?}"
-        ),
+        other => {
+            panic!("expected StoryError::DependsOnCycle naming one of 10/11/12, got {other:?}")
+        }
     }
 }
 
@@ -92,9 +92,7 @@ fn load_self_loop_in_depends_on_is_rejected() {
     write_story(tmp.path(), 7, &[7]);
 
     let result = Story::load_dir(tmp.path());
-    let err = result.expect_err(
-        "a story whose depends_on points at itself must be rejected",
-    );
+    let err = result.expect_err("a story whose depends_on points at itself must be rejected");
 
     match err {
         StoryError::DependsOnCycle { ref participants } => {
@@ -103,8 +101,6 @@ fn load_self_loop_in_depends_on_is_rejected() {
                 "DependsOnCycle must name the self-looping id 7; got {participants:?}"
             );
         }
-        other => panic!(
-            "expected StoryError::DependsOnCycle naming 7, got {other:?}"
-        ),
+        other => panic!("expected StoryError::DependsOnCycle naming 7, got {other:?}"),
     }
 }

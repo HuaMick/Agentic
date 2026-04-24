@@ -150,9 +150,7 @@ fn record_writes_exactly_one_jsonl_with_five_top_level_keys_on_success() {
 
     // Exactly the documented top-level keys, nothing more, nothing
     // less.
-    let obj = row
-        .as_object()
-        .expect("evidence row must be a JSON object");
+    let obj = row.as_object().expect("evidence row must be a JSON object");
     let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
     keys.sort();
     assert_eq!(
@@ -212,7 +210,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

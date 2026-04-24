@@ -58,8 +58,7 @@ fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     let body = format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 cycle-rejection scaffold"
@@ -115,9 +114,7 @@ fn cyclic_corpus_returns_cycle_error_and_touches_nothing() {
     let selector = format!("{ID_A}");
     let err = runner
         .run(&selector)
-        .expect_err(
-            "runner must REFUSE on a cyclic corpus; got a successful run instead",
-        );
+        .expect_err("runner must REFUSE on a cyclic corpus; got a successful run instead");
 
     match err {
         CiRunError::Cycle { participants } => {
@@ -128,16 +125,11 @@ fn cyclic_corpus_returns_cycle_error_and_touches_nothing() {
                  got participants={participants:?}"
             );
         }
-        other => panic!(
-            "expected CiRunError::Cycle naming the offending edge; got {other:?}"
-        ),
+        other => panic!("expected CiRunError::Cycle naming the offending edge; got {other:?}"),
     }
 
     // Zero executor invocations — cycle refusal fires before traversal.
-    let invocations = &calls
-        .lock()
-        .expect("calls mutex poisoned")
-        .invocations;
+    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
     assert!(
         invocations.is_empty(),
         "Cycle refusal must not invoke the executor; got {} invocations: {invocations:?}",

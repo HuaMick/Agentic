@@ -108,9 +108,9 @@ fn merge_refuses_typed_when_start_sha_has_drifted_and_main_is_untouched() {
                 "StartShaDrift must name main's current HEAD; got {actual_main_sha:?}"
             );
         }
-        other => panic!(
-            "merge_run_if_green must return StoryBuildError::StartShaDrift; got {other:?}"
-        ),
+        other => {
+            panic!("merge_run_if_green must return StoryBuildError::StartShaDrift; got {other:?}")
+        }
     }
 
     // Main must be byte-identical to its pre-invocation state.

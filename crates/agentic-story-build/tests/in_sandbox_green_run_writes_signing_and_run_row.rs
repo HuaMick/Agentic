@@ -57,11 +57,8 @@ async fn green_inner_loop_writes_matching_signing_and_run_rows() {
     .expect("write fixture story");
 
     let snapshot_path = work.join("snapshot.json");
-    fs::write(
-        &snapshot_path,
-        r#"{"schema_version":1,"signings":[]}"#,
-    )
-    .expect("write empty snapshot");
+    fs::write(&snapshot_path, r#"{"schema_version":1,"signings":[]}"#)
+        .expect("write empty snapshot");
 
     let runs_root_tmp = TempDir::new().expect("runs root tempdir");
     let runs_root = runs_root_tmp.path().to_path_buf();
@@ -71,9 +68,8 @@ async fn green_inner_loop_writes_matching_signing_and_run_rows() {
     // Stub runtime: canned green NDJSON fixture that story 19
     // shipped; the in-sandbox driver plugs this in via the
     // `runtime_override` field below.
-    let green_fixture = PathBuf::from(
-        "crates/agentic-runtime/tests/fixtures/mock_green_three_pairs.ndjson",
-    );
+    let green_fixture =
+        PathBuf::from("crates/agentic-runtime/tests/fixtures/mock_green_three_pairs.ndjson");
     let mock = MockRuntime::from_fixture(&green_fixture).expect("MockRuntime::from_fixture");
 
     let run_id = "run-green-42".to_string();
@@ -136,7 +132,8 @@ async fn green_inner_loop_writes_matching_signing_and_run_rows() {
     let run_row = &runs[0];
     assert_eq!(run_row["outcome"], json!("green"));
     assert_eq!(
-        run_row["signer"], json!(&signer),
+        run_row["signer"],
+        json!(&signer),
         "runs.signer must be byte-identical to uat_signings.signer"
     );
     let commits = run_row["branch_state"]["commits"]
@@ -147,7 +144,8 @@ async fn green_inner_loop_writes_matching_signing_and_run_rows() {
         "runs.branch_state.commits must be non-empty on green; got {commits:?}"
     );
     assert_eq!(
-        run_row["branch_state"]["merged"], json!(false),
+        run_row["branch_state"]["merged"],
+        json!(false),
         "runs.branch_state.merged is initially false — host flips it to true post-merge; \
          got {}",
         run_row["branch_state"]["merged"]

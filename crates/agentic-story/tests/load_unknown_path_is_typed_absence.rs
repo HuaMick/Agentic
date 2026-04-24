@@ -75,9 +75,9 @@ fn load_dir_unknown_path_is_typed_absence() {
                 "NotFound must carry the path the caller supplied; got path={path:?}"
             );
         }
-        Err(other) => panic!(
-            "expected StoryError::NotFound for a missing directory, got {other:?}"
-        ),
+        Err(other) => {
+            panic!("expected StoryError::NotFound for a missing directory, got {other:?}")
+        }
         Ok(stories) => panic!(
             "loading a nonexistent directory must not succeed; got {} stories",
             stories.len()

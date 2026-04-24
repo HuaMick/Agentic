@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use agentic_ci_record::{Recorder, RecordError, RunInput};
+use agentic_ci_record::{RecordError, Recorder, RunInput};
 use agentic_store::{MemStore, Store};
 
 #[test]

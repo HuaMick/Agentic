@@ -55,12 +55,13 @@ fn load_valid_story_round_trips() {
 
     assert_eq!(story.id, 42, "id must round-trip");
     assert_eq!(
-        story.title,
-        "A valid fixture story for the loader round-trip test",
+        story.title, "A valid fixture story for the loader round-trip test",
         "title must round-trip"
     );
     assert!(
-        story.outcome.starts_with("A developer can load this fixture"),
+        story
+            .outcome
+            .starts_with("A developer can load this fixture"),
         "outcome must round-trip; got {:?}",
         story.outcome
     );
@@ -88,7 +89,8 @@ fn load_valid_story_round_trips() {
         "test file path must round-trip"
     );
     assert!(
-        test.justification.contains("The very scaffold you are reading"),
+        test.justification
+            .contains("The very scaffold you are reading"),
         "test justification must round-trip; got {:?}",
         test.justification
     );

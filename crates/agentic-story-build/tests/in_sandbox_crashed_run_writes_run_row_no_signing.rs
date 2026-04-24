@@ -65,9 +65,8 @@ async fn crashed_subprocess_writes_crashed_row_no_signing_and_truncated_trace() 
     // fixture; we augment that with an explicit crash_code setter
     // on MockRuntime (if present) or rely on the fixture itself to
     // encode the crash.
-    let crash_fixture = PathBuf::from(
-        "crates/agentic-runtime/tests/fixtures/mock_pipe_break.ndjson",
-    );
+    let crash_fixture =
+        PathBuf::from("crates/agentic-runtime/tests/fixtures/mock_pipe_break.ndjson");
     let mock = MockRuntime::from_fixture(&crash_fixture)
         .expect("MockRuntime::from_fixture crash")
         .with_crash_exit_code(137);

@@ -84,9 +84,9 @@ fn cycle_in_depends_on_surfaces_typed_error_not_panic_or_partial_output() {
         Err(DashboardError::Cycle { .. }) => {
             // Correct: typed cycle error surfaced.
         }
-        Err(other) => panic!(
-            "expected DashboardError::Cycle on a two-node cycle; got other error: {other:?}"
-        ),
+        Err(other) => {
+            panic!("expected DashboardError::Cycle on a two-node cycle; got other error: {other:?}")
+        }
         Ok(output) => panic!(
             "frontier render against a cycle must return Err(Cycle), not Ok with partial \
              output; got:\n{output}"

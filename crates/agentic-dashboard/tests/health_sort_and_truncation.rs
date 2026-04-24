@@ -38,8 +38,7 @@ const ID_HEALTHY: u32 = 9404;
 // A 60-character title — definitely over the ~35-char truncation limit
 // the story names. The renderer must truncate this to some prefix
 // followed by a single U+2026 ellipsis.
-const LONG_TITLE_UNHEALTHY: &str =
-    "A very long title that exceeds thirty five characters easily";
+const LONG_TITLE_UNHEALTHY: &str = "A very long title that exceeds thirty five characters easily";
 
 fn fixture(id: u32, title: &str, status: &str) -> String {
     format!(
@@ -71,8 +70,8 @@ depends_on: []
 }
 
 #[test]
-fn rows_sort_unhealthy_under_construction_proposed_healthy_and_long_titles_truncate_with_single_ellipsis()
- {
+fn rows_sort_unhealthy_under_construction_proposed_healthy_and_long_titles_truncate_with_single_ellipsis(
+) {
     let tmp = TempDir::new().expect("tempdir");
     let stories_dir = tmp.path().join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
@@ -171,9 +170,7 @@ fn rows_sort_unhealthy_under_construction_proposed_healthy_and_long_titles_trunc
             .enumerate()
             .find(|(_, line)| line.contains(&id.to_string()))
             .unwrap_or_else(|| {
-                panic!(
-                    "rendered table must contain a row for story {id}; got:\n{rendered}"
-                )
+                panic!("rendered table must contain a row for story {id}; got:\n{rendered}")
             });
         (idx, line)
     };

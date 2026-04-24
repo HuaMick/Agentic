@@ -81,9 +81,7 @@ fn canopy_mode_shows_retired_stories_grouped_by_supersession_chain_with_chain_po
         fixture(
             ID_A_RETIRED,
             "retired",
-            &format!(
-                "\nsuperseded_by: {ID_B_RETIRED}\nretired_reason: |\n  A folded into B.\n"
-            ),
+            &format!("\nsuperseded_by: {ID_B_RETIRED}\nretired_reason: |\n  A folded into B.\n"),
         ),
     )
     .expect("write A");
@@ -92,9 +90,7 @@ fn canopy_mode_shows_retired_stories_grouped_by_supersession_chain_with_chain_po
         fixture(
             ID_B_RETIRED,
             "retired",
-            &format!(
-                "\nsuperseded_by: {ID_C_HEALTHY}\nretired_reason: |\n  B folded into C.\n"
-            ),
+            &format!("\nsuperseded_by: {ID_C_HEALTHY}\nretired_reason: |\n  B folded into C.\n"),
         ),
     )
     .expect("write B");
@@ -199,9 +195,9 @@ fn canopy_mode_shows_retired_stories_grouped_by_supersession_chain_with_chain_po
     }
 
     // A, B, C form one group keyed on C.
-    let a_b_c_group = by_era
-        .get(&(ID_C_HEALTHY as u64))
-        .unwrap_or_else(|| panic!("canopy must group A/B/C under era_head={ID_C_HEALTHY}; got by_era={by_era:?}"));
+    let a_b_c_group = by_era.get(&(ID_C_HEALTHY as u64)).unwrap_or_else(|| {
+        panic!("canopy must group A/B/C under era_head={ID_C_HEALTHY}; got by_era={by_era:?}")
+    });
     for expected in [ID_A_RETIRED, ID_B_RETIRED, ID_C_HEALTHY] {
         assert!(
             a_b_c_group.contains(&(expected as u64)),

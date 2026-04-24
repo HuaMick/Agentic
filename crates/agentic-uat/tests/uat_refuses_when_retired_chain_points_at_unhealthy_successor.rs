@@ -137,9 +137,9 @@ fn uat_run_pass_refuses_naming_successor_not_retired_intermediary_when_chain_end
     let executor = StubExecutor::always_pass();
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
-    let err = uat
-        .run(LEAF_ID)
-        .expect_err("Pass on a leaf whose retired ancestor's successor is unhealthy must be refused");
+    let err = uat.run(LEAF_ID).expect_err(
+        "Pass on a leaf whose retired ancestor's successor is unhealthy must be refused",
+    );
 
     match err {
         UatError::AncestorNotHealthy { ancestor_id, .. } => {
@@ -186,7 +186,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

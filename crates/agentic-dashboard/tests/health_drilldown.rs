@@ -32,8 +32,7 @@ const UAT_SIGNED_AT: &str = "2026-04-18T12:34:56Z";
 
 /// Three distinct failing basenames so we can assert each one appears
 /// independently and there is no "truncated at N" elision.
-const FAILING_TESTS: [&str; 3] =
-    ["alpha_test.rs", "beta_test.rs", "gamma_longer_name_test.rs"];
+const FAILING_TESTS: [&str; 3] = ["alpha_test.rs", "beta_test.rs", "gamma_longer_name_test.rs"];
 
 const UNHEALTHY_FIXTURE: &str = r#"id: 9601
 title: "An unhealthy story for the drill-down view"

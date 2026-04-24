@@ -43,8 +43,7 @@ fn fixture_yaml(id: u32, depends_on: &[u32]) -> String {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 CLI selectors-via-binary scaffold"
@@ -76,7 +75,8 @@ fn init_repo_and_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -147,14 +147,17 @@ fn run_with_stub(selector: &str, repo_root: &Path, store_path: &Path) -> (i32, V
     // pointed at — proving the wire carried the selector all the way
     // through the runner to the row-writer.
     let ids: Vec<u32> = if code == 0 {
-        let store =
-            SurrealStore::open(store_path).expect("re-open configured store must succeed");
+        let store = SurrealStore::open(store_path).expect("re-open configured store must succeed");
         let rows = store
             .query("test_runs", &|_| true)
             .expect("test_runs query must succeed");
         let mut ids: Vec<u32> = rows
             .iter()
-            .filter_map(|row| row.get("story_id").and_then(|v| v.as_u64()).map(|n| n as u32))
+            .filter_map(|row| {
+                row.get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32)
+            })
             .collect();
         ids.sort();
         ids
@@ -168,11 +171,8 @@ fn run_with_stub(selector: &str, repo_root: &Path, store_path: &Path) -> (i32, V
 #[test]
 fn plus_id_selector_via_binary_covers_target_plus_ancestors_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (code, ids, stderr) = run_with_stub(
-        &format!("+{ID_TARGET}"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (code, ids, stderr) =
+        run_with_stub(&format!("+{ID_TARGET}"), repo_tmp.path(), store_tmp.path());
     assert_eq!(
         code, 0,
         "`+{ID_TARGET}` with stub-pass executor must exit 0; stderr:\n{stderr}"
@@ -194,11 +194,8 @@ fn plus_id_selector_via_binary_covers_target_plus_ancestors_and_exits_0() {
 #[test]
 fn id_plus_selector_via_binary_covers_target_plus_descendants_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (code, ids, stderr) = run_with_stub(
-        &format!("{ID_TARGET}+"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (code, ids, stderr) =
+        run_with_stub(&format!("{ID_TARGET}+"), repo_tmp.path(), store_tmp.path());
     assert_eq!(
         code, 0,
         "`{ID_TARGET}+` with stub-pass executor must exit 0; stderr:\n{stderr}"
@@ -220,11 +217,8 @@ fn id_plus_selector_via_binary_covers_target_plus_descendants_and_exits_0() {
 #[test]
 fn plus_id_plus_selector_via_binary_covers_full_subtree_and_exits_0() {
     let (repo_tmp, store_tmp) = setup();
-    let (code, ids, stderr) = run_with_stub(
-        &format!("+{ID_TARGET}+"),
-        repo_tmp.path(),
-        store_tmp.path(),
-    );
+    let (code, ids, stderr) =
+        run_with_stub(&format!("+{ID_TARGET}+"), repo_tmp.path(), store_tmp.path());
     assert_eq!(
         code, 0,
         "`+{ID_TARGET}+` with stub-pass executor must exit 0; stderr:\n{stderr}"

@@ -125,9 +125,10 @@ fn test_build_plan_emits_json_and_record_writes_evidence_through_the_binary() {
          got status={:?}\nstdout:\n{plan_stdout}\nstderr:\n{plan_stderr}",
         plan_output.status
     );
-    let plan_json: serde_json::Value = serde_json::from_str(plan_stdout.trim()).unwrap_or_else(
-        |e| panic!("plan stdout must be valid JSON; err={e}; stdout:\n{plan_stdout}"),
-    );
+    let plan_json: serde_json::Value =
+        serde_json::from_str(plan_stdout.trim()).unwrap_or_else(|e| {
+            panic!("plan stdout must be valid JSON; err={e}; stdout:\n{plan_stdout}")
+        });
     let plan_arr = plan_json
         .as_array()
         .expect("plan stdout must be a JSON array");
@@ -232,7 +233,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

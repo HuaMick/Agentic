@@ -119,6 +119,7 @@ fn init_repo_without_email(root: &Path) {
     // but we deliberately leave user.email unset so the resolver's git
     // tier finds nothing).
     let mut cfg = repo.config().expect("repo config");
-    cfg.set_str("user.name", "test-builder").expect("set user.name");
+    cfg.set_str("user.name", "test-builder")
+        .expect("set user.name");
     // user.email intentionally NOT set.
 }

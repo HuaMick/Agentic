@@ -111,9 +111,7 @@ fn restore_seeds_destination_store_and_second_restore_is_typed_refusal() {
     let second = dest.restore(&snapshot);
     match second {
         Err(StoreError::AlreadyRestored) => {}
-        other => panic!(
-            "second restore must return StoreError::AlreadyRestored; got {other:?}"
-        ),
+        other => panic!("second restore must return StoreError::AlreadyRestored; got {other:?}"),
     }
 
     // After the refusal, the store state must not have doubled.

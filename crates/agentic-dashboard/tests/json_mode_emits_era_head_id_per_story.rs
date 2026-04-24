@@ -171,9 +171,8 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
     let canopy_json = dashboard
         .render_canopy_json()
         .expect("render_canopy_json should succeed");
-    let canopy: Value = serde_json::from_str(&canopy_json).unwrap_or_else(|e| {
-        panic!("canopy JSON must parse: {e}; raw:\n{canopy_json}")
-    });
+    let canopy: Value = serde_json::from_str(&canopy_json)
+        .unwrap_or_else(|e| panic!("canopy JSON must parse: {e}; raw:\n{canopy_json}"));
     let canopy_stories = canopy
         .get("stories")
         .and_then(|v| v.as_array())
@@ -243,9 +242,8 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
     let frontier_json = dashboard
         .render_frontier_json()
         .expect("render_frontier_json should succeed");
-    let frontier: Value = serde_json::from_str(&frontier_json).unwrap_or_else(|e| {
-        panic!("frontier JSON must parse: {e}; raw:\n{frontier_json}")
-    });
+    let frontier: Value = serde_json::from_str(&frontier_json)
+        .unwrap_or_else(|e| panic!("frontier JSON must parse: {e}; raw:\n{frontier_json}"));
     let frontier_stories = frontier
         .get("stories")
         .and_then(|v| v.as_array())

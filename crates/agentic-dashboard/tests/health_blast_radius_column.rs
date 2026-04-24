@@ -137,9 +137,7 @@ fn blast_radius_column_lists_immediate_downstreams_and_transitive_count() {
     let downstream: Vec<u64> = s_row
         .get("downstream")
         .and_then(|v| v.as_array())
-        .unwrap_or_else(|| {
-            panic!("S row must carry a `downstream` array; got: {s_row}")
-        })
+        .unwrap_or_else(|| panic!("S row must carry a `downstream` array; got: {s_row}"))
         .iter()
         .filter_map(|v| v.as_u64())
         .collect();
@@ -179,7 +177,9 @@ fn blast_radius_column_lists_immediate_downstreams_and_transitive_count() {
     let leaf_blocks_total = leaf_row
         .get("blocks_total")
         .and_then(|v| v.as_u64())
-        .unwrap_or_else(|| panic!("LEAF_ONLY row must carry integer blocks_total; got: {leaf_row}"));
+        .unwrap_or_else(|| {
+            panic!("LEAF_ONLY row must carry integer blocks_total; got: {leaf_row}")
+        });
     assert_eq!(
         leaf_blocks_total, 0,
         "A leaf frontier story must render with blocks_total == 0; got {leaf_blocks_total}"

@@ -69,7 +69,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -180,11 +181,8 @@ fn related_files_glob_double_star_crosses_path_separators_and_is_rooted_at_its_p
             )
             .expect("seed test_runs pass");
 
-        let dashboard = Dashboard::with_repo(
-            store.clone(),
-            stories_dir.clone(),
-            PathBuf::from(repo_root),
-        );
+        let dashboard =
+            Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
         let rendered = dashboard
             .render_table()
             .expect("render_table should succeed on nested-change scenario");
@@ -252,11 +250,8 @@ fn related_files_glob_double_star_crosses_path_separators_and_is_rooted_at_its_p
             )
             .expect("seed test_runs pass");
 
-        let dashboard = Dashboard::with_repo(
-            store.clone(),
-            stories_dir.clone(),
-            PathBuf::from(repo_root),
-        );
+        let dashboard =
+            Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
         let rendered = dashboard
             .render_table()
             .expect("render_table should succeed on sibling-change scenario");

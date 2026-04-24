@@ -119,9 +119,9 @@ fn uat_run_pass_permits_when_retired_ancestor_has_no_successor() {
              {TERMINAL_RETIRED_ID} has no successor to promote — refusing here \
              would permanently block every descendant"
         ),
-        Err(other) => panic!(
-            "terminal-retirement must permit Pass; got unexpected error {other:?}"
-        ),
+        Err(other) => {
+            panic!("terminal-retirement must permit Pass; got unexpected error {other:?}")
+        }
     };
     assert!(
         matches!(verdict, Verdict::Pass),
@@ -159,7 +159,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

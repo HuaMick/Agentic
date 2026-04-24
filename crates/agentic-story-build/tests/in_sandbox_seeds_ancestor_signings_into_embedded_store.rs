@@ -95,9 +95,7 @@ async fn seeding_refuses_and_writes_crashed_row_when_snapshot_misses_an_ancestor
 
     let err = StoryBuild::run_in_sandbox(cfg, Arc::clone(&store))
         .await
-        .expect_err(
-            "run_in_sandbox must refuse typed when the snapshot does not satisfy the gate",
-        );
+        .expect_err("run_in_sandbox must refuse typed when the snapshot does not satisfy the gate");
 
     // The typed refusal names the missing ancestor so the operator
     // can chase the right signing, not a generic "gate refused" line.
@@ -135,7 +133,12 @@ async fn seeding_refuses_and_writes_crashed_row_when_snapshot_misses_an_ancestor
     );
     let err_text = row["error"]
         .as_str()
-        .or_else(|| row["iterations"].as_array().and_then(|a| a.last()).and_then(|i| i["error"].as_str()))
+        .or_else(|| {
+            row["iterations"]
+                .as_array()
+                .and_then(|a| a.last())
+                .and_then(|i| i["error"].as_str())
+        })
         .unwrap_or("");
     assert!(
         err_text.to_ascii_lowercase().contains("ancestor")

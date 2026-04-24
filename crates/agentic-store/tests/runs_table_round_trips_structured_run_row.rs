@@ -120,7 +120,9 @@ fn runs_table_round_trips_structured_run_row() {
         "story_yaml_snapshot must be 64 hex chars; got {snapshot:?}"
     );
     assert!(
-        snapshot.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        snapshot
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
         "story_yaml_snapshot must be lowercase hex; got {snapshot:?}"
     );
 
@@ -131,7 +133,10 @@ fn runs_table_round_trips_structured_run_row() {
     assert_eq!(iterations.len(), 1, "one recorded iteration must appear");
 
     // build_config round-trips byte-identical.
-    assert_eq!(row["build_config"], json!({ "max_inner_loop_iterations": 3 }));
+    assert_eq!(
+        row["build_config"],
+        json!({ "max_inner_loop_iterations": 3 })
+    );
 
     // trace_ndjson_path is a non-empty string relative to the runs
     // root (no leading slash, no `..`).

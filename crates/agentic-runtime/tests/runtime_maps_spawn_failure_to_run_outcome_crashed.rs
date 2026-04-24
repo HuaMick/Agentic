@@ -88,9 +88,9 @@ async fn crash_mid_stream_maps_to_outcome_crashed_ok_not_err() {
                  got {error:?}"
             );
         }
-        other => panic!(
-            "outcome must be Outcome::Crashed for a mid-stream pipe break; got {other:?}"
-        ),
+        other => {
+            panic!("outcome must be Outcome::Crashed for a mid-stream pipe break; got {other:?}")
+        }
     }
 
     // Trace file is readable (possibly truncated) and contains the

@@ -70,11 +70,7 @@ fn uat_signer_flag_wins_over_git_and_empty_flag_is_rejected_and_env_is_tier_2() 
     let repo_root = repo_tmp.path();
     let stories_dir = repo_root.join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(
-        stories_dir.join(format!("{STORY_ID}.yml")),
-        FIXTURE_YAML,
-    )
-    .expect("write fixture");
+    fs::write(stories_dir.join(format!("{STORY_ID}.yml")), FIXTURE_YAML).expect("write fixture");
 
     init_repo_with_email(repo_root, "git-person@example.com");
 
@@ -134,8 +130,7 @@ fn uat_signer_flag_wins_over_git_and_empty_flag_is_rejected_and_env_is_tier_2() 
             "uat_signer_flag_lands_on_signing_row.rs",
             "uat_signer_flag_lands_on_signing_row_B.rs",
         );
-    fs::write(stories_b.join(format!("{STORY_ID_B}.yml")), &fixture_b)
-        .expect("write fixture b");
+    fs::write(stories_b.join(format!("{STORY_ID_B}.yml")), &fixture_b).expect("write fixture b");
     init_repo_with_email(repo_b, "git-person@example.com");
     let store_b_tmp = TempDir::new().expect("store b tempdir");
     let assert_b = Command::cargo_bin("agentic")
@@ -178,8 +173,7 @@ fn uat_signer_flag_wins_over_git_and_empty_flag_is_rejected_and_env_is_tier_2() 
     let stories_c = repo_c.join("stories");
     fs::create_dir_all(&stories_c).expect("stories c");
     let fixture_c = FIXTURE_YAML.replace("90901", &STORY_ID_C.to_string());
-    fs::write(stories_c.join(format!("{STORY_ID_C}.yml")), &fixture_c)
-        .expect("write c");
+    fs::write(stories_c.join(format!("{STORY_ID_C}.yml")), &fixture_c).expect("write c");
     init_repo_with_email(repo_c, "git-person@example.com");
     let store_c_tmp = TempDir::new().expect("store c");
     let assert_c = Command::cargo_bin("agentic")
@@ -220,7 +214,8 @@ fn init_repo_with_email(root: &Path, email: &str) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", email).expect("set user.email");
     }
     let mut index = repo.index().expect("repo index");

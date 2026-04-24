@@ -40,8 +40,8 @@ fn resolve_image_tag_prefers_per_sha_then_falls_back_to_latest() {
     let sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string();
 
     // Case 1: per-sha tag IS locally present — resolver returns it.
-    let resolver_with_sha = ImageTagResolver::new(sha.clone())
-        .with_local_tag_present(format!("agentic-sandbox:{sha}"));
+    let resolver_with_sha =
+        ImageTagResolver::new(sha.clone()).with_local_tag_present(format!("agentic-sandbox:{sha}"));
     let choice_with_sha = resolver_with_sha.resolve();
     match &choice_with_sha {
         ImageTagChoice::PerSha { tag } => {
@@ -51,9 +51,9 @@ fn resolve_image_tag_prefers_per_sha_then_falls_back_to_latest() {
                 "PerSha tag must be agentic-sandbox:<sha>; got {tag:?}"
             );
         }
-        other => panic!(
-            "resolve_image_tag must prefer the per-sha tag when present; got {other:?}"
-        ),
+        other => {
+            panic!("resolve_image_tag must prefer the per-sha tag when present; got {other:?}")
+        }
     }
 
     // Case 2: per-sha tag is NOT present, `:latest` IS — resolver
@@ -89,4 +89,3 @@ fn resolve_image_tag_prefers_per_sha_then_falls_back_to_latest() {
         ),
     }
 }
-

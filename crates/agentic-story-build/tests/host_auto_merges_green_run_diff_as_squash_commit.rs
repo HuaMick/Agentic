@@ -154,7 +154,11 @@ fn merge_run_if_green_squashes_branch_diff_onto_main_with_documented_commit_body
     let shas = rows[0]["branch_state"]["merge_shas"]
         .as_array()
         .expect("merge_shas must be an array");
-    assert_eq!(shas.len(), 1, "merge_shas must contain exactly one sha; got {shas:?}");
+    assert_eq!(
+        shas.len(),
+        1,
+        "merge_shas must contain exactly one sha; got {shas:?}"
+    );
     assert_eq!(shas[0], json!(squash_sha));
 }
 

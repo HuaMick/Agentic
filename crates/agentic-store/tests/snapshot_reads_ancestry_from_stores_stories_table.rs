@@ -98,8 +98,7 @@ fn stores_stories_table_beats_filesystem_ancestry_fixture() {
          acceptance:\n  tests: []\n  uat: \"\"\n\
          guidance: \"This YAML is bait for a filesystem-fallback impl.\"\n"
     );
-    fs::write(lie_dir.path().join(format!("{A_ID}.yml")), a_yaml)
-        .expect("write lying A fixture");
+    fs::write(lie_dir.path().join(format!("{A_ID}.yml")), a_yaml).expect("write lying A fixture");
     fs::write(
         lie_dir.path().join(format!("{DECOY_ANCESTOR_ID}.yml")),
         decoy_yaml,
@@ -161,7 +160,8 @@ fn stores_stories_table_beats_filesystem_ancestry_fixture() {
          the drift this test exists to catch."
     );
     assert_eq!(
-        only_row["verdict"], json!("pass"),
+        only_row["verdict"],
+        json!("pass"),
         "B's signing must round-trip its verdict"
     );
 

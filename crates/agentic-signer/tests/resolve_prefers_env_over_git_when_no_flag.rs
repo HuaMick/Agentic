@@ -54,6 +54,7 @@ fn resolve_prefers_env_over_git_when_no_flag() {
 fn init_repo_with_email(root: &Path, email: &str) {
     let repo = git2::Repository::init(root).expect("git init");
     let mut cfg = repo.config().expect("repo config");
-    cfg.set_str("user.name", "test-builder").expect("set user.name");
+    cfg.set_str("user.name", "test-builder")
+        .expect("set user.name");
     cfg.set_str("user.email", email).expect("set user.email");
 }

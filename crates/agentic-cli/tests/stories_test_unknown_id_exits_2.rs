@@ -29,8 +29,7 @@ fn fixture_yaml(id: u32, depends_on: &[u32]) -> String {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 CLI unknown-id exit-2 scaffold"
@@ -62,7 +61,8 @@ fn init_repo_and_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

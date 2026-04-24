@@ -83,11 +83,13 @@ fn branch_state_start_sha_end_sha_commits_come_from_real_git_observation() {
     let bs = &row["branch_state"];
 
     assert_eq!(
-        bs["start_sha"], json!(baseline_sha),
+        bs["start_sha"],
+        json!(baseline_sha),
         "branch_state.start_sha must equal the pre-branch HEAD SHA"
     );
     assert_eq!(
-        bs["end_sha"], json!(commit_2_sha),
+        bs["end_sha"],
+        json!(commit_2_sha),
         "branch_state.end_sha must equal the second commit's SHA"
     );
 
@@ -104,7 +106,8 @@ fn branch_state_start_sha_end_sha_commits_come_from_real_git_observation() {
         let author_field = commits[i]["author"].as_str().unwrap_or_default();
         let subject_field = commits[i]["subject"].as_str().unwrap_or_default();
         assert_eq!(
-            sha_field, *expected_sha.as_str(),
+            sha_field,
+            *expected_sha.as_str(),
             "commits[{i}].sha mismatch"
         );
         assert!(
@@ -133,7 +136,11 @@ fn commit_all(repo: &Repository, msg: &str) -> String {
     let tree = repo.find_tree(tree_oid).expect("find tree");
     let sig = Signature::now("test-builder", "test@agentic.local").expect("sig");
 
-    let parent = repo.head().ok().and_then(|h| h.target()).and_then(|oid| repo.find_commit(oid).ok());
+    let parent = repo
+        .head()
+        .ok()
+        .and_then(|h| h.target())
+        .and_then(|oid| repo.find_commit(oid).ok());
     let parents: Vec<&git2::Commit> = parent.iter().collect();
 
     let new_oid = repo

@@ -62,9 +62,9 @@ fn stories_health_json_flag_emits_parseable_object_with_stories_and_summary_keys
         )
     });
 
-    let obj = parsed.as_object().unwrap_or_else(|| {
-        panic!("top-level JSON must be an object; got: {parsed}")
-    });
+    let obj = parsed
+        .as_object()
+        .unwrap_or_else(|| panic!("top-level JSON must be an object; got: {parsed}"));
 
     let stories = obj
         .get("stories")
@@ -97,7 +97,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

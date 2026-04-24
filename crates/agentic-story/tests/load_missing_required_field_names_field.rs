@@ -49,9 +49,7 @@ fn load_missing_required_field_names_field() {
     fs::write(&path, MISSING_OUTCOME_YAML).expect("write fixture");
 
     let result = Story::load(&path);
-    let err = result.expect_err(
-        "a story missing the required `outcome` field must be rejected",
-    );
+    let err = result.expect_err("a story missing the required `outcome` field must be rejected");
 
     // The error must be the typed schema-violation variant, not a generic
     // parse error or a bubbled-up I/O error. The variant carries the
@@ -63,8 +61,6 @@ fn load_missing_required_field_names_field() {
                 "SchemaViolation must name the missing field `outcome`; got field={field:?}"
             );
         }
-        other => panic!(
-            "expected StoryError::SchemaViolation naming `outcome`, got {other:?}"
-        ),
+        other => panic!("expected StoryError::SchemaViolation naming `outcome`, got {other:?}"),
     }
 }

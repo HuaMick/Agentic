@@ -18,8 +18,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use agentic_test_builder::{ScaffoldClassification, TestBuilder};
 use agentic_story::Story;
+use agentic_test_builder::{ScaffoldClassification, TestBuilder};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -118,8 +118,10 @@ fn classify_scaffold_returns_typed_enum_matching_three_gate_rule() {
     for case in &cases {
         let tmp = TempDir::new().expect("repo tempdir");
         let repo_root = tmp.path();
-        let scaffold_rel =
-            format!("crates/fixture-classify-crate/tests/classify_{}.rs", case.name);
+        let scaffold_rel = format!(
+            "crates/fixture-classify-crate/tests/classify_{}.rs",
+            case.name
+        );
         let scaffold_abs = repo_root.join(&scaffold_rel);
 
         // Workspace + crate.
@@ -263,7 +265,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

@@ -61,8 +61,8 @@ fn load_absent_build_config_is_none_not_synthesised_default() {
 
     // Load must succeed — omitting build_config is the shape every
     // existing story has today and must keep working.
-    let story: Story = Story::load(&path)
-        .expect("a story that omits `build_config` must load successfully");
+    let story: Story =
+        Story::load(&path).expect("a story that omits `build_config` must load successfully");
 
     // Absent block must produce None. The distinction between "author
     // had no opinion" (None) and "author accepted the defaults"

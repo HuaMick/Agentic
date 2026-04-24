@@ -153,9 +153,7 @@ fn record_classifies_compile_red_correctly_across_rustc_ice() {
         .expect("verdicts must be a JSON array");
     assert_eq!(verdicts.len(), 1, "one verdict per acceptance test");
 
-    let verdict = verdicts[0]
-        .as_object()
-        .expect("verdict must be an object");
+    let verdict = verdicts[0].as_object().expect("verdict must be an object");
     let red_path = verdict
         .get("red_path")
         .and_then(|v| v.as_str())
@@ -177,7 +175,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

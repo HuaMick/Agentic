@@ -67,9 +67,8 @@ async fn exhausted_inner_loop_writes_run_row_no_signing_and_non_empty_trace() {
     // the budget without ever greening. Story 19 ships this fixture
     // at `mock_budget_five_pairs.ndjson` — we pass max=3 below so
     // the runtime stops at iteration 3.
-    let budget_fixture = PathBuf::from(
-        "crates/agentic-runtime/tests/fixtures/mock_budget_five_pairs.ndjson",
-    );
+    let budget_fixture =
+        PathBuf::from("crates/agentic-runtime/tests/fixtures/mock_budget_five_pairs.ndjson");
     let mock =
         MockRuntime::from_fixture(&budget_fixture).expect("MockRuntime::from_fixture budget");
 
@@ -88,10 +87,9 @@ async fn exhausted_inner_loop_writes_run_row_no_signing_and_non_empty_trace() {
         model: "claude-sonnet-4-6".to_string(),
     };
 
-    let outcome =
-        StoryBuild::run_in_sandbox_with_runtime(cfg, Arc::clone(&store), Arc::new(mock))
-            .await
-            .expect("run_in_sandbox on exhausted fixture must return Ok(Outcome::...) rather than Err");
+    let outcome = StoryBuild::run_in_sandbox_with_runtime(cfg, Arc::clone(&store), Arc::new(mock))
+        .await
+        .expect("run_in_sandbox on exhausted fixture must return Ok(Outcome::...) rather than Err");
 
     assert!(
         matches!(outcome, Outcome::InnerLoopExhausted { .. }),
@@ -129,7 +127,8 @@ async fn exhausted_inner_loop_writes_run_row_no_signing_and_non_empty_trace() {
         "iterations.length must equal the budget; got {iterations:?}"
     );
     assert_eq!(
-        row["branch_state"]["merged"], json!(false),
+        row["branch_state"]["merged"],
+        json!(false),
         "exhausted run must have branch_state.merged == false; got {}",
         row["branch_state"]["merged"]
     );

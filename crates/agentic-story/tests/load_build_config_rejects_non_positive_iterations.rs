@@ -68,9 +68,8 @@ fn load_build_config_rejects_zero_iterations_with_typed_error_naming_field_and_v
     let path = dir.path().join("1703.yml");
     fs::write(&path, fixture_with_iterations("0", 1703)).expect("write fixture");
 
-    let err = Story::load(&path).expect_err(
-        "a build_config.max_inner_loop_iterations of 0 must be rejected",
-    );
+    let err = Story::load(&path)
+        .expect_err("a build_config.max_inner_loop_iterations of 0 must be rejected");
 
     match err {
         StoryError::BuildConfigInvalidIterations { value } => {
@@ -104,9 +103,8 @@ fn load_build_config_rejects_negative_iterations_with_typed_error_carrying_signe
     let path = dir.path().join("1704.yml");
     fs::write(&path, fixture_with_iterations("-5", 1704)).expect("write fixture");
 
-    let err = Story::load(&path).expect_err(
-        "a negative build_config.max_inner_loop_iterations must be rejected",
-    );
+    let err = Story::load(&path)
+        .expect_err("a negative build_config.max_inner_loop_iterations must be rejected");
 
     match err {
         StoryError::BuildConfigInvalidIterations { value } => {
@@ -140,9 +138,8 @@ fn load_build_config_rejects_string_iterations_with_typed_type_mismatch() {
     let path = dir.path().join("1705.yml");
     fs::write(&path, fixture_with_iterations("\"five\"", 1705)).expect("write fixture");
 
-    let err = Story::load(&path).expect_err(
-        "a string build_config.max_inner_loop_iterations must be rejected",
-    );
+    let err = Story::load(&path)
+        .expect_err("a string build_config.max_inner_loop_iterations must be rejected");
 
     match err {
         StoryError::BuildConfigTypeMismatch {

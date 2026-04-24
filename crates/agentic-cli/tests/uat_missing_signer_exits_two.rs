@@ -129,7 +129,8 @@ fn agentic_uat_with_no_signer_resolvable_exits_two_and_writes_no_rows() {
 fn init_repo_without_email(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     let mut cfg = repo.config().expect("repo config");
-    cfg.set_str("user.name", "test-builder").expect("set user.name");
+    cfg.set_str("user.name", "test-builder")
+        .expect("set user.name");
     // user.email intentionally NOT set.
     let _ = cfg;
     // Need a committable baseline so the dirty-tree check passes and

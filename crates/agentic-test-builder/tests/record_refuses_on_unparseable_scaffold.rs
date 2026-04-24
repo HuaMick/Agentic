@@ -98,7 +98,8 @@ fn record_refuses_with_scaffold_parse_error_naming_path_and_parser_error() {
     match result {
         Err(TestBuilderError::ScaffoldParseError { file, parse_error }) => {
             assert_eq!(
-                file, scaffold_path,
+                file,
+                scaffold_path,
                 "ScaffoldParseError must name the unparseable scaffold path; got {}",
                 file.display()
             );
@@ -161,7 +162,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

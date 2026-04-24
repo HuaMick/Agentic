@@ -162,10 +162,10 @@ fn record_emits_preserved_verdict_without_probing_when_classification_is_preserv
     // PRESERVE, record must NOT probe it, and the new evidence JSONL
     // row must carry verdict "preserved".
     let builder = TestBuilder::new(repo_root);
-    let _outcome = builder
-        .record(STORY_ID)
-        .expect("record must succeed (not return ScaffoldNotRed) when a green scaffold's \
-                 classification under the three-gate rule is PRESERVE");
+    let _outcome = builder.record(STORY_ID).expect(
+        "record must succeed (not return ScaffoldNotRed) when a green scaffold's \
+                 classification under the three-gate rule is PRESERVE",
+    );
 
     // Assert: a new evidence JSONL was written under evidence/runs/<id>/.
     let files: Vec<_> = fs::read_dir(&evidence_dir)
@@ -221,7 +221,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

@@ -60,8 +60,8 @@ fn load_related_files_absent_is_empty_vec_not_parse_error() {
 
     // Load must succeed — omitting related_files is the shape every
     // existing story has today and must keep working.
-    let story: Story = Story::load(&path)
-        .expect("a story that omits `related_files` must load successfully");
+    let story: Story =
+        Story::load(&path).expect("a story that omits `related_files` must load successfully");
 
     // `related_files` must be a Vec<String>, and it must be empty.
     // Typed as Vec<String> (not Option<Vec<String>>) so downstream code

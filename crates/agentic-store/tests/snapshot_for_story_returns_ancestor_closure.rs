@@ -43,31 +43,19 @@ fn snapshot_of_leaf_carries_mid_and_root_signings_only() {
     // mechanism pinned in story 4's guidance ("Ancestry fixture
     // mechanism"). Closure walks leaf -> mid -> root via `depends_on`.
     store
-        .append(
-            "stories",
-            json!({ "id": ROOT_ID, "depends_on": [] }),
-        )
+        .append("stories", json!({ "id": ROOT_ID, "depends_on": [] }))
         .expect("seed root story row");
     store
-        .append(
-            "stories",
-            json!({ "id": MID_ID, "depends_on": [ROOT_ID] }),
-        )
+        .append("stories", json!({ "id": MID_ID, "depends_on": [ROOT_ID] }))
         .expect("seed mid story row");
     store
-        .append(
-            "stories",
-            json!({ "id": LEAF_ID, "depends_on": [MID_ID] }),
-        )
+        .append("stories", json!({ "id": LEAF_ID, "depends_on": [MID_ID] }))
         .expect("seed leaf story row");
     // Unrelated fixture row — present in the stories table but not in
     // the leaf's ancestry closure. Proves the walker does not pick up
     // unrelated rows just because they exist.
     store
-        .append(
-            "stories",
-            json!({ "id": UNRELATED_ID, "depends_on": [] }),
-        )
+        .append("stories", json!({ "id": UNRELATED_ID, "depends_on": [] }))
         .expect("seed unrelated story row");
 
     // Root ancestor: has a pass signing.

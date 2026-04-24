@@ -108,7 +108,8 @@ fn record_refuses_with_scaffold_missing_naming_the_absent_path() {
     match result {
         Err(TestBuilderError::ScaffoldMissing { file }) => {
             assert_eq!(
-                file, absent_path,
+                file,
+                absent_path,
                 "ScaffoldMissing must name the absent scaffold path; got {}",
                 file.display()
             );
@@ -173,7 +174,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

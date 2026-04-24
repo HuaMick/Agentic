@@ -87,7 +87,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -248,11 +249,8 @@ fn absent_related_files_stays_permissive_while_new_ancestor_rule_fires_on_siblin
         )
         .expect("seed L_SIBLING tests pass");
 
-    let dashboard = Dashboard::with_repo(
-        store.clone(),
-        stories_dir.clone(),
-        PathBuf::from(repo_root),
-    );
+    let dashboard =
+        Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
     let rendered = dashboard
         .render_json()
         .expect("render_json should succeed on the four-story fixture");
@@ -280,7 +278,8 @@ fn absent_related_files_stays_permissive_while_new_ancestor_rule_fires_on_siblin
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| panic!("L_PERMISSIVE row must carry health"));
     assert_eq!(
-        perm_health, "healthy",
+        perm_health,
+        "healthy",
         "L_PERMISSIVE has `related_files` absent (story 9 permissive-absent \
          rule), its UAT commit is older than HEAD, and its only ancestor \
          A classifies healthy — the permissive-absent rule must be \

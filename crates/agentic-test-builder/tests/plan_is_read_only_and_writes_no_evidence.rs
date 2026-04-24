@@ -70,8 +70,7 @@ fn plan_writes_no_files_and_leaves_git_status_porcelain_byte_identical() {
     // plan-is-read-only claim requires that a dirty tree is NOT a
     // refusal condition for plan; the planner returns normally and
     // leaves the dirt where it was.
-    fs::write(repo_root.join("dirty-over-here.txt"), b"unrelated\n")
-        .expect("write dirty file");
+    fs::write(repo_root.join("dirty-over-here.txt"), b"unrelated\n").expect("write dirty file");
 
     let porcelain_before = git_porcelain(repo_root);
     let evidence_dir = repo_root.join(format!("evidence/runs/{STORY_ID}"));
@@ -136,7 +135,8 @@ fn init_repo_and_commit_seed(root: &Path) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

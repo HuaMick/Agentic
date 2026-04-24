@@ -56,8 +56,11 @@ fn selector_with_unknown_id_returns_typed_unknown_story_error_naming_the_id() {
     let tmp = TempDir::new().expect("tempdir");
     let stories_dir = tmp.path().join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(stories_dir.join(format!("{ID_KNOWN}.yml")), fixture(ID_KNOWN))
-        .expect("write known fixture");
+    fs::write(
+        stories_dir.join(format!("{ID_KNOWN}.yml")),
+        fixture(ID_KNOWN),
+    )
+    .expect("write known fixture");
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let dashboard = Dashboard::new(store, stories_dir, HEAD_SHA.to_string());

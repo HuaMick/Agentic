@@ -254,15 +254,21 @@ fn render_json_emits_stories_and_summary_with_full_shas_and_null_absent_fields()
     }
 
     // (5) Summary counts add up to stories.len().
-    let counted: u64 = ["healthy", "unhealthy", "under_construction", "proposed", "error"]
-        .iter()
-        .map(|k| {
-            summary
-                .get(*k)
-                .and_then(|v| v.as_u64())
-                .unwrap_or_else(|| panic!("summary.{k} must be an unsigned integer; got: {summary:?}"))
-        })
-        .sum();
+    let counted: u64 = [
+        "healthy",
+        "unhealthy",
+        "under_construction",
+        "proposed",
+        "error",
+    ]
+    .iter()
+    .map(|k| {
+        summary
+            .get(*k)
+            .and_then(|v| v.as_u64())
+            .unwrap_or_else(|| panic!("summary.{k} must be an unsigned integer; got: {summary:?}"))
+    })
+    .sum();
     assert_eq!(
         counted,
         stories.len() as u64,

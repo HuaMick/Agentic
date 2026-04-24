@@ -51,9 +51,8 @@ fn restored_signings_survive_surrealstore_drop_and_reopen() {
     // `snapshot_for_story` on it.
     let snapshot: StoreSnapshot = {
         let source_dir = TempDir::new().expect("create source temp dir");
-        let source: Box<dyn Store> = Box::new(
-            SurrealStore::open(source_dir.path()).expect("open source SurrealStore"),
-        );
+        let source: Box<dyn Store> =
+            Box::new(SurrealStore::open(source_dir.path()).expect("open source SurrealStore"));
         source
             .append(
                 "uat_signings",
@@ -101,9 +100,8 @@ fn restored_signings_survive_surrealstore_drop_and_reopen() {
     // Phase 1: open the destination SurrealStore, restore the
     // snapshot, then drop the store entirely.
     {
-        let dest: Box<dyn Store> = Box::new(
-            SurrealStore::open(root.path()).expect("open fresh destination SurrealStore"),
-        );
+        let dest: Box<dyn Store> =
+            Box::new(SurrealStore::open(root.path()).expect("open fresh destination SurrealStore"));
         dest.restore(&snapshot)
             .expect("restore into fresh SurrealStore must succeed");
         // Sanity: pre-drop read-back sees the three rows.
@@ -152,9 +150,9 @@ fn restored_signings_survive_surrealstore_drop_and_reopen() {
         let story_id = snap_row["story_id"]
             .as_i64()
             .expect("snapshot row story_id must be i64");
-        let got = by_story.get(&story_id).unwrap_or_else(|| {
-            panic!("post-reopen store missing row for story_id={story_id}")
-        });
+        let got = by_story
+            .get(&story_id)
+            .unwrap_or_else(|| panic!("post-reopen store missing row for story_id={story_id}"));
         assert_eq!(
             got["story_id"], snap_row["story_id"],
             "story_id must survive drop+reopen byte-identical for story {story_id}"

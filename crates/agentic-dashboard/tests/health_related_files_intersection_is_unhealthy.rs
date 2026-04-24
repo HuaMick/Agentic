@@ -75,7 +75,8 @@ fn init_repo(root: &Path) -> git2::Repository {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }
@@ -121,19 +122,14 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
 
     let stories_dir = repo_root.join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(
-        stories_dir.join(format!("{STORY_ID}.yml")),
-        fixture_yaml(),
-    )
-    .expect("write fixture");
+    fs::write(stories_dir.join(format!("{STORY_ID}.yml")), fixture_yaml()).expect("write fixture");
 
     // C0: seed. The UAT signing will reference this commit.
     let c0 = commit_all(&repo, "C0 seed", &[]);
 
     // C1: edit the watched file — directly inside the glob. This is
     // the intersecting change the staleness rule must fire on.
-    fs::write(&watched_file, b"// seed\n// edited at C1\n")
-        .expect("rewrite watched lib.rs at C1");
+    fs::write(&watched_file, b"// seed\n// edited at C1\n").expect("rewrite watched lib.rs at C1");
     let c0_commit = repo
         .find_commit(git2::Oid::from_str(&c0).expect("parse C0 oid"))
         .expect("find C0 commit");
@@ -169,11 +165,8 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
         )
         .expect("seed test_runs pass at HEAD");
 
-    let dashboard = Dashboard::with_repo(
-        store.clone(),
-        stories_dir.clone(),
-        PathBuf::from(repo_root),
-    );
+    let dashboard =
+        Dashboard::with_repo(store.clone(), stories_dir.clone(), PathBuf::from(repo_root));
 
     // Table-mode classification must be `unhealthy`.
     let rendered = dashboard
@@ -183,9 +176,7 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
         .lines()
         .find(|line| line.contains(&STORY_ID.to_string()))
         .unwrap_or_else(|| {
-            panic!(
-                "rendered table must contain a row for story {STORY_ID}; got:\n{rendered}"
-            )
+            panic!("rendered table must contain a row for story {STORY_ID}; got:\n{rendered}")
         });
     assert!(
         row.contains("unhealthy"),
@@ -202,8 +193,9 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
     let json_output = dashboard
         .render_json()
         .expect("render_json should succeed on the same fixture");
-    let parsed: Value = serde_json::from_str(&json_output)
-        .unwrap_or_else(|e| panic!("render_json output must parse as JSON: {e}; raw:\n{json_output}"));
+    let parsed: Value = serde_json::from_str(&json_output).unwrap_or_else(|e| {
+        panic!("render_json output must parse as JSON: {e}; raw:\n{json_output}")
+    });
     let stories = parsed
         .get("stories")
         .and_then(|v| v.as_array())
@@ -211,21 +203,19 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
     let this_story = stories
         .iter()
         .find(|s| s.get("id").and_then(|v| v.as_u64()) == Some(STORY_ID as u64))
-        .unwrap_or_else(|| panic!("stories[] must include an entry for id {STORY_ID}; got: {parsed}"));
-
-    let stale = this_story
-        .get("stale_related_files")
         .unwrap_or_else(|| {
-            panic!(
-                "unhealthy-for-file-reason row must carry a `stale_related_files` \
+            panic!("stories[] must include an entry for id {STORY_ID}; got: {parsed}")
+        });
+
+    let stale = this_story.get("stale_related_files").unwrap_or_else(|| {
+        panic!(
+            "unhealthy-for-file-reason row must carry a `stale_related_files` \
                  field so the reason channel is distinguishable from failing tests; \
                  got row: {this_story}"
-            )
-        });
-    let stale_arr = stale.as_array().unwrap_or_else(|| {
-        panic!(
-            "`stale_related_files` must be a JSON array; got {stale:?} on row {this_story}"
         )
+    });
+    let stale_arr = stale.as_array().unwrap_or_else(|| {
+        panic!("`stale_related_files` must be a JSON array; got {stale:?} on row {this_story}")
     });
     assert!(
         !stale_arr.is_empty(),
@@ -251,7 +241,9 @@ fn story_whose_related_files_changed_since_uat_commit_classifies_unhealthy_for_f
     let failing_tests = this_story
         .get("failing_tests")
         .and_then(|v| v.as_array())
-        .unwrap_or_else(|| panic!("failing_tests must be emitted as an array; got row {this_story}"));
+        .unwrap_or_else(|| {
+            panic!("failing_tests must be emitted as an array; got row {this_story}")
+        });
     assert!(
         failing_tests.is_empty(),
         "failing_tests must be empty on a row that is unhealthy ONLY because \

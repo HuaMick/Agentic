@@ -53,8 +53,7 @@ fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     let body = format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 unknown-id scaffold"
@@ -121,17 +120,12 @@ fn unknown_id_in_selector_returns_unknown_story_error_and_touches_nothing() {
                 "UnknownStory must name the missing id {ID_MISSING}; got {id}"
             );
         }
-        other => panic!(
-            "expected CiRunError::UnknownStory {{ id: {ID_MISSING} }}; got {other:?}"
-        ),
+        other => panic!("expected CiRunError::UnknownStory {{ id: {ID_MISSING} }}; got {other:?}"),
     }
 
     // Zero executor invocations — the runner must refuse BEFORE touching
     // the executor.
-    let invocations = &calls
-        .lock()
-        .expect("calls mutex poisoned")
-        .invocations;
+    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
     assert!(
         invocations.is_empty(),
         "UnknownStory refusal must not invoke the executor; got {} invocations: {invocations:?}",

@@ -61,9 +61,8 @@ fn load_related_files_rejects_non_string_entry_with_typed_error_naming_field() {
     fs::write(&path, NON_STRING_ENTRY_YAML).expect("write fixture");
 
     let result = Story::load(&path);
-    let err = result.expect_err(
-        "a story whose `related_files` contains a non-string entry must be rejected",
-    );
+    let err = result
+        .expect_err("a story whose `related_files` contains a non-string entry must be rejected");
 
     // The error must be a typed loader variant (not a generic parse
     // error or a bubbled-up I/O error) whose payload names the

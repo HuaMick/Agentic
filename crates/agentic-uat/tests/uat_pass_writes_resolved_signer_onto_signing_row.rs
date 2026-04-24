@@ -103,7 +103,11 @@ fn uat_pass_writes_resolved_signer_onto_signing_row_tier_3_then_tier_2() {
         .get("commit")
         .and_then(|v| v.as_str())
         .expect("signing row must still carry a string `commit` field");
-    assert_eq!(commit.len(), 40, "commit must be a full SHA; got {commit:?}");
+    assert_eq!(
+        commit.len(),
+        40,
+        "commit must be a full SHA; got {commit:?}"
+    );
 
     // --- Subtest 2: tier-2 env var beats git. ---
     // Fresh fixture, fresh store, fresh repo — re-use a separate story
@@ -119,8 +123,7 @@ fn uat_pass_writes_resolved_signer_onto_signing_row_tier_3_then_tier_2() {
             "Fixture story for story 18 signer-on-signing-row",
             "Fixture story for story 18 env-tier",
         );
-    fs::write(stories_dir_2.join(format!("{STORY_ID_2}.yml")), &fixture2)
-        .expect("write fixture 2");
+    fs::write(stories_dir_2.join(format!("{STORY_ID_2}.yml")), &fixture2).expect("write fixture 2");
     init_repo_with_email(repo_root_2, "git-person@example.com");
 
     std::env::set_var("AGENTIC_SIGNER", "env-person@example.com");
@@ -152,7 +155,8 @@ fn init_repo_with_email(root: &Path, email: &str) {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", email).expect("set user.email");
     }
     let mut index = repo.index().expect("repo index");

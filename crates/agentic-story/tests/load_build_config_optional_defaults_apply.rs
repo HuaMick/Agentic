@@ -60,8 +60,8 @@ fn load_build_config_optional_defaults_apply() {
     let path = dir.path().join("42.yml");
     fs::write(&path, NO_BUILD_CONFIG_YAML).expect("write fixture");
 
-    let story: Story = Story::load(&path)
-        .expect("a story without a build_config block must still load cleanly");
+    let story: Story =
+        Story::load(&path).expect("a story without a build_config block must still load cleanly");
 
     // Absent block => None. NOT a silently-substituted default struct.
     assert_eq!(

@@ -97,8 +97,8 @@ fn agentic_uat_without_verdict_flag_exits_two_writes_no_rows_and_leaves_yaml_unc
     // at all, must not be followed by an append when args are
     // malformed. `SurrealStore::open` is safe to call on a tempdir
     // that may or may not have been touched.
-    let store = SurrealStore::open(&store_path)
-        .expect("SurrealStore open on the tempdir must succeed");
+    let store =
+        SurrealStore::open(&store_path).expect("SurrealStore open on the tempdir must succeed");
     let rows = store
         .query("uat_signings", &|_| true)
         .expect("uat_signings query must succeed");
@@ -121,7 +121,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

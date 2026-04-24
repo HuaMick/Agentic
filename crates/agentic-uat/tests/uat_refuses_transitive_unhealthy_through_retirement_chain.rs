@@ -187,9 +187,9 @@ fn uat_run_pass_refuses_naming_first_bad_link_when_retirement_and_depends_on_com
     let executor = StubExecutor::always_pass();
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
-    let err = uat
-        .run(LEAF_ID)
-        .expect_err("Pass through a retirement chain onto a transitively-broken foundation must be refused");
+    let err = uat.run(LEAF_ID).expect_err(
+        "Pass through a retirement chain onto a transitively-broken foundation must be refused",
+    );
 
     match err {
         UatError::AncestorNotHealthy { ancestor_id, .. } => {
@@ -239,7 +239,8 @@ fn init_repo_and_commit_seed(root: &Path) -> String {
     let repo = git2::Repository::init(root).expect("git init");
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", "test@agentic.local")
             .expect("set user.email");
     }

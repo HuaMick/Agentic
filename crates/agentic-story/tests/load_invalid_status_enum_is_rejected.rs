@@ -100,9 +100,7 @@ fn load_invalid_status_enum_is_rejected() {
     fs::write(&path, INVALID_STATUS_YAML).expect("write fixture");
 
     let result = Story::load(&path);
-    let err = result.expect_err(
-        "a story with an out-of-enum `status` value must be rejected",
-    );
+    let err = result.expect_err("a story with an out-of-enum `status` value must be rejected");
 
     // The error must name both the field (`status`) and the offending
     // value (`deprecated`) so the error message is actionable without
@@ -135,8 +133,8 @@ fn load_retired_status_round_trips_as_variant() {
     let path = dir.path().join("42.yml");
     fs::write(&path, RETIRED_STATUS_YAML).expect("write fixture");
 
-    let story = Story::load(&path)
-        .expect("status: retired must load cleanly under the five-value enum");
+    let story =
+        Story::load(&path).expect("status: retired must load cleanly under the five-value enum");
     assert_eq!(
         story.status,
         Status::Retired,

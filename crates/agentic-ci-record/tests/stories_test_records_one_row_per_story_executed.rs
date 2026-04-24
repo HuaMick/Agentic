@@ -55,8 +55,7 @@ fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
         let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
         format!("depends_on:\n{}", lines.join("\n"))
     };
-    let test_file =
-        format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
+    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
     let body = format!(
         r#"id: {id}
 title: "Fixture {id} for story-12 rows-per-executed scaffold"

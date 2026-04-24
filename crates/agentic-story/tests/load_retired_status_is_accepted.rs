@@ -100,8 +100,7 @@ fn load_retired_status_is_accepted() {
     let path = dir.path().join("7.yml");
     fs::write(&path, RETIRED_WITH_SUCCESSOR_YAML).expect("write fixture");
 
-    let story: Story =
-        Story::load(&path).expect("a story with status: retired must load cleanly");
+    let story: Story = Story::load(&path).expect("a story with status: retired must load cleanly");
 
     assert_eq!(
         story.status,
@@ -136,9 +135,8 @@ fn load_retired_terminal_is_accepted_with_none_options() {
     let path = dir.path().join("8.yml");
     fs::write(&path, RETIRED_TERMINAL_YAML).expect("write fixture");
 
-    let story: Story = Story::load(&path).expect(
-        "a story with status: retired and no superseded_by/retired_reason must load",
-    );
+    let story: Story = Story::load(&path)
+        .expect("a story with status: retired and no superseded_by/retired_reason must load");
 
     assert_eq!(
         story.status,

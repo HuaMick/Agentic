@@ -189,7 +189,8 @@ fn init_repo_and_commit_seed(root: &Path, email: &str) -> String {
     // signer resolver's tier-3 fallback will return.
     {
         let mut cfg = repo.config().expect("repo config");
-        cfg.set_str("user.name", "test-builder").expect("set user.name");
+        cfg.set_str("user.name", "test-builder")
+            .expect("set user.name");
         cfg.set_str("user.email", email).expect("set user.email");
     }
 

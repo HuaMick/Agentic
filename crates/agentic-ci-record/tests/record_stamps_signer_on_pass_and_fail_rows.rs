@@ -77,10 +77,9 @@ fn record_stamps_resolved_signer_on_pass_row_and_on_fail_row_symmetrically() {
         .expect("recorder must have upserted a Pass row keyed by story_id");
 
     // Additive: signer is present and equals the resolved value.
-    let pass_signer = pass_row
-        .get("signer")
-        .and_then(|v| v.as_str())
-        .expect("Pass row must carry a string `signer` field (additive; test_runs-uat_signings symmetry)");
+    let pass_signer = pass_row.get("signer").and_then(|v| v.as_str()).expect(
+        "Pass row must carry a string `signer` field (additive; test_runs-uat_signings symmetry)",
+    );
     assert!(
         !pass_signer.trim().is_empty(),
         "Pass row `signer` must be non-empty; got {pass_signer:?}"

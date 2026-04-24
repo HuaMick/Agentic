@@ -64,8 +64,7 @@ fn load_build_config_is_parsed() {
     let path = dir.path().join("42.yml");
     fs::write(&path, BUILD_CONFIG_POPULATED_YAML).expect("write fixture");
 
-    let story: Story =
-        Story::load(&path).expect("a story with a valid build_config must load");
+    let story: Story = Story::load(&path).expect("a story with a valid build_config must load");
 
     let build_config: &BuildConfig = story
         .build_config
@@ -94,8 +93,7 @@ fn load_build_config_is_parsed() {
         "status must round-trip unchanged"
     );
     assert_eq!(
-        story.title,
-        "Fixture story carrying a populated build_config",
+        story.title, "Fixture story carrying a populated build_config",
         "title must round-trip unchanged"
     );
 }

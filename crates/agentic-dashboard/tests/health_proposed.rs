@@ -61,8 +61,11 @@ fn story_with_status_proposed_renders_as_proposed_even_when_evidence_exists() {
     let tmp = TempDir::new().expect("tempdir");
     let stories_dir = tmp.path().join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
-    fs::write(stories_dir.join(format!("{STORY_ID}.yml")), PROPOSED_FIXTURE)
-        .expect("write proposed fixture");
+    fs::write(
+        stories_dir.join(format!("{STORY_ID}.yml")),
+        PROPOSED_FIXTURE,
+    )
+    .expect("write proposed fixture");
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
 
@@ -108,9 +111,7 @@ fn story_with_status_proposed_renders_as_proposed_even_when_evidence_exists() {
         .lines()
         .find(|line| line.contains(&STORY_ID.to_string()))
         .unwrap_or_else(|| {
-            panic!(
-                "rendered table must contain a row for story {STORY_ID}; got:\n{rendered}"
-            )
+            panic!("rendered table must contain a row for story {STORY_ID}; got:\n{rendered}")
         });
     assert!(
         row.contains("proposed"),

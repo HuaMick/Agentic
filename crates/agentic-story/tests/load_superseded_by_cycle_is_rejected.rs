@@ -69,9 +69,8 @@ fn load_superseded_by_multi_hop_cycle_is_rejected() {
     write_retired(tmp.path(), 102, Some(100));
 
     let result = Story::load_dir(tmp.path());
-    let err = result.expect_err(
-        "a superseded_by cycle across three stories must be rejected at load time",
-    );
+    let err = result
+        .expect_err("a superseded_by cycle across three stories must be rejected at load time");
 
     match err {
         StoryError::SupersededByCycle { ref participants } => {
@@ -99,9 +98,7 @@ fn load_superseded_by_self_loop_is_rejected() {
     write_retired(tmp.path(), 200, Some(200));
 
     let result = Story::load_dir(tmp.path());
-    let err = result.expect_err(
-        "a superseded_by self-loop must be rejected at load time",
-    );
+    let err = result.expect_err("a superseded_by self-loop must be rejected at load time");
 
     match err {
         StoryError::SupersededByCycle { ref participants } => {
@@ -111,8 +108,6 @@ fn load_superseded_by_self_loop_is_rejected() {
                  {participants:?}"
             );
         }
-        other => panic!(
-            "expected StoryError::SupersededByCycle naming 200, got {other:?}"
-        ),
+        other => panic!("expected StoryError::SupersededByCycle naming 200, got {other:?}"),
     }
 }

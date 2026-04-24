@@ -119,7 +119,9 @@ fn load_build_config_round_trips_iterations_and_models_in_order() {
         "title must round-trip alongside build_config"
     );
     assert!(
-        story.outcome.starts_with("A developer can load this fixture"),
+        story
+            .outcome
+            .starts_with("A developer can load this fixture"),
         "outcome must round-trip alongside build_config; got {:?}",
         story.outcome
     );

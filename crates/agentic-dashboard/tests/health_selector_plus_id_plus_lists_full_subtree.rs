@@ -120,7 +120,15 @@ fn plus_id_plus_selector_returns_full_subtree_deduplicated_in_single_topological
         .collect();
 
     // All five subtree members present.
-    for &expected in [ID_ANC_ROOT, ID_ANC_MID, ID_TARGET, ID_DESC_MID, ID_DESC_LEAF].iter() {
+    for &expected in [
+        ID_ANC_ROOT,
+        ID_ANC_MID,
+        ID_TARGET,
+        ID_DESC_MID,
+        ID_DESC_LEAF,
+    ]
+    .iter()
+    {
         assert!(
             ids_ordered.contains(&(expected as u64)),
             "+TARGET+ must include id {expected}; got {ids_ordered:?}"
