@@ -61,25 +61,32 @@ acceptance:
   - file: crates/agentic-ci-record/tests/record_stamps_signer_on_pass_and_fail_rows.rs
     justification: |
       Proves signer symmetry with `uat_signings` at the
-      `test_runs` row shape: given a `Recorder::record(...,
-      SignerSource::Resolve)` call for story `<pass-id>` with
-      passing tests in an environment where the signer resolves
-      to `dev@example.com` (via story 18's four-tier chain —
-      flag → `AGENTIC_SIGNER` env → `git config user.email` →
-      typed error), the row written to `test_runs` carries
-      `signer == "dev@example.com"` alongside the existing
-      `story_id`, `verdict=pass`, `failing_tests=[]`, `commit`,
-      `ran_at` fields. The same test then drives a Fail row for
-      story `<fail-id>` under the same resolution scaffold and
-      asserts the Fail row ALSO carries `signer ==
-      "dev@example.com"` — symmetry is unconditional, not
-      outcome-gated. A Pass row without a signer or a Fail row
-      without a signer would both fail this test. Without this,
-      the dashboard (story 3) can tell who signed a UAT verdict
-      but not who ran the CI that reddened a `test_runs` row,
-      and the cross-table asymmetry surfaces as a permanent
-      lint at the dashboard join. Pairs with story 18's
-      `record_writes_resolved_signer_onto_test_runs_row.rs`,
+      `test_runs` row shape: given a
+      `Recorder::record_with_signer(input, SignerSource::Resolve)`
+      call for story `<pass-id>` with passing tests in an
+      environment where the signer resolves to `dev@example.com`
+      (via story 18's four-tier chain — flag → `AGENTIC_SIGNER`
+      env → `git config user.email` → typed error), the row
+      written to `test_runs` carries `signer == "dev@example.com"`
+      alongside the existing `story_id`, `verdict=pass`,
+      `failing_tests=[]`, `commit`, `ran_at` fields. The same
+      test then drives a Fail row for story `<fail-id>` under
+      the same resolution scaffold, again via
+      `record_with_signer(..., SignerSource::Resolve)`, and
+      asserts the Fail row ALSO carries
+      `signer == "dev@example.com"` — symmetry is unconditional,
+      not outcome-gated. A Pass row without a signer or a Fail
+      row without a signer would both fail this test. The test
+      calls `record_with_signer` (the explicit-source 2-arg
+      form) rather than the 1-arg `record(input)` auto-resolve
+      default so the scaffold names the signer path at the
+      callsite and a reader can see "this is the signer
+      contract" without chasing into the recorder. Without
+      this, the dashboard (story 3) can tell who signed a UAT
+      verdict but not who ran the CI that reddened a
+      `test_runs` row, and the cross-table asymmetry surfaces
+      as a permanent lint at the dashboard join. Pairs with
+      story 18's `record_writes_resolved_signer_onto_test_runs_row.rs`,
       which exercises the same contract from the signer-crate
       side; this test is story 2's owner-side pin of the
       additive field.
@@ -241,6 +248,32 @@ guidance: |
     misconfigured CI runner cannot silently stamp empty
     signers. The field is additive — every existing field on
     the row contract above remains unchanged.
+
+    Recorder API surface — two callables, one contract. The
+    signer amendment is delivered as a NEW public method
+    `Recorder::record_with_signer(input: RunInput,
+    source: SignerSource) -> Result<(), RecordError>` — the
+    explicit 2-arg form the signer-landing acceptance test
+    (`record_stamps_signer_on_pass_and_fail_rows.rs`) exercises
+    as `recorder.record_with_signer(input,
+    SignerSource::Resolve)`. The pre-existing 1-arg
+    `Recorder::record(input) -> Result<(), RecordError>`
+    remains valid and is the default auto-resolve path:
+    internally it is equivalent to
+    `record_with_signer(input, SignerSource::Resolve)` and is
+    what the five preserved acceptance tests
+    (`record_pass.rs`, `record_fail.rs`,
+    `record_replaces_not_appends.rs`,
+    `record_malformed_input_preserves_row.rs`,
+    `record_standalone_resilience.rs`) continue to drive. Both
+    forms resolve via the four-tier chain and both stamp the
+    additive `signer` field on the emitted row; the 2-arg form
+    simply makes the signer source explicit at the callsite so
+    a reader of the signer-landing scaffold sees "this is the
+    signer contract" without chasing into the recorder. No
+    existing caller needs to migrate; new callers that want
+    to document "I am exercising the signer path" at the
+    callsite use `record_with_signer`.
 
   Relationship to story 1.
     Story 1 writes to `uat_signings`. This story writes to
