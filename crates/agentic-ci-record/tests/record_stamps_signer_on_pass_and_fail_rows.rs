@@ -68,7 +68,7 @@ fn record_stamps_resolved_signer_on_pass_row_and_on_fail_row_symmetrically() {
     let recorder_pass = Recorder::new(store_pass.clone());
 
     recorder_pass
-        .record(RunInput::pass(STORY_ID_PASS), SignerSource::Resolve)
+        .record_with_signer(RunInput::pass(STORY_ID_PASS), SignerSource::Resolve)
         .expect("Pass record must succeed when signer is resolvable");
 
     let pass_row = store_pass
@@ -132,7 +132,7 @@ fn record_stamps_resolved_signer_on_pass_row_and_on_fail_row_symmetrically() {
         "crates/agentic-foo/tests/b_broken.rs".to_string(),
     ];
     recorder_fail
-        .record(
+        .record_with_signer(
             RunInput::fail(STORY_ID_FAIL, failing_paths.clone()),
             SignerSource::Resolve,
         )
