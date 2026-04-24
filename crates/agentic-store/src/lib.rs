@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod surrealstore;
@@ -57,6 +58,10 @@ pub use surrealstore::SurrealStore;
 /// halfway through the first write. The variant carries the offending
 /// path plus the underlying cause so logs name both without a consumer
 /// having to stringly-match.
+///
+/// Story 4 also adds [`StoreError::AlreadyRestored`] for the `restore`
+/// operation's one-shot semantics: a destination store that already has
+/// rows in the target table refuses the seed to avoid accidental merges.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -80,6 +85,12 @@ pub enum StoreError {
         /// `surrealdb::Error` (engine-level failure).
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
+
+    /// Restore attempted on a destination store that already has rows in the
+    /// target table. Restore is one-shot; re-seeding would cause an accidental
+    /// merge across distinct runs. See story 4's guidance for the one-shot
+    /// semantics contract.
+    AlreadyRestored,
 }
 
 impl std::fmt::Display for StoreError {
@@ -88,6 +99,12 @@ impl std::fmt::Display for StoreError {
             StoreError::Backend(msg) => write!(f, "store backend error: {msg}"),
             StoreError::Open { path, source } => {
                 write!(f, "could not open store at {}: {}", path.display(), source)
+            }
+            StoreError::AlreadyRestored => {
+                write!(
+                    f,
+                    "restore failed: destination store already has rows in the target table"
+                )
             }
         }
     }
@@ -98,8 +115,34 @@ impl std::error::Error for StoreError {
         match self {
             StoreError::Backend(_) => None,
             StoreError::Open { source, .. } => Some(source.as_ref()),
+            StoreError::AlreadyRestored => None,
         }
     }
+}
+
+/// A snapshot of ancestor-closure signings for a given story.
+///
+/// Produced by [`Store::snapshot_for_story`] to capture the transitive-
+/// ancestor closure of `uat_signings` rows for a story id, and consumed
+/// by [`Store::restore`] to seed a fresh destination store with those
+/// signings.
+///
+/// The snapshot is serializable to JSON (the wire format for the sandbox
+/// in story 20); the `schema_version` is pinned at 1 per story 20's
+/// mount contract, and `signings` carries the rows selected by the
+/// closure traversal. Rows for the subject story itself and unrelated
+/// stories are excluded.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StoreSnapshot {
+    /// The schema version of this snapshot. Pinned at 1 for story 20's
+    /// mount contract; future changes to the snapshot shape bump this.
+    pub schema_version: u32,
+
+    /// The `uat_signings` rows in the transitive-ancestor closure,
+    /// serialized as schemaless JSON. Each row carries at minimum
+    /// `story_id`, `verdict`, `signer`, and `commit` fields (the shape
+    /// pinned by story 4's ancestor-closure and round-trip tests).
+    pub signings: Vec<Value>,
 }
 
 /// The persistence abstraction every runtime crate writes through.
@@ -134,6 +177,32 @@ pub trait Store: Send + Sync {
     /// closures at the call site work as expected.
     fn query(&self, table: &str, filter: &dyn Fn(&Value) -> bool)
         -> Result<Vec<Value>, StoreError>;
+
+    /// Produce a snapshot of the transitive-ancestor closure of `uat_signings`
+    /// rows for the given `story_id`.
+    ///
+    /// The ancestry graph is read from a `stories` table in the same store,
+    /// with rows shaped `{ "id": <i64>, "depends_on": [<i64>, ...] }`. The
+    /// closure is computed via depth-first search; a story whose row is absent
+    /// from the `stories` table is treated as having no ancestors (empty
+    /// closure). Rows for the subject story itself and unrelated stories are
+    /// excluded from the snapshot.
+    ///
+    /// This is the story-20 snapshot/restore primitive: the snapshot is the
+    /// ancestor-closure slice, nothing more. See story 4's guidance for the
+    /// contract in full.
+    fn snapshot_for_story(&self, story_id: i64) -> Result<StoreSnapshot, StoreError>;
+
+    /// Restore a snapshot produced by [`snapshot_for_story`] into this store,
+    /// making its `uat_signings` rows available to subsequent reads (in
+    /// particular to the ancestor-gate helper).
+    ///
+    /// Restore is one-shot: a destination store that already has rows in the
+    /// `uat_signings` table refuses the seed with [`StoreError::AlreadyRestored`]
+    /// to avoid accidental merges of ancestries across distinct runs.
+    ///
+    /// [`snapshot_for_story`]: Store::snapshot_for_story
+    fn restore(&self, snapshot: &StoreSnapshot) -> Result<(), StoreError>;
 }
 
 /// The row kind stored for a given table.
@@ -254,6 +323,76 @@ impl Store for MemStore {
             }
         }
         Ok(out)
+    }
+
+    fn snapshot_for_story(&self, story_id: i64) -> Result<StoreSnapshot, StoreError> {
+        // Compute the transitive-ancestor closure via DFS. The stories table
+        // carries rows shaped { "id": <i64>, "depends_on": [<i64>, ...] }.
+        // A story absent from the table is treated as having no ancestors.
+        let stories = self.query("stories", &|_| true)?;
+        let mut story_map: HashMap<i64, Vec<i64>> = HashMap::new();
+        for row in stories {
+            if let Some(id) = row.get("id").and_then(|v| v.as_i64()) {
+                let depends_on = row
+                    .get("depends_on")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                story_map.insert(id, depends_on);
+            }
+        }
+
+        // DFS to compute transitive closure (ancestors only, not self).
+        let mut closure = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = vec![story_id];
+
+        while let Some(current) = stack.pop() {
+            if visited.contains(&current) {
+                continue;
+            }
+            visited.insert(current);
+
+            if let Some(depends_on) = story_map.get(&current) {
+                for &ancestor in depends_on {
+                    // Add ancestors to the closure, but NOT the subject story itself.
+                    if ancestor != story_id {
+                        closure.insert(ancestor);
+                    }
+                    stack.push(ancestor);
+                }
+            }
+        }
+
+        // Query uat_signings for rows matching the ancestor closure (excluding
+        // the subject story itself).
+        let signings = self.query("uat_signings", &|row| {
+            if let Some(sid) = row.get("story_id").and_then(|v| v.as_i64()) {
+                closure.contains(&sid)
+            } else {
+                false
+            }
+        })?;
+
+        Ok(StoreSnapshot {
+            schema_version: 1,
+            signings,
+        })
+    }
+
+    fn restore(&self, snapshot: &StoreSnapshot) -> Result<(), StoreError> {
+        // Check if the destination already has rows in uat_signings.
+        let existing = self.query("uat_signings", &|_| true)?;
+        if !existing.is_empty() {
+            return Err(StoreError::AlreadyRestored);
+        }
+
+        // Append each signing row from the snapshot.
+        for signing in &snapshot.signings {
+            self.append("uat_signings", signing.clone())?;
+        }
+
+        Ok(())
     }
 }
 

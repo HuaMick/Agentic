@@ -48,7 +48,7 @@ use surrealkv::{LSMIterator, Mode, Tree, TreeBuilder};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::{Store, StoreError};
+use crate::{Store, StoreError, StoreSnapshot};
 
 /// Durable [`Store`] implementation backed by the `surrealkv` embedded
 /// engine. Constructed via [`SurrealStore::open`]. See module docs for
@@ -305,6 +305,77 @@ impl Store for SurrealStore {
         drop(txn);
         drop(tree);
         Ok(out)
+    }
+
+    fn snapshot_for_story(&self, story_id: i64) -> Result<StoreSnapshot, StoreError> {
+        // Compute the transitive-ancestor closure via DFS. The stories table
+        // carries rows shaped { "id": <i64>, "depends_on": [<i64>, ...] }.
+        // A story absent from the table is treated as having no ancestors.
+        let stories = self.query("stories", &|_| true)?;
+        let mut story_map: std::collections::HashMap<i64, Vec<i64>> =
+            std::collections::HashMap::new();
+        for row in stories {
+            if let Some(id) = row.get("id").and_then(|v| v.as_i64()) {
+                let depends_on = row
+                    .get("depends_on")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                story_map.insert(id, depends_on);
+            }
+        }
+
+        // DFS to compute transitive closure (ancestors only, not self).
+        let mut closure = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut stack = vec![story_id];
+
+        while let Some(current) = stack.pop() {
+            if visited.contains(&current) {
+                continue;
+            }
+            visited.insert(current);
+
+            if let Some(depends_on) = story_map.get(&current) {
+                for &ancestor in depends_on {
+                    // Add ancestors to the closure, but NOT the subject story itself.
+                    if ancestor != story_id {
+                        closure.insert(ancestor);
+                    }
+                    stack.push(ancestor);
+                }
+            }
+        }
+
+        // Query uat_signings for rows matching the ancestor closure (excluding
+        // the subject story itself).
+        let signings = self.query("uat_signings", &|row| {
+            if let Some(sid) = row.get("story_id").and_then(|v| v.as_i64()) {
+                closure.contains(&sid)
+            } else {
+                false
+            }
+        })?;
+
+        Ok(StoreSnapshot {
+            schema_version: 1,
+            signings,
+        })
+    }
+
+    fn restore(&self, snapshot: &StoreSnapshot) -> Result<(), StoreError> {
+        // Check if the destination already has rows in uat_signings.
+        let existing = self.query("uat_signings", &|_| true)?;
+        if !existing.is_empty() {
+            return Err(StoreError::AlreadyRestored);
+        }
+
+        // Append each signing row from the snapshot.
+        for signing in &snapshot.signings {
+            self.append("uat_signings", signing.clone())?;
+        }
+
+        Ok(())
     }
 }
 
