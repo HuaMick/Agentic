@@ -6,7 +6,7 @@ outcome: |
   loader as a typed value, so any downstream consumer of a `Story`
   reads the author's budget and model selection without re-parsing
   the YAML.
-status: proposed
+status: under_construction
 patterns: []
 acceptance:
   tests:
