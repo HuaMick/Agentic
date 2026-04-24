@@ -91,6 +91,8 @@ struct StoryHealth {
     lvl: i32,
     immediate_downstreams: Vec<u32>,
     blocks_total: u32,
+    status: Status,
+    superseded_by: Option<u32>,
 }
 
 /// The five health statuses.
@@ -216,7 +218,7 @@ impl Dashboard {
     /// Render the dashboard as JSON (all stories, backward compatible with story 3).
     pub fn render_json(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
-        let json = self.format_json(&stories, ViewType::All);
+        let json = self.format_json_with_all(&stories, &stories, ViewType::All);
         Ok(json)
     }
 
@@ -231,7 +233,20 @@ impl Dashboard {
     pub fn render_frontier_json(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
         let frontier = self.filter_frontier(&stories);
-        let json = self.format_json(&frontier, ViewType::Frontier);
+        let json = self.format_json_with_all(&frontier, &stories, ViewType::Frontier);
+        Ok(json)
+    }
+
+    /// Render the dashboard as a formatted table with canopy lens (story 3 amendment).
+    pub fn render_canopy_table(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        Ok(self.format_dag_table(&stories))
+    }
+
+    /// Render the dashboard as JSON with canopy lens (story 3 amendment).
+    pub fn render_canopy_json(&self) -> Result<String, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        let json = self.format_json_with_all(&stories, &stories, ViewType::All);
         Ok(json)
     }
 
@@ -243,7 +258,7 @@ impl Dashboard {
     /// Render the dashboard with --all flag (flat list, equivalent to render_json).
     pub fn render_all_json(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
-        let json = self.format_json(&stories, ViewType::All);
+        let json = self.format_json_with_all(&stories, &stories, ViewType::All);
         Ok(json)
     }
 
@@ -258,7 +273,7 @@ impl Dashboard {
     pub fn render_expand_json(&self) -> Result<String, DashboardError> {
         let stories = self.load_and_compute_health()?;
         let expanded = self.filter_expand(&stories);
-        let json = self.format_json(&expanded, ViewType::Expand);
+        let json = self.format_json_with_all(&expanded, &stories, ViewType::Expand);
         Ok(json)
     }
 
@@ -285,11 +300,12 @@ impl Dashboard {
         };
 
         let filtered: Vec<StoryHealth> = stories
+            .clone()
             .into_iter()
             .filter(|s| result_ids.contains(&s.id))
             .collect();
 
-        let json = self.format_json(&filtered, view_type);
+        let json = self.format_json_with_all(&filtered, &stories, view_type);
         Ok(json)
     }
 
@@ -499,17 +515,26 @@ impl Dashboard {
         Ok(self.format_drilldown(story, &stories))
     }
 
-    /// Filter to frontier view: not-healthy stories with no not-healthy ancestors.
+    /// Filter to frontier view: all stories on the active frontier, excluding retired.
+    /// The frontier includes:
+    /// - All healthy stories
+    /// - Non-healthy stories with no non-healthy ancestors (no frontier blocking)
+    /// But excludes all retired stories (which are off-tree).
     fn filter_frontier(&self, stories: &[StoryHealth]) -> Vec<StoryHealth> {
         stories
             .iter()
             .filter(|story| {
-                // Not healthy
-                if story.health == Health::Healthy {
+                // Exclude retired stories from frontier view
+                if story.status == Status::Retired {
                     return false;
                 }
 
-                // All ancestors must be healthy
+                // Healthy stories are always on the frontier
+                if story.health == Health::Healthy {
+                    return true;
+                }
+
+                // Non-healthy stories are on frontier only if all ancestors are healthy
                 for &ancestor_id in &story.depends_on {
                     if let Some(ancestor) = stories.iter().find(|s| s.id == ancestor_id) {
                         if ancestor.health != Health::Healthy {
@@ -531,6 +556,34 @@ impl Dashboard {
             .filter(|story| story.health != Health::Healthy)
             .cloned()
             .collect()
+    }
+
+    /// Compute the era head for a story by walking the superseded_by chain
+    /// to its terminus. Returns the id of the terminal story (the one with
+    /// no superseded_by pointing further). For stories not retired or not
+    /// superseded, returns the story's own id.
+    fn compute_era_head(&self, story_id: u32, stories: &[StoryHealth]) -> u32 {
+        let mut current_id = story_id;
+        let mut visited = HashSet::new();
+
+        loop {
+            if !visited.insert(current_id) {
+                // Cycle detected (shouldn't happen if loader validated, but defend)
+                return current_id;
+            }
+
+            if let Some(story) = stories.iter().find(|s| s.id == current_id) {
+                if let Some(next_id) = story.superseded_by {
+                    current_id = next_id;
+                } else {
+                    // No successor, this is the era head
+                    return current_id;
+                }
+            } else {
+                // Story not found, return current
+                return current_id;
+            }
+        }
     }
 
     /// Load all story YAML files, compute health for each, and return sorted
@@ -862,6 +915,7 @@ impl Dashboard {
                 let status = story.status;
                 let related_files = story.related_files.clone();
                 let depends_on = story.depends_on.clone();
+                let superseded_by = story.superseded_by;
 
                 // Load evidence from the store.
                 let test_run = self.get_test_run(id);
@@ -895,6 +949,8 @@ impl Dashboard {
                     lvl: 0,
                     immediate_downstreams: vec![],
                     blocks_total: 0,
+                    status,
+                    superseded_by,
                 }
             }
             Err(e) => {
@@ -928,6 +984,8 @@ impl Dashboard {
                     lvl: 0,
                     immediate_downstreams: vec![],
                     blocks_total: 0,
+                    status: Status::Proposed,
+                    superseded_by: None,
                 }
             }
         }
@@ -1385,15 +1443,22 @@ impl Dashboard {
         output
     }
 
-    /// Format stories as JSON.
-    fn format_json(&self, stories: &[StoryHealth], view: ViewType) -> String {
+    /// Format stories as JSON, with access to all stories for computing era_head_id.
+    fn format_json_with_all(
+        &self,
+        stories: &[StoryHealth],
+        all_stories: &[StoryHealth],
+        view: ViewType,
+    ) -> String {
         let mut story_objects = Vec::new();
 
         for story in stories {
+            let era_head_id = self.compute_era_head(story.id, all_stories);
             let mut obj = json!({
                 "id": story.id,
                 "title": story.title,
                 "health": story.health.as_str(),
+                "era_head_id": era_head_id,
                 "lvl": story.lvl,
                 "upstream": story.depends_on,
                 "downstream": story.immediate_downstreams,
