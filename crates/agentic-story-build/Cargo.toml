@@ -17,6 +17,14 @@ publish.workspace = true
 # any runtime code runs.
 
 [dependencies]
+agentic-runtime = { path = "../agentic-runtime" }
+agentic-store = { path = "../agentic-store" }
+git2 = { version = "0.19", default-features = false }
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt", "process"] }
 
 [dev-dependencies]
 # Story 20 scaffolds: every test constructs a `MemStore` via the

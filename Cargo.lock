@@ -98,9 +98,11 @@ dependencies = [
  "agentic-runtime",
  "agentic-store",
  "git2",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

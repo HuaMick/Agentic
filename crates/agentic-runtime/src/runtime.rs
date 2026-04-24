@@ -200,6 +200,7 @@ impl Runtime for ClaudeCodeRuntime {
 pub struct MockRuntime {
     fixture_path: PathBuf,
     pipe_break: bool,
+    crash_exit_code: Option<i32>,
     store: Arc<agentic_store::MemStore>,
 }
 
@@ -209,6 +210,7 @@ impl MockRuntime {
         Ok(MockRuntime {
             fixture_path: path.to_path_buf(),
             pipe_break: false,
+            crash_exit_code: None,
             store: Arc::new(agentic_store::MemStore::new()),
         })
     }
@@ -218,8 +220,15 @@ impl MockRuntime {
         Ok(MockRuntime {
             fixture_path: path.to_path_buf(),
             pipe_break: true,
+            crash_exit_code: None,
             store: Arc::new(agentic_store::MemStore::new()),
         })
+    }
+
+    /// Set the exit code the mock runtime should simulate when crashing.
+    pub fn with_crash_exit_code(mut self, code: i32) -> Self {
+        self.crash_exit_code = Some(code);
+        self
     }
 }
 
