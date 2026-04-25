@@ -82,13 +82,13 @@ acceptance:
       `SignerError::SignerInvalid` naming the offending
       source (`flag`, `env`, or `git`). Non-whitespace
       strings of any shape — `"a"`, `"not-an-email"`,
-      `"sandbox:claude-sonnet-4-6@run-a1b2c3"`,
-      `"operator-17"` — are accepted verbatim.
-      Specifically, no email-shape regex is applied: a
-      signer is a free-form non-empty identity string. This
-      pins the decision so a future contributor does not
-      tighten the validator into an RFC-5321 gate that
-      rejects the `sandbox:<model>@<run_id>` convention.
+      `"operator-17"`, plus a sandbox signer matching the
+      form in `agents/assets/definitions/identifier-forms.yml`
+      — are accepted verbatim. Specifically, no email-shape
+      regex is applied: a signer is a free-form non-empty
+      identity string. This pins the decision so a future
+      contributor does not tighten the validator into an
+      RFC-5321 gate that rejects the sandbox signer form.
       Without this, either the validator is silently
       permissive (empty signers land in evidence rows) or
       silently restrictive (the sandbox convention fails
@@ -167,21 +167,25 @@ acceptance:
     justification: |
       Proves the sandbox convention at the runtime
       boundary: when `ClaudeCodeRuntime` (story 19) spawns
-      a claude subprocess for a run with `run_id =
-      "a1b2c3"` against a configured model
-      `"claude-sonnet-4-6"`, the child process's
-      environment contains `AGENTIC_SIGNER=sandbox:claude-
-      sonnet-4-6@run-a1b2c3` exactly. The value is
-      composed by the runtime from its own inputs (model,
-      run id); the caller does NOT pass it in as a flag.
-      Inside the sandbox, any `agentic uat` or `agentic
-      ci record` invocation resolves the signer from this
-      env var via tier 2 — no special-case code path for
-      agents. Without this, the compositional story the
-      outcome promises (one resolver, one chain, one
-      convention) degrades into two parallel paths (human
-      path + agent-special path), and the sandbox
-      convention is a comment rather than a behaviour.
+      a claude subprocess for a run against a configured
+      model and a generated run_id, the child process's
+      environment contains `AGENTIC_SIGNER` composed per
+      the sandbox signer form in
+      `agents/assets/definitions/identifier-forms.yml`
+      (model and run_id placeholders match the asset's
+      shape exactly — the asset's drift_warning notes the
+      historical short-id mistake this test fences). The
+      value is composed by the runtime from its own
+      inputs (model, run id); the caller does NOT pass
+      it in as a flag. Inside the sandbox, any `agentic
+      uat` or `agentic ci record` invocation resolves
+      the signer from this env var via tier 2 — no
+      special-case code path for agents. Without this,
+      the compositional story the outcome promises (one
+      resolver, one chain, one convention) degrades
+      into two parallel paths (human path + agent-
+      special path), and the sandbox convention is a
+      comment rather than a behaviour.
   - file: crates/agentic-runtime/tests/runtime_writes_resolved_signer_onto_run_row.rs
     justification: |
       Proves the third evidence table gains the field: a
@@ -489,16 +493,15 @@ guidance: |
   Sandbox convention (normative composition).
     When `ClaudeCodeRuntime` (story 19's scope) spawns
     a claude subprocess on behalf of a run, it composes
-    the child's `AGENTIC_SIGNER` env var from its own
-    inputs:
-
-      AGENTIC_SIGNER = "sandbox:" + <model> + "@" + <run_id>
-
-    where `<model>` is the claude model string from
-    `RunConfig.models[0]` (or a single `model` field if
-    the runtime pins one per spawn) and `<run_id>` is
-    the run id generated for this invocation. Example:
-    `sandbox:claude-sonnet-4-6@run-a1b2c3`.
+    the child's `AGENTIC_SIGNER` env var per the sandbox
+    signer form documented in
+    `agents/assets/definitions/identifier-forms.yml` —
+    `<model>` from `RunConfig.models[0]` (or a single
+    `model` field if the runtime pins one per spawn),
+    `<run_id>` from the run id generated for this
+    invocation. Match the form's punctuation exactly;
+    the asset's drift_warning calls out the historical
+    short-id mistake the runtime must not reproduce.
 
     The composition happens in the runtime, NOT in
     `agentic-signer`. `agentic-signer` has no opinion
