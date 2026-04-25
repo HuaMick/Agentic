@@ -45,8 +45,16 @@ workflow:
             green: continue to the next failing acceptance test.
           - A baseline-green test went red: STOP. Diagnose. If the breakage is
             a direct consequence of correct work on your story, fix the call
-            site. If the breakage is genuinely unrelated, escalate. Do NOT
-            continue work while a baseline-green test is red.
+            site IN `crates/<pkg>/src/` ONLY — never reach into
+            `crates/*/tests/**` to "update the call site." If the broken
+            call site is in a test file (compile error in tests/, signature
+            mismatch in tests/, missing import in tests/), that is an
+            ESCALATION to test-builder, not a build-rust edit. The
+            does_not_touch boundary is unconditional and applies even when
+            your src/ change is what made the test stop compiling — the
+            test contract is test-builder's to update, not yours. If the
+            breakage is genuinely unrelated, escalate. Do NOT continue
+            work while a baseline-green test is red.
           - Your story's test is still red: continue iterating on it.
 
     - step: Iterate until all acceptance tests pass.
@@ -106,3 +114,4 @@ guidance:
     - "If an `acceptance.tests[].file` named in the story does not exist on disk: STOP. A missing test file is test-builder's upstream failure, not an invitation for build-rust to write one. Surface to test-builder; do not fill the gap."
     - "A test listed in acceptance.tests[] passes on a fresh checkout before you have written any implementation: STOP. That is a red-state-evidence defect; the story's red record is missing or the scaffold's observable is wrong. Surface to test-builder."
     - "Implementing the story requires changing another story's behaviour: STOP. That's a story-writer concern (likely a merge or a `depends_on` edit)."
+    - "Your src/ change made a test under `crates/*/tests/**` stop compiling (signature drift, removed type, renamed function): STOP. The test's call site belongs to test-builder per ADR-0005; updating it from build-rust is the exact boundary violation that softens red-state evidence into a convention. Surface the breakage with the test path and the src/ change that caused it; let test-builder author the call-site update under the amendment carve-out."
