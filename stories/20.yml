@@ -157,16 +157,19 @@ acceptance:
       applies the branch's diff to main as a SINGLE squash
       commit (not `git merge --no-ff`, not cherry-pick of each
       commit), whose author identity is `git config
-      user.email` resolved at host invocation time (NOT
-      `sandbox:<model>@<run_id>` — merge identity is dev's, per
-      note 14), whose subject line is `story <id>: <title>`
-      where `<title>` is the story YAML's `title` field, whose
-      body contains `run-id: <run-id>`, `signer:
-      sandbox:<model>@<run_id>`, `start-sha: <40-char-hex>`,
-      and `runs-path: runs/<run-id>/run.json`. After the
-      merge, the run row is updated: `branch_state.merged ==
-      true` and `branch_state.merge_shas` contains exactly one
-      sha (the squash commit's). Without this, green runs
+      user.email` resolved at host invocation time (the
+      sandbox signer form is NOT used as merge identity —
+      merge identity is dev's, per note 14), whose subject
+      line is `story <id>: <title>` where `<title>` is the
+      story YAML's `title` field, whose body contains
+      `run-id`, `signer`, `start-sha`, and `runs-path` keys
+      (see Decision 8 in guidance for the body template;
+      `signer` and `start-sha` use the canonical forms in
+      `agents/assets/definitions/identifier-forms.yml`).
+      After the merge, the run row is updated:
+      `branch_state.merged == true` and
+      `branch_state.merge_shas` contains exactly one sha
+      (the squash commit's). Without this, green runs
       either (a) don't land on main at all (the
       reproducibility-from-story attestation is paper), or
       (b) land as an unreadable cherry-pick sequence that
@@ -220,8 +223,10 @@ acceptance:
       command (`docker build -t agentic-sandbox:<sha> -t
       agentic-sandbox:latest -f infra/sandbox/Dockerfile .`)
       produces exactly two tags that resolve to the same
-      image ID — `agentic-sandbox:<sha>` where `<sha>` is the
-      full 40-char lowercase hex of `git rev-parse HEAD`, and
+      image ID — `agentic-sandbox:<sha>` where `<sha>` is
+      the commit form documented in
+      `agents/assets/definitions/identifier-forms.yml`
+      (captured from `git rev-parse HEAD`), and
       `agentic-sandbox:latest`. `StoryBuild::resolve_image_tag`
       defaults to `agentic-sandbox:<sha-at-host-invocation>`
       and falls back to `agentic-sandbox:latest` only when the
@@ -505,9 +510,11 @@ guidance: |
     of the trait methods being called in this story's tests.
 
   Decision 3 — per-commit SHA image tag with `latest` alias.
-    `agentic-sandbox:<40-char-sha>` is the authoritative tag;
-    `agentic-sandbox:latest` is a convenience alias that
-    always points at the last-built image. Three reasons:
+    `agentic-sandbox:<sha>` (where `<sha>` is the commit form
+    documented in `agents/assets/definitions/identifier-forms.yml`)
+    is the authoritative tag; `agentic-sandbox:latest` is a
+    convenience alias that always points at the last-built
+    image. Three reasons:
       - Reproducibility requires the sha. ADR-0006 §1 is
         explicit: "The image at tag X + the story YAML at
         commit Y + the agent at model Z is the reproducibility
@@ -615,12 +622,16 @@ guidance: |
     agent-composed summary). The YAML title is the canonical
     name; using it keeps `git log --oneline` searchable
     against the corpus.
-    Body:
+    Body (`<run-id>`, `<signer>`, `<start-sha>`, `<end-sha>`
+    take the canonical forms from
+    `agents/assets/definitions/identifier-forms.yml` —
+    sandbox signer for `<signer>`, full commit SHA for the
+    sha fields, run_id UUID for `<run-id>`):
       ```
-      run-id:    <uuid>
-      signer:    sandbox:<model>@<run_id>
-      start-sha: <40-char-hex>
-      end-sha:   <40-char-hex>
+      run-id:    <run-id>
+      signer:    <signer>
+      start-sha: <start-sha>
+      end-sha:   <end-sha>
       runs-path: runs/<run-id>/run.json
 
       <first line of the trace's final iteration summary>
