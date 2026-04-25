@@ -27,6 +27,7 @@ Current content (see [`agents/assets/README.md`](assets/README.md) for the full 
 - `definitions/tools-base.yml` — canonical base toolset every agent needs.
 - `definitions/session-start-memory.yml` — do-not-trust-prior-session clause referenced from every agent's `workflow.session_start`.
 - `definitions/audit-mode-protocol.yml` — shared six-step protocol for any curator with an `audit` mode (Scope, Scan, Plan, Confirm, Execute, Summarize).
+- `definitions/identifier-forms.yml` — canonical forms of run_id, signer, story_id, and commit, referenced by test-builder and build-rust.
 - `guidelines/reference-claude-md.yml` — when and why to read CLAUDE.md, so individual agents do not restate it.
 - `guidelines/edit-first-curation.yml` — edit-is-default rule shared by curator agents.
 - `guidelines/no-proof-preservation.yml` — anti-pattern of tiptoeing around fields to preserve a verdict, shared by curator agents.

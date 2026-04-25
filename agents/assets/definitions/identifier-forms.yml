@@ -1,0 +1,102 @@
+name: identifier-forms
+description: |
+  Canonical string forms of the four identifiers that flow through evidence
+  rows, signing rows, and the story corpus. Authored once here so test-builder
+  scaffolds, build-rust producers, and downstream consumers cannot quietly
+  drift on punctuation (the underscore-vs-hyphen kind of bug). Reference this
+  file from any agent that authors fixtures or implements producers/parsers
+  for these identifiers — do not restate the canonical forms in the agent's
+  own spec.
+
+forms:
+  run_id:
+    shape: UUID v4 string
+    pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    example: "a1b2c3d4-e5f6-4789-8abc-def012345678"
+    produced_by: |
+      Story 16's RunRecorder is the canonical producer. Any other emitter
+      (e.g. an evidence row written by hand for a fixture) MUST match the
+      same UUID v4 shape — not a truncated short id, not a hyphen-stripped
+      hex, not a sequence number.
+    consumed_by:
+      - Test-builder evidence rows (`evidence/runs/<id>/*-red.jsonl`),
+        `run_id` field.
+      - The signer string when the signer is a sandbox agent (see below).
+      - UAT signing rows written by `agentic uat` (story 1) and read by
+        the dashboard.
+
+  signer:
+    shape: |
+      EITHER an email-shaped string (a human signer; the canonical form for
+      stories 1, 2, 18 when a developer signs a verdict), OR
+      `sandbox:<model>@<run_id>` (an agent signer per stories 18, 19, 20
+      where a sandboxed claude run emits the verdict).
+    pattern_human_email: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    pattern_sandbox: "^sandbox:[A-Za-z0-9._-]+@[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    examples:
+      human: "hua.mick@gmail.com"
+      sandbox: "sandbox:claude-sonnet-4-6@a1b2c3d4-e5f6-4789-8abc-def012345678"
+    drift_warning: |
+      The `<run_id>` segment of the sandbox form uses the SAME UUID v4
+      shape as `run_id` above — full hyphen-separated UUID, NOT a short
+      prefix, NOT a hyphen-stripped variant. Story 20 originally drifted
+      this to `sandbox:<model>@run-a1b2c3` (short id, leading `run-`); an
+      audit caught it. The literal `@` between `<model>` and `<run_id>`
+      is mandatory; story 18 specifies it explicitly.
+    consumed_by:
+      - Evidence rows that record an agent verdict.
+      - The `AGENTIC_SIGNER` environment variable set by the runtime
+        before invoking a subagent (story 18).
+      - The `uat_signings.signer` column.
+
+  story_id:
+    shape: positive integer
+    pattern: "^[1-9][0-9]*$"
+    example: "16"
+    canonical_source: schemas/story.schema.json — `id` field.
+    drift_warning: |
+      Stored as an integer in YAML and JSON. String-quoted variants (e.g.
+      `"16"`) are an interop hazard — a producer that stringifies and a
+      consumer that parses-as-int will compare unequal across the wire.
+      Match the schema: integer in, integer out. Filenames embed the same
+      integer (`stories/16.yml`); the path is the only place the id is
+      lexically a string.
+    consumed_by:
+      - Every evidence row (`story_id` field).
+      - The story file path (`stories/<story_id>.yml`).
+      - CLI argv (`agentic uat <story_id> --verdict <pass|fail>`).
+
+  commit:
+    shape: 40-character lowercase hex SHA
+    pattern: "^[0-9a-f]{40}$"
+    example: "5f3a91c2e74b6d8a0c1e2b4d6e8f0a2c4e6b8d0f"
+    captured_by: "`git rev-parse HEAD` on a clean working tree."
+    drift_warning: |
+      Always lowercase, always 40 chars, never the abbreviated 7- or
+      8-char form. Abbreviated SHAs are ambiguous across rebases and
+      forks; the signing contract requires the full 40 chars so the
+      commit a verdict was signed against can be unambiguously
+      re-resolved years later. Story 23 evidence rows use the same
+      40-char lowercase-hex form — keep them aligned.
+    consumed_by:
+      - Test-builder evidence rows (`commit` field).
+      - UAT signing rows (`uat_signings.commit`).
+      - Story 23's evidence rows.
+
+reference_pattern:
+  in_inputs_yml: |
+    Under `required_reading`, include a bullet:
+      - path: agents/assets/definitions/identifier-forms.yml
+        reason: |
+          Canonical forms of run_id, signer, story_id, and commit — match
+          these exactly when authoring fixtures or implementing producers.
+  in_process_yml: |
+    Where the workflow names one of these identifiers (e.g. test-builder's
+    "Record red-state evidence" step naming `run_id`, `commit`,
+    `story_id`), reference this file inline rather than re-quoting the
+    pattern: "see agents/assets/definitions/identifier-forms.yml for the
+    canonical form."
+
+current_consumers:
+  - agents/test/test-builder/inputs.yml
+  - agents/build/build-rust/inputs.yml

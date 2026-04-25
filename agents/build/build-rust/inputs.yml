@@ -13,6 +13,13 @@ required_reading:
       Architectural Decision Records. Read every ADR the story or its
       patterns reference. Especially ADR-0002 (store trait, no direct DB
       access) and ADR-0003 (subscription auth via local claude binary).
+  - path: agents/assets/definitions/identifier-forms.yml
+    reason: |
+      Canonical forms of run_id, signer, story_id, and commit. When you
+      implement a producer or parser for any of these (stories 16, 18,
+      19, 20, 23), match the forms verbatim. The underscore-vs-hyphen
+      kind of drift in `sandbox:<model>@<run_id>` is the bug class this
+      asset exists to prevent.
 
 context:
   - pattern: patterns/*.yml

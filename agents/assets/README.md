@@ -35,6 +35,10 @@ something not in `assets/` for the second time, extract it.
   (Scope, Scan, Produce a plan, Confirm, Execute, Summarize). Each
   curator's Scan detail stays per-agent; the other five steps reference
   this asset.
+- `definitions/identifier-forms.yml` — canonical forms of run_id,
+  signer, story_id, and commit. Authored once so test-builder fixtures
+  and build-rust producers cannot drift on punctuation
+  (e.g. underscore-vs-hyphen in `sandbox:<model>@<run_id>`).
 - `guidelines/reference-claude-md.yml` — when and why to read CLAUDE.md;
   removes the scattered restatement across each agent's spec.
 - `guidelines/edit-first-curation.yml` — edit-is-default rule shared by

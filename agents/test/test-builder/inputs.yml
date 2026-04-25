@@ -25,6 +25,13 @@ required_reading:
       The story you are scaffolding. Read in full, including `guidance` —
       the guidance block often names the fixture shape or resilience
       claim a test scaffold must put into the panic message.
+  - path: agents/assets/definitions/identifier-forms.yml
+    reason: |
+      Canonical forms of run_id, story_id, and commit (and the signer
+      string downstream rows reference). Evidence rows you write must
+      match these forms verbatim — UUID v4 for run_id, integer for
+      story_id, 40-char lowercase hex for commit. Drift here invalidates
+      the handshake with build-rust and `agentic-verify`.
 
 context:
   - pattern: patterns/*.yml
