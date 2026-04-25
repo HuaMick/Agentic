@@ -6,7 +6,7 @@ outcome: |
   `signer` field is a non-empty identity string resolved from an
   explicit four-tier chain, so every piece of attestable evidence is
   attributable to a source without re-deriving it from context.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree

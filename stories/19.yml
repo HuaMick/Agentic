@@ -8,7 +8,7 @@ outcome: |
   — so `agentic story build` and future orchestrators have one
   typed surface for "spawn an agent against a story and get a
   replayable run."
-status: proposed
+status: under_construction
 patterns: []
 acceptance:
   tests:

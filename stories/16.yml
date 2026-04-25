@@ -7,7 +7,7 @@ outcome: |
   branch state, and the filesystem path to a non-empty NDJSON trace
   of the underlying subprocess stream — so the attempt is inspectable
   and replayable without re-execution.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
