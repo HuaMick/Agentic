@@ -138,15 +138,16 @@ acceptance:
   - file: crates/agentic-runtime/tests/runtime_injects_sandbox_signer_into_recorder.rs
     justification: |
       Proves the signer composition with story 18: given a
-      `RunConfig` whose `signer` resolves to
-      `sandbox:claude-sonnet-4-6@run-abc123`, the `runs` row
-      the runtime writes via `RunRecorder::start(...)`
-      carries that exact string in its `signer` field. The
-      runtime does NOT generate the signer itself — it
-      accepts it in `RunConfig` and passes it through — so
-      story 18's resolution chain (CLI flag → env var →
-      fallback) remains the sole authority. A nil or
-      whitespace-only signer passed to
+      `RunConfig` whose `signer` resolves to a sandbox
+      signer matching the form in
+      `agents/assets/definitions/identifier-forms.yml`,
+      the `runs` row the runtime writes via
+      `RunRecorder::start(...)` carries that exact string
+      in its `signer` field. The runtime does NOT generate
+      the signer itself — it accepts it in `RunConfig` and
+      passes it through — so story 18's resolution chain
+      (CLI flag → env var → fallback) remains the sole
+      authority. A nil or whitespace-only signer passed to
       `spawn_claude_session` returns
       `RuntimeError::InvalidConfig` before any subprocess
       is spawned. Without this, either the runtime forges
@@ -461,13 +462,15 @@ guidance: |
       `--ignored` run; the mock path surfaces in CI.
 
   `RunConfig` shape (auditable).
-    The call boundary is:
+    Canonical string forms for `run_id` and `signer` are
+    defined in `agents/assets/definitions/identifier-forms.yml`;
+    `RunConfig::validate()` rejects values that do not match.
     ```
     pub struct RunConfig {
-        pub run_id: String,              // uuid v4, validated
+        pub run_id: String,              // see identifier-forms.yml
         pub story_id: i64,
         pub story_yaml_bytes: Vec<u8>,   // for recorder's sha256 snapshot
-        pub signer: String,              // story 18's resolution
+        pub signer: String,              // story 18's resolution; see identifier-forms.yml
         pub build_config: serde_json::Value,  // story 17's opaque passthrough
         pub runs_root: PathBuf,
         pub repo_path: Option<PathBuf>,  // Some: populate branch_state
