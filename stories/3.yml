@@ -57,11 +57,13 @@ acceptance:
     justification: |
       Proves the `--json` contract at the library boundary: emits
       an object with `stories[]` and `summary{}` keys, includes
-      FULL commit SHAs (not truncated), preserves the same data as
-      the table mode, and is parseable by `serde_json` round-trip.
-      Without this downstream tooling (CI status checks, future web
-      UI) cannot consume the dashboard programmatically without
-      scraping the TTY output.
+      commit fields in the canonical form documented in
+      `agents/assets/definitions/identifier-forms.yml` (not
+      truncated), preserves the same data as the table mode, and
+      is parseable by `serde_json` round-trip. Without this
+      downstream tooling (CI status checks, future web UI) cannot
+      consume the dashboard programmatically without scraping the
+      TTY output.
   - file: crates/agentic-dashboard/tests/health_drilldown.rs
     justification: |
       Proves the single-story drill-down at the library boundary:
@@ -344,15 +346,16 @@ guidance: |
     not useful here.
 
   `--json` contract.
-    Top-level shape:
+    Top-level shape (`<commit>` takes the canonical form in
+    `agents/assets/definitions/identifier-forms.yml`):
       ```json
       {
         "stories": [
           { "id": 1, "title": "...", "health": "healthy",
             "failing_tests": [],
-            "uat_commit": "<full-40-char-sha>",
+            "uat_commit": "<commit>",
             "uat_signed_at": "<rfc3339>",
-            "test_run_commit": "<full-40-char-sha>",
+            "test_run_commit": "<commit>",
             "test_run_at": "<rfc3339>" }
         ],
         "summary": {
@@ -362,7 +365,6 @@ guidance: |
         }
       }
       ```
-    Full SHAs (not short) so downstream tooling can match exactly.
     Null-able fields (uat_*, test_run_*) are emitted as JSON null
     when absent rather than omitted, so consumers don't have to
     distinguish "missing key" from "key with null value."
