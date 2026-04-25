@@ -423,14 +423,19 @@ guidance: |
     recorder's API.
 
   Row shape, field-by-field (the authoritative reference).
+    Canonical string forms for `run_id`, `signer`, `story_id`, and
+    SHA fields are defined in
+    `agents/assets/definitions/identifier-forms.yml`; match those
+    forms exactly when emitting or parsing this row.
     ```
-    run_id:                string (uuid v4, validated charset)
-    story_id:              integer (matches an existing stories/<id>.yml)
+    run_id:                string (see identifier-forms.yml: run_id)
+    story_id:              integer (see identifier-forms.yml: story_id;
+                           must match an existing stories/<id>.yml)
     story_yaml_snapshot:   string (64-char lowercase hex SHA256
                            of the story YAML bytes at launch)
-    signer:                string (non-empty; convention
-                           "sandbox:<model>@<run_id>" for agents,
-                           "<email>" for humans — story 18's scope)
+    signer:                string (see identifier-forms.yml: signer;
+                           sandbox form for agent runs, email form for
+                           humans — story 18's scope)
     started_at:            string (RFC3339 UTC)
     ended_at:              string (RFC3339 UTC, strictly > started_at)
     build_config:          object (passthrough; no schema pin in this
@@ -446,15 +451,18 @@ guidance: |
                              error: optional string
                            }
     branch_state:          {
-                             start_sha: string (40-char hex, the SHA
-                                        the sandbox branch was cut from),
-                             end_sha: optional string (the tip SHA of
-                                      the sandbox branch at finish;
-                                      absent if no commits were made),
+                             start_sha: string (commit form — see
+                                        identifier-forms.yml: commit —
+                                        the SHA the sandbox branch was
+                                        cut from),
+                             end_sha: optional string (commit form;
+                                      tip SHA of the sandbox branch at
+                                      finish; absent if no commits
+                                      were made),
                              commits: array of {sha, author, subject},
                              merged: boolean,
-                             merge_shas: array of strings (the
-                                        resulting main commits on
+                             merge_shas: array of strings (commit form;
+                                        the resulting main commits on
                                         auto-merge; empty when
                                         merged==false)
                            }
