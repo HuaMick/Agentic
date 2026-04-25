@@ -133,6 +133,17 @@ For the current agent roster and their authority boundaries, see
   in `.gitmodules` — its internal working-tree state is upstream's
   business and does not surface as repo dirt.
 
+- **Claude Code `isolation: "worktree"` — avoid.** The harness's
+  worktree isolation creates `.git` files pointing at Windows-style UNC
+  paths (`//wsl.localhost/...`) which WSL git cannot traverse. A
+  subagent invoked into such a worktree sees `fatal: not a git
+  repository` and silently falls back to editing the main worktree —
+  evidence ends up in the wrong place. If you genuinely need parallel
+  cargo work in worktrees, create them from inside WSL with `git
+  worktree add <wsl-path>` and pass the WSL path to subagents
+  explicitly; do not use the harness's `isolation` flag from this
+  workspace.
+
 ## Reference: the legacy system
 
 The submodule at `legacy/AgenticEngineering/` is the Python predecessor.
