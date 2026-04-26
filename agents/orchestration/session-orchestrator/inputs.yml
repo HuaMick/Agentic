@@ -1,0 +1,79 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: README.md
+    reason: |
+      Current project state — what is shipped, what is in flight, what
+      is next. The orchestrator routes work against the live phase, not
+      a remembered one.
+  - path: agents/README.md
+    reason: |
+      Authoritative roster of active agents and their authority
+      boundaries. The orchestrator picks which authoring agent owns
+      each surface from this file plus the per-agent contract.yml of
+      the candidates.
+  - path: docs/decisions/
+    reason: |
+      Read every ADR. ADRs are non-negotiable for the relevant scope
+      (CLAUDE.md, "How to drive the system", item 3). Routing
+      decisions that contradict an ADR are routing failures. ADR-0006
+      in particular distinguishes this agent (outer loop) from the
+      deferred orchestration-executor (inner loop) — read it before
+      claiming you understand the orchestration boundary.
+
+context:
+  - pattern: agents/**/contract.yml
+    reason: Per-agent ownership and authority — for routing decisions about which agent gets each surface.
+  - pattern: agents/**/process.yml
+    reason: Per-agent workflow shape — for briefing each spawned agent in the right vocabulary.
+  - pattern: stories/*.yml
+    reason: Story corpus state — surface-of-work for most directed-mode briefs.
+  - pattern: schemas/*.schema.json
+    reason: Authoritative shapes — the orchestrator does not validate, but it routes investigation against the schemas when a brief makes claims about valid fields or statuses.
+
+parameters:
+  - name: brief
+    description: |
+      The user-supplied objective for the session. May be a feature
+      request ("draft a story for X"), a bug ("story 23 is unhealthy,
+      figure out why"), a discussion prompt ("how should we approach
+      Y?"), or a multi-step plan ("amend story 6, then re-UAT it").
+      Triggers mode selection (`directed` vs `discussion`) and the
+      orient-trigger evaluation.
+  - name: skip_orient
+    description: |
+      Optional explicit override. When the user has just verified
+      state themselves (e.g. "I just ran agentic stories audit, the
+      tree is clean, please draft a story for X"), they may pass
+      `skip_orient: true` to suppress the orient phase even if the
+      trigger rule would otherwise fire. The orchestrator records the
+      override in the final summary so the audit trail names who
+      vouched for the skipped verification.
+    required_when: optional — defaults to `false`.
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+  - Task
+
+commands:
+  - name: git-log-readonly
+    invocation_example: git log --oneline -n 20
+    purpose: |
+      Read commit history to evaluate the orient-trigger ("brief is
+      more than ~24 hours older than session start", "no session has
+      run against this corpus today"). Read-only; the orchestrator
+      does not commit, push, or otherwise mutate git state — those
+      are the authoring agents' surface (build-rust commits its own
+      code; test-builder records its own evidence; etc.).
+  - name: git-status-readonly
+    invocation_example: git status --porcelain
+    purpose: |
+      Detect dirty-tree state at session start. A dirty tree at
+      orchestration time is not a fail-closed condition the way it is
+      for test-builder or test-uat (the orchestrator itself writes
+      nothing), but it is information the orchestrator surfaces to
+      the user before delegating to an agent that DOES fail-closed
+      on dirt.

@@ -39,6 +39,11 @@ something not in `assets/` for the second time, extract it.
   signer, story_id, and commit. Authored once so test-builder fixtures
   and build-rust producers cannot drift on punctuation
   (e.g. underscore-vs-hyphen in `sandbox:<model>@<run_id>`).
+- `definitions/story-schema-contract.yml` — why and how every
+  story-touching agent (story-writer, build-rust, test-builder,
+  test-uat) reads `schemas/story.schema.json` at session start: field
+  shapes, the lifecycle enum, and the prove-it-gate connection that
+  makes `status: healthy` writable only by `agentic uat`.
 - `guidelines/reference-claude-md.yml` — when and why to read CLAUDE.md;
   removes the scattered restatement across each agent's spec.
 - `guidelines/edit-first-curation.yml` — edit-is-default rule shared by
@@ -48,5 +53,4 @@ something not in `assets/` for the second time, extract it.
 
 ## Pending extractions (waiting for second consumer)
 
-- A `definitions/story-schema-contract.yml` — extract when test-uat is
-  authored and also reads `schemas/story.schema.json` at session start.
+(none currently)

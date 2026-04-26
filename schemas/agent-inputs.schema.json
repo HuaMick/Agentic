@@ -59,7 +59,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebFetch", "WebSearch", "NotebookEdit"]
+        "enum": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Task", "WebFetch", "WebSearch", "NotebookEdit"]
       },
       "description": "Claude Code tool grant. The base set is Read,Glob,Grep,Write,Edit,Bash — see agents/assets/definitions/tools-base.yml. Add only what the agent genuinely needs."
     },

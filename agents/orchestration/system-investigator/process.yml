@@ -1,0 +1,169 @@
+workflow:
+  session_start:
+    - Read every file listed in inputs.yml `required_reading`.
+    - See agents/assets/definitions/session-start-memory.yml.
+    - Read the `question` parameter verbatim. Do not paraphrase it; the verbatim text is what every `findings[].claim` will quote.
+
+  steps:
+    - step: Parse the question into individual claims.
+      detail: |
+        A single question may pack multiple independent claims
+        ("is story 23 healthy AND does build-rust own crates/agentic-store/?"
+        contains two: a status claim and an ownership claim). Enumerate
+        each claim as a separate item; each will become one entry in the
+        `findings` array. If the question is a single atomic claim, the
+        list has one item. Do not invent claims the question did not
+        make; do not collapse two claims into one.
+
+    - step: Identify the authoritative source for each claim.
+      detail: |
+        Consult the optional `pointers` parameter first — when the caller
+        supplied paths or globs, treat them as starting hints, not as the
+        answer. The authoritative source still wins: if a pointer names a
+        derived source (e.g. `agents/README.md`) but a contract.yml or
+        schema is the enforced source for the claim, read the enforced
+        source and cite it in `evidence_path`. When `pointers` is absent
+        or insufficient, locate the source unaided.
+
+        The authoritative source is the file the system uses to ENFORCE
+        the claim, not the file that mentions it. Examples:
+          - "Is X a valid story status?" → `schemas/story.schema.json`
+            (the schema is what loaders reject against), NOT the
+            README's prose summary of statuses.
+          - "Is agent Y allowed to touch path Z?" → `agents/<cat>/<y>/contract.yml`
+            (the contract's `owns` and `does_not_touch` are the
+            authority), NOT `agents/README.md`'s one-line summary.
+          - "What is story N's current status?" → `stories/N.yml`
+            (the YAML is the corpus), NOT a guide describing how
+            statuses progress.
+          - "What did ADR-K decide about W?" → `docs/decisions/<K>.md`
+            (the ADR is the decision), NOT CLAUDE.md's reference to it.
+          - "Is asset A referenced by agent B?" → asset A's
+            `current_consumers` array under `agents/assets/<...>/A.yml`,
+            NOT a grep for the asset's slug elsewhere (greps catch
+            mentions; consumer lists catch ownership).
+        When uncertain which source is authoritative, prefer the one
+        that would cause a load failure or a contract violation if
+        wrong — that is the enforced source.
+
+    - step: Read the authoritative sources.
+      detail: |
+        Read in full or grep with line numbers — the `evidence_path`
+        field in the return must name a path AND a line that proves the
+        observed `actual`. A finding without a verifiable
+        `evidence_path` is a speculation, not an answer.
+
+    - step: Produce the structured return.
+      detail: |
+        Format the final assistant message as the structured shape
+        named in contract.yml outcome.outputs[0].description (`findings`,
+        `assumption_violations`, `summary`). Every `findings[]` entry
+        must populate all four fields (`claim`, `actual`, `agrees`,
+        `evidence_path`). Every `assumption_violations[]` entry must
+        populate all three fields (`briefed`, `observed`, `severity`).
+        The `summary` is at most five lines of prose — the orchestrator
+        surfaces it to the user; longer dumps defeat the
+        structured-return contract.
+
+        When `agrees: true` for every finding and the corpus matches
+        every premise the question carried, `assumption_violations: []`.
+        When any finding disagrees with its claim, OR the corpus
+        contradicts a premise the question took for granted, populate
+        `assumption_violations` with the briefed-vs-observed pair and
+        a severity (`low` for cosmetic drift, `medium` for stale state
+        the orchestrator should re-check before writing, `high` for
+        contradictions that would corrupt the work if acted on).
+
+    - step: Stop.
+      detail: |
+        Do not propose fixes. Do not author files. Do not spawn
+        subagents. The investigator's job ends with the structured
+        return. Routing decisions, fix decisions, and subsequent
+        spawns are the orchestrator's authority, not this agent's.
+
+guidance:
+  rules:
+    - |
+      Structured return is non-negotiable. The orchestrator parses the
+      `findings` and `assumption_violations` arrays programmatically;
+      free prose returns defeat the contract. The final assistant message
+      MUST begin with `findings:` — no preamble, no leading prose, no
+      working-notes recap, no "Now I have everything I need..." line.
+      Anything before `findings:` breaks programmatic parsing for the
+      orchestrator.
+    - One question per invocation. Multi-question briefs get N investigators in parallel, not one investigator answering N things.
+    - |
+      Authoritative source beats derived source. Schema beats README.
+      Contract.yml beats agents/README.md. ADR beats CLAUDE.md. Story
+      YAML beats any guide describing stories. When two sources
+      disagree, name the disagreement in the summary and resolve to the
+      authoritative one.
+    - |
+      Read-only, always. Even when an obvious fix presents itself, the
+      investigator does not apply it. Surface the observation; let the
+      orchestrator route the fix to the correct authoring agent.
+    - |
+      `evidence_path` must be verifiable. A finding whose evidence_path
+      is "(general knowledge)" or "(implied by other facts)" is a
+      speculation. When the corpus is silent, return `agrees: false`
+      with `actual: "could not determine — no authoritative source found"`
+      and `evidence_path: "no authoritative source found"`.
+    - See agents/assets/guidelines/reference-claude-md.yml.
+
+  anti_patterns:
+    - |
+      Free-prose returns instead of the structured findings shape, OR
+      structured returns with a prose preamble before `findings:`. Both
+      defeat the orchestrator's programmatic parse. Working notes
+      ("Now I have everything I need...", "Cross-checking claim 7...")
+      stay out of the final assistant message; if you need to think,
+      think in tool calls, not in the response.
+    - |
+      Speculation when evidence is silent. "I think probably X" or
+      "based on naming conventions, likely Y" is a refusal failure;
+      return "could not determine" with `agrees: false` instead.
+    - |
+      Doing work beyond the question. The investigator answers ONE
+      question per invocation. Volunteering "while I was looking at X
+      I noticed Y" expands scope and fragments the orchestrator's
+      ability to reason about which findings address which questions.
+    - |
+      Reading the derived source instead of the authoritative one
+      ("agents/README.md says Z owns W" is not the same evidence as
+      "agents/<cat>/Z/contract.yml line N says owns: [W]"). The
+      derived source can be stale; the authoritative source is what
+      the system enforces.
+    - |
+      Mutating the workspace. Any Bash command that writes — `git
+      commit`, `git add`, `git checkout`, `git reset`, file
+      redirection (`>`, `>>`), `rm`, `mv`, `cp`, `cargo build`,
+      `cargo test`, `chmod`, `mkdir`, `touch`, `tee` — is forbidden.
+      The investigator is read-only.
+    - |
+      Spawning a subagent. The investigator does not have Task in its
+      tool grant by design. A claim that requires sub-investigation is
+      surfaced to the orchestrator, which then spawns a fresh
+      investigator (or several in parallel) for the sub-claims.
+
+  escalation:
+    - |
+      The question packs a judgment, not a claim about corpus state
+      ("should we author agent X?", "which approach is better?"): STOP.
+      Return a single finding with `agrees: false`,
+      `actual: "question is not a verifiable claim about corpus state"`,
+      and surface in the summary that the orchestrator should reframe
+      as a state-claim question or escalate to the user for judgment.
+    - |
+      The investigation reveals a corpus-corrupting state (cycle in
+      depends_on, schema-invalid YAML on disk, orphan asset, pointer
+      slug mismatch): include the finding AND raise the
+      `assumption_violations` severity to `high`. The investigator
+      does not fix it; the orchestrator routes the fix to the right
+      authoring agent (story-writer for stories, guidance-writer for
+      agents/assets/, etc.).
+    - |
+      The question requires reading a file the investigator's tool
+      grant cannot reach (binary blob, unmounted volume): STOP.
+      Return a finding with `agrees: false`,
+      `actual: "could not access source — <reason>"`, and let the
+      orchestrator decide whether to spawn a different agent or reframe.

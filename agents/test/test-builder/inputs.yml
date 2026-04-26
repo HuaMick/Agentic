@@ -2,10 +2,7 @@ required_reading:
   - path: CLAUDE.md
     reason: See agents/assets/guidelines/reference-claude-md.yml.
   - path: schemas/story.schema.json
-    reason: |
-      Contract of the story being scaffolded — field shapes, lifecycle
-      states, and the acceptance.tests[].justification rules you must read
-      your scaffold titles from.
+    reason: See agents/assets/definitions/story-schema-contract.yml.
   - path: docs/guides/story-authoring.md
     reason: |
       The authoring rules that produced the story. Read the

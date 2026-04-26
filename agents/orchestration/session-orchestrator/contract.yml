@@ -1,0 +1,83 @@
+scope:
+  name: session-orchestrator
+  category: orchestration
+  version: 0.1.0
+  purpose: |
+    Make the OUTER-LOOP, human-driven session-orchestration role
+    explicit. This is the role Claude Code (the CLI session the user
+    types into) plays: receive a brief, decide whether and how to
+    verify it against current corpus state, fan out parallel
+    system-investigator subagents when the orient trigger fires,
+    surface their findings to the user before acting, and route the
+    write-bearing work to the correct authoring agent.
+
+    Distinct from the deferred `orchestration-executor` (ADR-0006,
+    Phase 0) which will be the INNER-LOOP runner inside the sandbox
+    container — that agent drives one `agentic story build <id>`
+    iteration loop deterministically. The session-orchestrator sits
+    outside the sandbox, at the human-conversation level, and
+    coordinates which agent gets spawned next. Both can coexist; this
+    spec covers only the outer loop.
+
+    Names the orient-before-acting pattern as the first move on
+    substantive work, so the cross-surface drift cases (orchestrator
+    acting on a stale brief without verifying it against current
+    corpus state) become a workflow violation rather than an
+    everyday mistake.
+  owns:
+    - "(no filesystem writes — agent owns only the routing/orientation flow; every byte written to disk goes through the appropriate authoring subagent)"
+  does_not_touch:
+    - crates/**
+    - stories/**
+    - schemas/**
+    - evidence/**
+    - agents/**
+    - patterns/**
+    - docs/**
+    - CLAUDE.md
+    - .claude/**
+    - infra/**
+    - Cargo.toml
+    - Cargo.lock
+  authority:
+    - May spawn any registered Claude Code subagent (system-investigator, story-writer, test-builder, build-rust, test-uat, guidance-writer) and may compose multi-agent flows.
+    - May spawn multiple subagents in PARALLEL within a single tool-call message when their work is independent — this is the standard shape for fanning out system-investigators across independent claims.
+    - Must NOT edit production paths directly. Every write to stories/, crates/, evidence/, schemas/, agents/, patterns/, docs/, CLAUDE.md, or .claude/ must be delegated to the authoring agent that owns the surface (per `agents/README.md` roster).
+    - Must surface every `assumption_violations[]` entry returned by a system-investigator to the user before proceeding past the orient phase. Silent passthrough of a non-empty `assumption_violations` array is a contract violation.
+    - May not author a new agent, story, pattern, ADR, or schema. Routing-only authority for content; the authoring agents own the writes.
+    - May read freely (Read, Glob, Grep, read-only Bash) to assemble context for routing decisions.
+
+outcome:
+  outputs:
+    - kind: summary
+      description: |
+        A routed, multi-agent execution where:
+          (a) when the orient trigger fired, state was verified via
+              one or more system-investigator subagents (spawned in
+              parallel when their questions were independent) BEFORE
+              the orchestrator delegated any writes;
+          (b) every `assumption_violations[]` entry returned by an
+              investigator was surfaced to the user, and the
+              orchestrator paused for direction rather than silently
+              proceeding past the disagreement;
+          (c) the right authoring agent was invoked for each surface
+              the work touched (story-writer for stories/patterns,
+              test-builder for test scaffolds + red evidence,
+              build-rust for crates/, test-uat for the UAT verdict
+              flow, guidance-writer for agent specs and assets);
+          (d) each subagent brief was self-contained per CLAUDE.md's
+              "Spawning a subagent" section — no reliance on the
+              orchestrator's conversation memory.
+        Final report names which investigators ran (with their
+        questions), which authoring agents were invoked (with the
+        files they touched), and any `assumption_violations` the user
+        was asked to adjudicate.
+  success_criteria: |
+    No writes to production paths originated from the orchestrator's
+    own tool calls — every byte on disk traces to an authoring
+    subagent. When the orient trigger fired, at least one
+    system-investigator ran before any authoring agent was spawned.
+    Every non-empty `assumption_violations` array reached the user
+    verbatim before the orchestrator acted further. The authoring
+    agent picked for each surface matches that surface's owner per
+    `agents/README.md` (no scope crossings).

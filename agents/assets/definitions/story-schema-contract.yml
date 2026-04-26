@@ -1,0 +1,98 @@
+name: story-schema-contract
+description: |
+  Stories are the unit of work. `schemas/story.schema.json` is the authoritative
+  contract every story YAML is validated against, and the only file that pins
+  the field shapes, the lifecycle enum, and the per-test 1-to-1 binding the
+  prove-it gate hangs off. Every agent that authors, reads, scaffolds, or
+  executes a story must read this schema at session start so it cannot drift
+  from the true field set. This asset captures WHY each consuming agent reads
+  it and WHAT each one extracts, so individual `inputs.yml` files do not
+  restate the same framing.
+
+why_agents_read_it:
+  - role: authoring
+    detail: |
+      A curator authoring or editing a story (story-writer) needs the field
+      shapes, defaults, and required-vs-optional split to produce a draft
+      that validates. The schema is the single source of truth for what a
+      well-formed story looks like — not a guide, not an example.
+  - role: implementing
+    detail: |
+      An agent implementing a story (build-rust) reads the schema to know
+      the contract of the story file it is consuming: which fields are
+      authoritative (id, status, acceptance.tests[]), which carry the
+      non-obvious technical context (guidance), and which the agent must
+      not edit (status — promotion flows through `agentic uat`, never
+      through a build-time hand).
+  - role: scaffolding
+    detail: |
+      An agent scaffolding tests (test-builder) reads the schema to know
+      the per-test structure under acceptance.tests[] — the 1-to-1 binding
+      between a story and each test file, and the per-test
+      `justification` field that shapes every scaffold's panic message.
+  - role: executing
+    detail: |
+      An agent executing the UAT (test-uat) reads the schema to know the
+      shape of the `acceptance.uat:` free-prose block it walks through and
+      the lifecycle states the CLI transitions the story through on a Pass
+      verdict. The schema names the enum values; the agent must not invent
+      synonyms.
+
+what_to_extract:
+  - name: field_shapes
+    detail: |
+      Required vs optional, types, defaults, and the small set of patterns
+      (e.g. `id` is a positive integer matching the filename, `patterns`
+      is a slug array defaulting to []). The schema's `additionalProperties:
+      false` makes the field set closed — no agent may invent a new
+      top-level key.
+  - name: lifecycle_states
+    detail: |
+      The `status` enum: `proposed | under_construction | healthy |
+      unhealthy | retired`. Authoring writes `proposed` or
+      `under_construction`. `healthy` is written ONLY by `agentic uat` on
+      a Pass verdict (the prove-it gate connection). `unhealthy` is
+      computed by the dashboard from evidence and is never written to
+      disk. `retired` is a terminal off-tree state.
+  - name: acceptance_block
+    detail: |
+      `acceptance.tests` is a non-empty array of `{ file, justification }`
+      objects (1-to-1 binding: each test file is referenced by exactly
+      one story). `acceptance.uat` is the free-prose walkthrough a UAT
+      agent or human executes end-to-end and must include cleanup. Both
+      are required.
+  - name: prove_it_gate_link
+    detail: |
+      The `status: healthy` enum value plus the prose around it ("written
+      only by `agentic uat` on a Pass verdict") is the schema's anchor
+      point for ADR-0005's prove-it gate. The schema is what makes the
+      gate enforceable — without it, an agent could quietly write
+      `status: healthy` directly. With it, the document is rejected at
+      parse time unless the CLI is the writer.
+
+what_NOT_to_do:
+  - |
+    Do not restate the field shapes or the status enum in an agent's own
+    spec. Reference this asset instead — drift between the schema and an
+    agent's paraphrase is a guaranteed source of bugs once the schema
+    evolves.
+  - |
+    Do not rely on a previous session's reading of the schema. Re-read at
+    every session start; field additions or enum changes propagate the
+    moment the schema is touched.
+  - |
+    Do not author or edit the schema from inside an agent that consumes
+    it. Schema changes are escalations (per guidance-writer's escalation
+    rules); a consumer with edit ambitions is a layering violation.
+
+reference_pattern:
+  in_inputs_yml: |
+    Under required_reading, write:
+      - path: schemas/story.schema.json
+        reason: See agents/assets/definitions/story-schema-contract.yml.
+
+current_consumers:
+  - agents/planner/story-writer/inputs.yml
+  - agents/build/build-rust/inputs.yml
+  - agents/test/test-builder/inputs.yml
+  - agents/test/test-uat/inputs.yml

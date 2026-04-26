@@ -2,10 +2,7 @@ required_reading:
   - path: CLAUDE.md
     reason: See agents/assets/guidelines/reference-claude-md.yml.
   - path: schemas/story.schema.json
-    reason: |
-      Contract of the story whose UAT you are running — field shapes, the
-      `acceptance.uat:` free-prose field you execute, and the lifecycle
-      states the CLI transitions the story through on a Pass verdict.
+    reason: See agents/assets/definitions/story-schema-contract.yml.
   - path: docs/decisions/0005-red-green-is-a-contract.md
     reason: |
       Defines the prove-it gate and why the UAT signing surface exists.

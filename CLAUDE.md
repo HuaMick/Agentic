@@ -30,6 +30,16 @@ Authority flows through, in order:
 9. **Patterns under `patterns/`** — reusable design guidance referenced by
    stories.
 
+### Orchestration role
+
+When Claude Code is the session orchestrator, the **session-orchestrator**
+spec at `agents/orchestration/session-orchestrator/process.yml` is its
+authoritative behavioral guide — including the orient-before-acting pattern
+(verify brief claims against current corpus state before delegating writes).
+The **system-investigator** (`agents/orchestration/system-investigator/`) is
+the sanctioned tool for parallel, read-only state-investigation when the
+orient trigger fires; spawn one per independent question, in parallel.
+
 ### Spawning a subagent
 
 For agents registered as native Claude Code subagent types, use
@@ -81,7 +91,7 @@ the appropriate subagent — context discipline matters.
 
 - **Story** — a unit of work defined by an outcome, one or more executable
   acceptance tests, a UAT journey, and rebuild guidance.
-  Status enum: `proposed | under_construction | healthy | unhealthy`.
+  Status enum: `proposed | under_construction | healthy | unhealthy | retired`.
 - **Pattern** — reusable design/operational guidance referenced by stories.
 - **Verdict** — the output of `agentic uat`: Pass or Fail, with commit-signed
   evidence in the `uat_signings` table.

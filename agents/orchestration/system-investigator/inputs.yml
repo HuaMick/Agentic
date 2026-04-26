@@ -1,0 +1,72 @@
+required_reading:
+  - path: CLAUDE.md
+    reason: See agents/assets/guidelines/reference-claude-md.yml.
+  - path: agents/README.md
+    reason: |
+      Authoritative roster of active agents and their categories. Many
+      claims about "what owns X" or "what category Y belongs to" resolve
+      against this file plus the named agent's contract.yml.
+
+context:
+  - pattern: stories/*.yml
+    reason: Story corpus — for claims about story IDs, statuses, dependencies, acceptance tests.
+  - pattern: agents/**/contract.yml
+    reason: Per-agent authority and ownership boundaries — for claims about which agent owns which surface.
+  - pattern: agents/**/process.yml
+    reason: Per-agent workflow and rules — for claims about how an agent behaves.
+  - pattern: agents/**/inputs.yml
+    reason: Per-agent tool grants and required reading — for claims about what an agent reads or what tools it holds.
+  - pattern: agents/assets/**/*.yml
+    reason: Shared asset definitions and consumer lists — for claims about which agents reference which assets.
+  - pattern: schemas/*.schema.json
+    reason: Authoritative artefact shapes — for claims about valid statuses, required fields, enum values.
+  - pattern: docs/decisions/*.md
+    reason: Architectural Decision Records — for claims grounded in an ADR's stated decision.
+  - pattern: evidence/runs/**/*.jsonl
+    reason: Red-state evidence files — for claims about whether a story has recorded red evidence at a given commit.
+  - pattern: .claude/agents/*.md
+    reason: Pointer files — for claims about which subagents are registered with Claude Code and what their slugs are.
+
+parameters:
+  - name: question
+    description: |
+      The single specific question to answer. One question per
+      invocation — if the orchestrator needs ten things verified, it
+      spawns ten investigators in parallel. The question may pack
+      multiple independent claims (each becomes one entry in the
+      structured `findings` array), but it must address ONE coherent
+      area of corpus state. "Is story 23 healthy AND does build-rust
+      own crates/agentic-store/?" is acceptable (two claims, both
+      answerable from corpus state). "Is story 23 healthy AND should
+      we author a new agent X?" is not (the second is a judgment, not
+      a claim about state).
+  - name: pointers
+    description: |
+      Optional list of file paths or globs the caller already knows are
+      relevant. The investigator may use these as starting points but
+      must still identify the AUTHORITATIVE source for each claim
+      (schema beats README; contract.yml beats agents/README.md; ADR
+      beats CLAUDE.md). Pointers are hints, not the answer.
+    required_when: optional — investigator can locate sources unaided when omitted.
+
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+
+commands:
+  - name: git-log-readonly
+    invocation_example: git log --oneline -n 20
+    purpose: |
+      Read commit history to verify claims about recent changes, commit
+      SHAs, or branch state. Read-only. Never invoke `git commit`,
+      `git push`, `git add`, `git checkout`, `git reset`, `git merge`,
+      `git rebase`, `git stash`, `git rm`, or any other mutating git
+      command.
+  - name: git-status-readonly
+    invocation_example: git status --porcelain
+    purpose: Verify dirty-tree claims without mutating state.
+  - name: git-show-readonly
+    invocation_example: git show <sha>:<path>
+    purpose: Read a file at a specific commit to verify claims about historical state.

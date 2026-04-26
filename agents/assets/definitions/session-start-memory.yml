@@ -34,3 +34,5 @@ current_consumers:
   - agents/teacher/guidance-writer/process.yml
   - agents/test/test-builder/process.yml
   - agents/test/test-uat/process.yml
+  - agents/orchestration/session-orchestrator/process.yml
+  - agents/orchestration/system-investigator/process.yml

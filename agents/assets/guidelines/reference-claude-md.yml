@@ -52,3 +52,5 @@ current_consumers:
   - agents/teacher/guidance-writer/inputs.yml
   - agents/test/test-builder/inputs.yml
   - agents/test/test-uat/inputs.yml
+  - agents/orchestration/session-orchestrator/inputs.yml
+  - agents/orchestration/system-investigator/inputs.yml

@@ -1,6 +1,6 @@
 required_reading:
   - path: schemas/story.schema.json
-    reason: Story schema — validate every draft against this.
+    reason: See agents/assets/definitions/story-schema-contract.yml.
   - path: schemas/pattern.schema.json
     reason: Pattern schema — validate every draft against this.
   - path: docs/guides/story-authoring.md
