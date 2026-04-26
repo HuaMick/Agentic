@@ -33,5 +33,5 @@ Extract when the same concept appears (or is about to appear) in **2+ stories' g
 
 ## Current patterns
 
-- **`standalone-resilient-library`** — extracted when multiple crates needed the same "crate stands alone, fails closed on missing deps" guidance. Referenced by stories 1, 2, 5, and 7.
-- **`fail-closed-on-dirty-tree`** — extracted when the UAT gate and the test-builder converged on the same "refuse to attest on a dirty working tree" semantics. Referenced by stories 1 and 7.
+- **`standalone-resilient-library`** — extracted when multiple crates needed the same "crate stands alone, fails closed on missing deps" guidance. Referenced by stories 1, 2, 5, 10, 11, 12, 15, 16, 18, 23, 24, 25.
+- **`fail-closed-on-dirty-tree`** — extracted when the UAT gate and the test-builder converged on the same "refuse to attest on a dirty working tree" semantics. Referenced by stories 1, 11, 15, 18, 20, 23, 24.

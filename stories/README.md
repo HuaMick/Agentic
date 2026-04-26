@@ -40,7 +40,7 @@ Each test file referenced in `acceptance.tests[].file` is bound **1-to-1** to ex
 - `crates/<crate>/tests/*.rs` — Rust integration tests (preferred).
 - `scripts/verify/*.sh` — shell-based verifiers when Rust doesn't fit.
 
-Orphan test files (unreferenced by any story) are flagged by `agentic story audit`.
+Status-vs-implementation drift (status `proposed` but acceptance tests already passing, status `healthy` but a test currently red, etc.) will be flagged by `agentic stories audit` (story 25, proposed). Orphan-test detection is explicitly carved out of story 25's scope; a future story may amend that surface.
 
 ## Schema
 
@@ -50,18 +50,37 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 
 | id | title | status |
 |----|-------|--------|
-| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | healthy |
-| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | healthy |
-| 3 | `agentic stories health` dashboard (library + CLI) | healthy |
-| 4 | `Store` trait + `MemStore` impl | healthy |
-| 5 | `SurrealStore` backed by `surrealkv` | healthy |
-| 6 | `agentic-story` YAML loader + schema + DAG check | healthy |
+| 1 | `agentic uat` signs a verdict promoting a story to healthy (library + CLI) | under_construction |
+| 2 | `agentic-ci-record` records test-builder test results to `test_runs` | under_construction |
+| 3 | `agentic stories health` dashboard (library + CLI) | under_construction |
+| 4 | `Store` trait + `MemStore` impl | under_construction |
+| 5 | `SurrealStore` backed by `surrealkv` | under_construction |
+| 6 | `agentic-story` YAML loader + schema + DAG check | under_construction |
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
 | 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | healthy |
-| 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | healthy |
+| 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | under_construction |
 | 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | healthy |
 | 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | healthy |
 | 15 | test-build is a plan-and-record CLI whose user writes the scaffolds | healthy |
+| 16 | Persist one run row per inner-loop invocation with a tee'd NDJSON trace | under_construction |
+| 17 | Story YAML carries an optional `build_config` block the loader parses | under_construction |
+| 18 | Resolve a signer identity and stamp it on every signing and run row | under_construction |
+| 19 | `agentic-runtime` un-deferred — Runtime trait and ClaudeCodeRuntime impl | under_construction |
+| 20 | `agentic story build <id>` launches the sandbox and returns an attested run | under_construction |
+| 21 | Retired status + `superseded_by` chain let the tree prune without deletion | under_construction |
+| 23 | `agentic test-build record` emits mixed red/preserved/re-authored verdicts | under_construction |
+| 24 | `agentic test-build record` rejects scaffold defects masquerading as compile-red | proposed |
+| 25 | `agentic stories audit` surfaces status-vs-implementation drift | proposed |
+
+Stories 1-6 and 11 were previously `healthy`. They auto-reverted to
+`under_construction` during the Phase 0 batch when defects-amend-the-
+owning-story added new acceptance tests (e.g. signer wiring on top of
+story 1's UAT path, signer wiring on top of story 2's `test_runs`
+shape, related contract tightenings as the runtime/sandbox stories
+exposed downstream gaps). The fact that they are not currently green
+is what the system is supposed to surface — the moment a defect lands,
+proof is invalidated, and a new red-green cycle drives the tightening
+back to a Pass verdict.
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather

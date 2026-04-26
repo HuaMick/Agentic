@@ -2,7 +2,7 @@
 
 A Rust-based agent orchestration system built around story-driven development.
 
-**Status:** Phase 2 — vertical slice operational end-to-end. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Twelve stories `healthy` (1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 15); zero under_construction, zero proposed, zero unhealthy. The `dag-primary-lens` epic (stories 10-13) is complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes three top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test`, and `agentic test-build [plan|record]`.
+**Status:** Phase 2 / Phase 0 batch in flight. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Five stories currently `healthy` (9, 10, 12, 13, 15); fourteen `under_construction` as the Phase 0 batch (signer resolver, runtime un-deferral, run recorder, sandbox launcher) is implemented and previously-healthy stories cycle through amendment for newly-discovered defects (per the defects-amend-the-owning-story rule); two `proposed` (24, 25). Three retired (7, 8, 14). The `dag-primary-lens` epic (stories 10-13) is complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes three top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test`, and `agentic test-build [plan|record]`.
 
 ## What this is
 
@@ -22,8 +22,9 @@ A rebuild of [AgenticEngineering](https://github.com/HuaMick/AgenticEngineering)
 ```
 crates/            Rust workspace (7 active crates + _deferred/ placeholders)
 agents/            Authored YAML agent definitions (the product)
-agents/assets/     Reusable agent assets (6 active; schema in schemas/asset.schema.json)
+agents/assets/     Reusable agent assets (7 active; schema in schemas/asset.schema.json)
 .claude/agents/    Hand-written pointer .md files that delegate to agents/
+.claude/hooks/     Programmatic enforcement of agent contracts (PreToolUse hooks)
 patterns/          Reusable design guidance referenced by stories
 schemas/           JSON Schemas — authoritative shape of authored artifacts
 stories/           User stories — the unit of work
@@ -55,12 +56,33 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 
 ## Current state
 
-**Healthy:** stories 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 15. Zero `under_construction`, zero `proposed`, zero `unhealthy`.
+**Healthy:** stories 9, 10, 12, 13, 15. The **`dag-primary-lens`** epic
+(`epics/live/dag-primary-lens/`) is **complete** — stories 10, 11, 12,
+and 13 shifted the system's mental model from "flat list of stories"
+to "DAG with frontier-of-work, blast-radius drilldown, UAT
+ancestor-gating, and subtree-scoped CI." Story 11 has since been
+auto-reverted to `under_construction` for an amendment.
 
-The **`dag-primary-lens`** epic (`epics/live/dag-primary-lens/`) is
-**complete**. Stories 10, 11, 12, and 13 shifted the system's mental
-model from "flat list of stories" to "DAG with frontier-of-work,
-blast-radius drilldown, UAT ancestor-gating, and subtree-scoped CI."
+**Under construction (14):** stories 1, 2, 3, 4, 5, 6, 11, 16, 17, 18,
+19, 20, 21, 23. Stories 1-6 and 11 were previously healthy and have
+been auto-reverted as defects-amend-the-owning-story added new
+acceptance tests during the Phase 0 batch (signer resolver,
+agentic-runtime, run recorder, sandbox launcher). Stories 16-21 and 23
+are net-new Phase 0 work in progress.
+
+**Proposed (2):** story 24 (`agentic test-build record` diagnostic
+classifier; tightens probe to E0432/E0599 only) and story 25 (`agentic
+stories audit` CLI; surfaces status-vs-implementation drift).
+
+**Retired (3):** stories 7, 8, 14.
+
+**Programmatic enforcement.** `.claude/hooks/build_rust_guard.py` is a
+PreToolUse hook that enforces three of build-rust's contractual
+boundaries that already had clear documentation but were violated
+anyway: `cargo fmt` is denied outright, Bash invocations must match an
+explicit allowlist, and `Write`/`Edit` to `crates/*/tests/**` and `Write`
+to `stories/**` are blocked. See `.claude/hooks/README.md` for the
+specifics; the hook only fires for the build-rust subagent.
 
 Stories 7, 8, and 14 were retired during the session that shipped
 story 15:
