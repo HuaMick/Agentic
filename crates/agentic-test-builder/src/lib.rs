@@ -503,7 +503,7 @@ impl TestBuilder {
 
         // Classify and probe each scaffold, collecting verdicts.
         let mut verdicts = Vec::new();
-        for (_idx, entry) in plan.iter().enumerate() {
+        for entry in plan.iter() {
             let test_path = self.repo_root.join(&entry.file);
 
             // Check file exists.
@@ -574,7 +574,7 @@ impl TestBuilder {
 
         // Write evidence atomically.
         let run_id = Uuid::new_v4().to_string();
-        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let commit = get_head_commit(&self.repo_root)?;
 
         let evidence_dir = self.repo_root.join(format!("evidence/runs/{story_id}"));
@@ -582,11 +582,7 @@ impl TestBuilder {
         // Construct the filename from timestamp.
         let filename = format!(
             "{}-red.jsonl",
-            timestamp
-                .replace(":", "-")
-                .split('.')
-                .next()
-                .unwrap_or(&timestamp)
+            timestamp.replace(":", "-").replace(".", "-")
         );
 
         let evidence_path = evidence_dir.join(&filename);
@@ -663,9 +659,11 @@ fn is_tree_clean(repo_root: &Path, story: &Story) -> bool {
         if path_normalized.starts_with(".bin/")
             || path_normalized.starts_with(".agentic-cache/")
             || path_normalized.starts_with("target/")
+            || path_normalized.starts_with("evidence/")
             || path_normalized == ".bin"
             || path_normalized == ".agentic-cache"
             || path_normalized == "target"
+            || path_normalized == "evidence"
             || path_normalized == "Cargo.lock"
         {
             continue;
