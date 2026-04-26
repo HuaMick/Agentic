@@ -124,26 +124,13 @@ impl TestBuilder {
     ///   and is unchanged).
     ///
     /// This is a pure read operation; no probing, no tree mutation.
-    /// Internally resolves the story from disk and opens the repository.
     pub fn classify_scaffold(
         &self,
-        story_id: u32,
+        story: &Story,
         scaffold_path: &Path,
+        repo: &git2::Repository,
     ) -> ScaffoldClassification {
-        // Load the story from disk.
-        let story_path = self.repo_root.join(format!("stories/{story_id}.yml"));
-        let story = match Story::load(&story_path) {
-            Ok(s) => s,
-            Err(_) => return ScaffoldClassification::Preserve,
-        };
-
-        // Open the repository.
-        let repo = match git2::Repository::open(&self.repo_root) {
-            Ok(r) => r,
-            Err(_) => return ScaffoldClassification::Preserve,
-        };
-
-        self.classify_scaffold_internal(&story, scaffold_path, &repo)
+        self.classify_scaffold_internal(story, scaffold_path, repo)
     }
 
     /// Internal classification logic to avoid type-checking ICE.
@@ -507,6 +494,10 @@ impl TestBuilder {
             return Err(TestBuilderError::DirtyTree);
         }
 
+        // Open the repo for classification.
+        let repo = git2::Repository::open(&self.repo_root)
+            .map_err(|e| TestBuilderError::ClassificationFailed(e.to_string()))?;
+
         // Plan the scaffolds.
         let plan = Self::plan(&story);
 
@@ -536,7 +527,7 @@ impl TestBuilder {
             }
 
             // Classify the scaffold.
-            let classification = self.classify_scaffold(story_id, Path::new(&entry.file));
+            let classification = self.classify_scaffold(&story, Path::new(&entry.file), &repo);
 
             // Build the verdict entry based on classification.
             let verdict_entry = match classification {
