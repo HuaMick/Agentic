@@ -13,17 +13,19 @@
 //! would lose the "this is the story's first red record" signal
 //! from day one of a new story's life.
 //!
-//! Red today is compile-red: this test asserts the classifier's
-//! first-authoring outcome through the typed
-//! `TestBuilder::classify_scaffold` -> `ScaffoldClassification`
-//! library surface the story promises. Neither symbol exists on the
-//! current `agentic-test-builder` public API, so `cargo check`
-//! fails with `error[E0432]: unresolved import` until build-rust
-//! adds the classifier.
+//! The test asserts the classifier's first-authoring outcome
+//! through the typed `TestBuilder::classify_scaffold(&Story, &Path,
+//! &git2::Repository) -> ScaffoldClassification` library surface the
+//! story promises (canonical 3-arg signature pinned by stories/23.yml
+//! `guidance` and the parallel
+//! `record_classification_matches_three_gate_rule.rs`), and that
+//! `record` on a fresh-checkout-shape fixture stamps every verdict
+//! as `red`, never `re-authored`.
 
 use std::fs;
 use std::path::Path;
 
+use agentic_story::Story;
 use agentic_test_builder::{ScaffoldClassification, TestBuilder};
 use tempfile::TempDir;
 
@@ -123,14 +125,17 @@ fn new_story_first_authoring_classifies_as_red_not_re_authored() {
 
     init_repo_and_commit_seed(repo_root);
 
+    // Load the story and open the repo for classify_scaffold's
+    // canonical (&Story, &Path, &git2::Repository) signature.
+    let story = Story::load(&story_path).expect("load fixture story");
+    let repo = git2::Repository::open(repo_root).expect("open repo");
+
     // Act + assert 1: classifier surface. Both scaffolds must be
-    // classified FirstAuthoring — not ReAuthor. This fails compile
-    // today because neither `classify_scaffold` nor
-    // `ScaffoldClassification::FirstAuthoring` exist on the library's
-    // public API.
+    // classified FirstAuthoring — not ReAuthor — because no prior
+    // `evidence/runs/<STORY_ID>/` directory exists for this fixture.
     let builder = TestBuilder::new(repo_root);
-    let c_a = builder.classify_scaffold(STORY_ID, Path::new(SCAFFOLD_A));
-    let c_b = builder.classify_scaffold(STORY_ID, Path::new(SCAFFOLD_B));
+    let c_a = builder.classify_scaffold(&story, Path::new(SCAFFOLD_A), &repo);
+    let c_b = builder.classify_scaffold(&story, Path::new(SCAFFOLD_B), &repo);
     assert!(
         matches!(c_a, ScaffoldClassification::FirstAuthoring),
         "scaffold_a must classify FirstAuthoring when no prior evidence row exists; \
