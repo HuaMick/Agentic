@@ -362,8 +362,22 @@ guidance: |
   take a classification manifest from the caller. Adding an agent-
   authored manifest would introduce a forgery axis the amendment
   explicitly closed (the whole reason the signal is git-native is
-  to avoid a YAML field the caller could set wrong). For each
-  scaffold named in the story's `acceptance.tests[]`:
+  to avoid a YAML field the caller could set wrong).
+
+  Classifier signature. The library entry point for the three-gate
+  rule is the pure function `TestBuilder::classify_scaffold(&Story,
+  &Path, &git2::Repository) -> ScaffoldClassification`. The first
+  argument carries the on-disk YAML state (status, depends_on,
+  acceptance tests); the path is the scaffold file under inspection;
+  the repository handle is the `git2` opening of the workspace, used
+  read-only for Gate B's `git log` and Gate C's clean-tree probe.
+  The function returns a typed enum value; it does not probe, does
+  not touch the evidence directory, and does not mutate the working
+  tree. Build-rust may add helpers around this entry point, but the
+  three-argument shape is the contract the CLI and the re-author /
+  preserve test cases consume.
+
+  For each scaffold named in the story's `acceptance.tests[]`:
 
     1. If the story has NO prior `evidence/runs/<id>/*.jsonl` row
        at all → first-authoring: probe the scaffold; on red,
