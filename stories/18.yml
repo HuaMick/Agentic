@@ -368,9 +368,10 @@ acceptance:
          extended here to drive through
          `ClaudeCodeRuntime` with a stub NDJSON
          source). Pass `model = "claude-sonnet-4-6"`
-         and `run_id = "a1b2c3"`. Observe:
+         and `run_id =
+         "62458c1e-1a64-4243-ab6d-1bec05d8a644"`. Observe:
            - The new row in `runs` has `signer ==
-             "sandbox:claude-sonnet-4-6@run-a1b2c3"`
+             "sandbox:claude-sonnet-4-6@62458c1e-1a64-4243-ab6d-1bec05d8a644"`
              — NOT `env-person@example.com`, even
              though that env var is exported in the
              outer shell. The runtime composes the

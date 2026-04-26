@@ -197,7 +197,8 @@ acceptance:
            b. Constructs a `RunRecorder` with runs_root=<runs-
               root>, story_id=15, story_yaml_bytes=<bytes of
               stories/15.yml>, signer="sandbox:stub-
-              subprocess@run-aaa111", build_config=`{"max_inner_
+              subprocess@5a6537a5-46d0-48e5-9f1c-2c5ece3fe184",
+              build_config=`{"max_inner_
               loop_iterations": 3}`.
            c. Drives a stub NDJSON stream — the literal bytes
               `{"kind":"tool_call","i":0}\n{"kind":"tool_
@@ -218,7 +219,8 @@ acceptance:
          Confirm:
            - `story_id == 15`
            - `story_yaml_snapshot == <expected-hash>`
-           - `signer == "sandbox:stub-subprocess@run-aaa111"`
+           - `signer ==
+             "sandbox:stub-subprocess@5a6537a5-46d0-48e5-9f1c-2c5ece3fe184"`
            - `outcome == "green"`
            - `iterations` is a one-element array
            - `trace_ndjson_path == "<run-id>/trace.ndjson"`
