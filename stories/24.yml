@@ -1,0 +1,437 @@
+id: 24
+title: "`agentic test-build record` rejects scaffold defects masquerading as compile-red"
+outcome: |
+  An operator running `agentic test-build record <id>` against a scaffold whose
+  rustc diagnostic is anything other than "unresolved import" or "unresolved
+  method" receives a typed scaffold-defect refusal naming the unexpected rustc
+  code, exits 2, writes zero evidence rows, and leaves the working tree
+  byte-identical.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-test-builder/tests/record_refuses_on_type_mismatch_diagnostic.rs
+    justification: |
+      Proves the type-mismatch defect class is fail-closed: given a fixture
+      story whose scaffold on disk compiles into a single rustc E0308
+      diagnostic ("expected `&str`, found `str`" — the exact shape that
+      shipped in `crates/agentic-runtime/tests/run_recorder_captures_branch_
+      state_from_git_repo.rs` during story 16's authoring pass), `agentic
+      test-build record <id>` returns the new typed
+      `TestBuilderError::ScaffoldDefect` (or equivalently named) variant
+      naming the file path AND the unexpected rustc code (`E0308`), exits
+      2, writes zero evidence rows, creates no directory under
+      `evidence/runs/<id>/`, and leaves `git status --porcelain`
+      byte-identical to its pre-invocation output. Without this test, a
+      type-confused scaffold continues to mint `red_path: compile`
+      evidence as if the scaffold were a legitimate contract red, and
+      build-rust then hits the type error as a blocker because there is
+      no green to drive the scaffold to.
+  - file: crates/agentic-test-builder/tests/record_refuses_on_borrow_checker_diagnostic.rs
+    justification: |
+      Proves the borrow-checker defect class is fail-closed: given a
+      fixture story whose scaffold on disk compiles into a rustc E0382
+      diagnostic ("borrow of moved value" inside a test helper, the
+      shape that surfaced repeatedly during the Phase 0 amendment pass
+      when fixtures threaded an owned `String` through two assertions
+      without cloning), `agentic test-build record <id>` returns
+      `ScaffoldDefect` naming the file and the unexpected rustc code
+      (`E0382`), exits 2, writes zero evidence rows, leaves the tree
+      byte-identical. Without this test, borrow errors in the scaffold's
+      own helper code masquerade as the contract's red — but they prove
+      nothing about the symbol or method the scaffold is meant to drive.
+  - file: crates/agentic-test-builder/tests/record_refuses_on_arity_mismatch_diagnostic.rs
+    justification: |
+      Proves the arity-mismatch defect class is fail-closed: given a
+      fixture story whose scaffold on disk compiles into a rustc E0061
+      diagnostic ("this function takes N arguments but M were supplied"
+      — the exact shape that shipped in `crates/agentic-cli/tests/
+      record_new_story_loop_emits_all_red_verdicts.rs` during story 23's
+      authoring pass, where a helper invocation passed the wrong number
+      of arguments), `agentic test-build record <id>` returns
+      `ScaffoldDefect` naming the file and `E0061`, exits 2, writes zero
+      evidence rows, leaves the tree byte-identical. Without this test,
+      a scaffold whose call to an EXISTING helper has the wrong arity
+      gets stamped as `red_path: compile` even though no missing symbol
+      is being exercised — the contract red the story is supposed to
+      pin is not actually being probed.
+  - file: crates/agentic-test-builder/tests/record_refuses_on_syntax_error_in_fixture_literal.rs
+    justification: |
+      Proves the syntax-error defect class is fail-closed: given a
+      fixture story whose scaffold on disk contains a fixture string
+      literal whose embedded quotes were not escaped (the exact shape
+      that shipped in `crates/agentic-store/tests/load_build_config_
+      rejects_non_positive_iterations.rs` during story 17's authoring
+      pass, where YAML inside a Rust raw-string literal terminated the
+      literal early and produced a parse error rather than a contract
+      red), `agentic test-build record <id>` returns `ScaffoldDefect`
+      naming the file and the parser's diagnostic shape (a syntax
+      error, not a typed rustc EXXXX code — `ScaffoldDefect` is also
+      the variant for non-rustc-EXXXX compile failures), exits 2,
+      writes zero evidence rows, leaves the tree byte-identical.
+      Without this test, the existing `ScaffoldParseError` path (story
+      15's `record_refuses_on_unparseable_scaffold.rs`) catches files
+      that fail `syn::parse_file`, but a file that parses with `syn`
+      yet fails rustc parsing inside a string literal slips through;
+      this test pins that gap explicitly.
+  - file: crates/agentic-test-builder/tests/record_accepts_unresolved_import_as_legitimate_red.rs
+    justification: |
+      Proves the legitimate-red happy path survives the new gate: given
+      a fixture story whose scaffold on disk contains a `use
+      <target_crate>::not_yet_implemented;` import for a symbol the
+      target crate does not declare (the canonical "you have not built
+      this yet" scaffold shape), `agentic test-build record <id>`
+      classifies the verdict as `red_path: compile` and writes the
+      evidence row exactly as story 15's contract specified — the new
+      diagnostic-allowlist path is additive, not substitutive. The
+      written verdict carries the rustc diagnostic code for unresolved
+      imports (`E0432`) in its `diagnostic` field. Without this test,
+      tightening the probe could regress the foundational "scaffold
+      that names an unimplemented symbol records red" loop the entire
+      red-green contract is built on.
+  - file: crates/agentic-test-builder/tests/record_accepts_unresolved_method_as_legitimate_red.rs
+    justification: |
+      Proves the second legitimate-red happy path survives: given a
+      fixture story whose scaffold on disk constructs a value of a
+      type the target crate exports and calls a method that type does
+      not yet have (e.g. `MyType::new().not_yet_implemented()`),
+      `agentic test-build record <id>` classifies the verdict as
+      `red_path: compile`, captures the rustc diagnostic code for
+      unresolved methods (`E0599`) in `diagnostic`, and writes the
+      evidence row. Together with the unresolved-import test above,
+      these two tests pin the FULL set of rustc diagnostic codes the
+      probe accepts as legitimate compile-red. Anything outside
+      `{E0432, E0599}` (the import-vs-method axis) routes to
+      `ScaffoldDefect`. Without this test, the probe could over-narrow
+      to imports only, breaking the second canonical scaffold shape
+      (extending an existing type with a missing method) that
+      build-rust drives to green.
+  - file: crates/agentic-cli/tests/test_build_record_diagnostic_classification_through_binary.rs
+    justification: |
+      Proves the diagnostic-classification refusal reaches the operator
+      through the `agentic` binary: running `agentic test-build record
+      <fixture-id>` against a fixture story whose scaffold on disk
+      produces an E0308 type mismatch (the canonical scaffold-defect
+      shape) exits with code 2, prints to stderr a message naming the
+      file path AND the unexpected rustc code, AND `evidence/runs/
+      <fixture-id>/` does not exist after the invocation. Conversely,
+      against a fixture whose scaffold produces an E0432 unresolved
+      import the same binary exits 0 and writes the evidence row with
+      `red_path: compile`. Without this test, the library-level
+      contract is library-level only — the argv-to-subcommand wire
+      could swap exit codes, drop the diagnostic-class refusal, or
+      map `ScaffoldDefect` to exit 1 (real fail) instead of exit 2
+      (could-not-verdict), and the operator running the CLI against a
+      defective scaffold would not see the actionable error.
+  uat: |
+    Goal: convince yourself that `agentic test-build record` no longer
+    accepts arbitrary non-zero rustc exits as red verdicts. Only the
+    two sanctioned compile-red shapes — unresolved import and
+    unresolved method — produce evidence rows. Anything else (type
+    mismatches, borrow-checker errors, arity errors, syntax errors
+    inside string literals) is classified as a scaffold defect, the
+    command refuses with exit 2, and zero evidence is written.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status
+         --porcelain` and confirm it is empty.
+      2. Install the CLI: `cargo install --path crates/agentic-cli
+         --locked`. Confirm `command -v agentic` resolves.
+      3. On a scratch branch, author a small fixture crate at
+         `crates/agentic-fixture-defect/` with one public function
+         `pub fn already_built() -> i32 { 1 }` (so a happy-path
+         scaffold has something to import) and no other public
+         surface. Add it to the workspace `Cargo.toml`. Commit.
+      4. Author a fixture story at `stories/<fixture-id>.yml` with
+         `status: proposed`, six acceptance.tests[] entries (one per
+         walkthrough below), and a substantive justification per
+         entry. Commit.
+
+    Legitimate-red walkthrough (the gate must NOT fire here):
+      5. Author scaffold A at the path the story names for the
+         unresolved-import case. Body: `use agentic_fixture_defect::
+         not_yet_implemented; #[test] fn t() { not_yet_implemented(); }`.
+         Stage with `git add`.
+      6. Run `agentic test-build record <fixture-id>` with ONLY scaffold
+         A's path enumerated in the story. Observe:
+           - Process exits 0.
+           - One JSONL appears at `evidence/runs/<fixture-id>/
+             <timestamp>-red.jsonl`.
+           - `cat` it. The single verdict has `verdict: "red"`,
+             `red_path: "compile"`, and a `diagnostic` field whose
+             text contains the rustc code `E0432` (unresolved import).
+      7. `git reset --hard <SHA-before-step-5>` and `git clean -fd`.
+      8. Author scaffold B at the path for the unresolved-method case.
+         Body: `use agentic_fixture_defect::already_built; #[test] fn
+         t() { already_built().no_such_method(); }`. Stage with `git
+         add`. Re-author the story to enumerate only scaffold B.
+         Stage and commit the story edit so the tree is clean except
+         for the staged scaffold.
+      9. Run `agentic test-build record <fixture-id>`. Observe exit
+         0, evidence written, the verdict's `diagnostic` contains
+         rustc code `E0599` (no method named `no_such_method`).
+
+    Scaffold-defect walkthroughs (the gate MUST fire — exit 2, no
+    evidence, byte-identical tree):
+     10. `git reset --hard` and `git clean -fd`. Author scaffold C
+         that produces an E0308 type mismatch. Body: `#[test] fn t()
+         { let s: String = "hello"; let _ = s; }`. Re-author the
+         story to enumerate only scaffold C. Stage. Commit the story
+         edit. Run `agentic test-build record <fixture-id>`. Observe:
+           - Process exits 2.
+           - stderr names the scaffold path AND the string `E0308`.
+           - `evidence/runs/<fixture-id>/` does NOT exist on disk.
+           - `git status --porcelain` is byte-identical to its
+             pre-invocation output.
+     11. Repeat step 10 with a scaffold producing E0382 (borrow of
+         moved value): construct a `String`, move it into one
+         function call, then attempt to use it in a second
+         assertion. Confirm exit 2, stderr names `E0382`, no
+         evidence, byte-identical tree.
+     12. Repeat step 10 with a scaffold producing E0061 (arity
+         mismatch): call an existing helper with the wrong number
+         of arguments. Confirm exit 2, stderr names `E0061`, no
+         evidence, byte-identical tree.
+     13. Repeat step 10 with a scaffold whose body contains a raw
+         string literal whose embedded quotes terminate the literal
+         early (the syntax-error-inside-fixture-literal shape).
+         Confirm exit 2, stderr names the syntax error and the file
+         path (rustc does not emit an EXXXX code for some parser
+         failures; `ScaffoldDefect` accepts that case and surfaces
+         the parser's message verbatim). No evidence, byte-identical
+         tree.
+
+    Cleanup:
+     14. `git reset --hard <SHA-before-UAT>` and `git clean -fd` to
+         restore the tree and the fixture to their pre-walkthrough
+         state.
+     15. Revert to `main` and delete the scratch branch.
+     16. If you want the installed binary gone: `cargo uninstall
+         agentic-cli`.
+guidance: |
+  This story tightens `agentic test-build record`'s red-state probe so
+  that "compile-red" stops meaning "any non-zero rustc exit" and starts
+  meaning "rustc emitted exactly one of the two sanctioned diagnostic
+  codes the contract recognises as a legitimate first-authoring red."
+  Story 15's contract (probe semantics, evidence atomicity, dirty-tree
+  gate, typed errors) is unchanged. Story 23's classification rule
+  (`red` / `preserved` / `re-authored`) is unchanged. This story adds a
+  precondition that runs INSIDE the existing compile-red branch of the
+  probe: before stamping `red_path: compile`, validate that the rustc
+  diagnostic is in the allowlist. If not, refuse with a new typed
+  error and write nothing.
+
+  The trigger. During the Phase 0 amendment pipeline AND the dag-
+  primary-lens epic, six scaffolds shipped that compiled red for the
+  WRONG reason. Three are named explicitly so a future contributor
+  rebuilding from this spec can reproduce the failure modes:
+
+    1. `crates/agentic-runtime/tests/run_recorder_captures_branch_
+       state_from_git_repo.rs` (story 16). The scaffold contained a
+       `let s: &str = some_owned_string;` against rustc's borrow rules
+       — an E0308 type mismatch ("expected `&str`, found `str`"). Under
+       the old probe, the non-zero exit + an `error[E0308]` line in
+       stderr produced `red_path: compile` evidence. Build-rust then
+       picked up the story and could not drive the scaffold to green
+       because the type confusion was inside the scaffold's own setup,
+       not in the symbol the story was supposed to be proving.
+
+    2. `crates/agentic-store/tests/load_build_config_rejects_non_
+       positive_iterations.rs` (story 17). The scaffold embedded a YAML
+       fixture inside a Rust string literal. The literal used `"` as
+       both Rust's string delimiter and inside the YAML payload, with
+       no `r#"..."#` raw-string framing and no escapes. rustc's parser
+       terminated the literal early on the first inner `"`, producing a
+       cascade of syntax errors that exited non-zero. Under the old
+       probe this stamped `red_path: compile`. The justification's
+       observable (the loader rejecting non-positive iterations) was
+       never actually exercised.
+
+    3. `crates/agentic-cli/tests/record_new_story_loop_emits_all_red_
+       verdicts.rs` (story 23). The scaffold's helper invocation passed
+       four arguments to a helper that took three — an E0061 arity
+       mismatch. rustc exited non-zero with an `error[E0061]` line; the
+       old probe stamped `red_path: compile`. The story's actual
+       observable (the CLI emitting a row of `red` verdicts for a new
+       story) was never probed.
+
+  Three more instances surfaced in the same session; the pattern is
+  the same. Three concrete examples is enough rebuild guidance for a
+  future contributor — the failure mode is "any rustc-EXXXX diagnostic
+  outside the allowlist gets accepted as contract red."
+
+  The diagnostic allowlist. A scaffold's compile failure is a
+  legitimate first-authoring red iff rustc's primary diagnostic code
+  is one of:
+
+    - `E0432` — "unresolved import". The scaffold names a symbol
+      (function, struct, trait, module) that the target crate does
+      not export yet. This is the canonical "I have not implemented
+      this module/function yet" red.
+    - `E0599` — "no method named X found for type Y". The scaffold
+      constructs a value of an existing type and calls a method that
+      type does not yet have. This is the canonical "I have not
+      added this method to my impl yet" red.
+
+  Anything else — `E0308` (type mismatch), `E0382` (borrow of moved
+  value), `E0061` (arity mismatch), `E0277` (trait bound not
+  satisfied), syntax errors from broken fixture literals, etc. — is
+  a scaffold defect: a flaw in the scaffold itself that is not part
+  of the contract the story is trying to pin. The probe must
+  fail-closed.
+
+  How the probe distinguishes. Use rustc's structured JSON
+  diagnostic stream (`cargo check --message-format=json`) so the
+  classification is on the typed `code.code` field of the primary
+  diagnostic, not on a substring match of human-rendered stderr.
+  Story 15's `record_classifies_compile_red_correctly_across_rustc_
+  ice.rs` already pinned that classification must not depend on
+  human-rendered stderr (because rustc 1.95's annotate-snippets
+  renderer can ICE before that text emits); the same JSON stream
+  this story consumes is the same one that ICE-resilience test
+  already requires. If multiple primary diagnostics emit, the FIRST
+  one in source order is the classifier's input — a scaffold
+  cannot smuggle in an unresolved-import diagnostic to bypass an
+  earlier type mismatch.
+
+  Syntax errors that escape `syn::parse_file`. Story 15's
+  `record_refuses_on_unparseable_scaffold.rs` catches files that
+  `syn` cannot parse at all. A file with a malformed string literal
+  inside an otherwise-valid token tree CAN parse with `syn` yet
+  still produce rustc parse errors when rustc lexes the literal
+  body. Those land in the JSON stream without an EXXXX code (rustc
+  emits parser errors with empty `code` in some shapes). The new
+  `ScaffoldDefect` variant accepts both forms — "rustc-EXXXX outside
+  the allowlist" AND "rustc parse error with no code" — and surfaces
+  the diagnostic message verbatim. The two error variants are
+  distinct: `ScaffoldParseError` fires when `syn` cannot parse;
+  `ScaffoldDefect` fires when `syn` parsed but rustc rejects with a
+  non-allowlisted diagnostic.
+
+  Failure mode. The new typed error variant joins the existing
+  table (story 15 + story 23):
+
+    `ScaffoldDefect { file, diagnostic_code, diagnostic_message }`
+      - `file`: the scaffold path.
+      - `diagnostic_code`: the rustc EXXXX code if present, else
+        the empty string (parser failures with no code).
+      - `diagnostic_message`: the first line of rustc's structured
+        message for the offending diagnostic, verbatim.
+
+    Exit code: 2 (could-not-verdict). Same as `ScaffoldNotRed`,
+    `ScaffoldMissing`, `ScaffoldParseError`, `DirtyTree`. The CLI
+    distinguishes the variant in stderr but maps to the same code
+    so CI tooling treats them identically (retry after fixing the
+    scaffold).
+
+  Why a new variant rather than reusing `ScaffoldParseError`. They
+  fire at different points and carry different signals. `ScaffoldParseError`
+  fires on `syn::parse_file` failure — the file is not Rust at all.
+  `ScaffoldDefect` fires AFTER `syn` has parsed the file, after
+  `cargo check` has run, when rustc's primary diagnostic is outside
+  the allowlist. A reader of the evidence chain (or stderr)
+  needs to know which class of defect they have, because the
+  remediation differs: `ScaffoldParseError` means the file is
+  truncated or corrupted; `ScaffoldDefect` means the scaffold's
+  Rust is well-formed but its red is the wrong shape.
+
+  The probe's revised contract (replacing story 15's step 3, leaving
+  steps 1, 2, 4 unchanged):
+
+    1. Confirm the file exists. Missing → `ScaffoldMissing`.
+    2. Parse the file as Rust via `syn::parse_file`.
+       Unparseable → `ScaffoldParseError`.
+    3. Run `cargo check --package <target_crate> --test <test-name>
+       --message-format=json`. On non-zero exit:
+         a. Parse the JSON diagnostic stream; locate the FIRST
+            primary diagnostic in source order.
+         b. If `code.code` ∈ `{"E0432", "E0599"}` → `red_path:
+            compile`; capture the diagnostic's `message` field as
+            `diagnostic`.
+         c. Otherwise → `ScaffoldDefect { file, diagnostic_code,
+            diagnostic_message }` and STOP. Do NOT fall through to
+            step 4. Do NOT write evidence.
+    4. If check succeeded: run `cargo test --package <target_crate>
+       --test <test-name> -- --nocapture`. Non-zero → `red_path:
+       runtime`; capture first panic line as `diagnostic`. Exit 0
+       → `ScaffoldNotRed`.
+
+  No runtime-red allowlist. Runtime-reds are assertion failures and
+  panics from real test logic — `assert_eq!`, `panic!`,
+  unimplemented!() — and the universe of legitimate runtime-red
+  shapes is too broad to enumerate. This story scopes to compile-red
+  only. If a future incident reveals a category of runtime-red
+  scaffold defect that warrants its own typed refusal, that is a
+  separate story.
+
+  Atomicity. The dirty-tree gate fires before any classification
+  (story 15). The diagnostic-allowlist check happens INSIDE the
+  per-scaffold probe loop. If any scaffold trips `ScaffoldDefect`,
+  the whole `record` invocation rolls back atomically: no evidence
+  directory created, no partial JSONL row written, no other scaffold
+  in the loop is probed (the failure is per-run, not per-scaffold —
+  fail-closed semantics from story 15 carry over unchanged). This is
+  consistent with how `ScaffoldMissing`, `ScaffoldParseError`, and
+  `ScaffoldNotRed` already abort the run.
+
+  What this story is NOT.
+    - NOT an amendment to story 15. Story 15 stays `healthy`. Its
+      contract (probe shape, evidence atomicity, dirty-tree gate,
+      existing typed errors) is unchanged. This story narrows
+      step 3 of story 15's probe to add a diagnostic-code allowlist;
+      narrowing is additive at the type level (a new variant) and
+      does not invalidate any of story 15's existing tests.
+    - NOT an amendment to story 23. Story 23's classifier
+      (`red` / `preserved` / `re-authored`) operates ABOVE the probe;
+      this story tightens what counts as a legitimate `red` at the
+      probe layer. A `re-authored` verdict whose probe trips
+      `ScaffoldDefect` aborts the run the same way; the
+      classification path is unchanged.
+    - NOT an ADR edit. ADR-0005's red-green contract is reinforced,
+      not reshaped, by tightening which rustc diagnostics count as
+      contract red.
+    - NOT a test-builder agent guidance edit. The agent does not
+      know what diagnostic codes rustc emits unless the tooling
+      tells it; tightening the probe in code is the right home, and
+      the agent's process.yml stays unchanged.
+    - NOT a schema change. No new field lands in story YAML. No new
+      field lands in the evidence row shape (the existing
+      `diagnostic` field already carries the rustc message; the
+      `red_path: compile` verdict shape is unchanged).
+    - NOT a `--allow-defect` escape hatch. There is no way to opt
+      out of the allowlist. A scaffold whose red is outside the
+      allowlist is by definition not a contract red, and the
+      probe's whole job is to prevent that mistake from minting
+      evidence.
+
+  Standalone-resilience posture. The diagnostic-allowlist check
+  stays inside `agentic-test-builder` and consumes only existing
+  dependencies (`agentic-store`, `agentic-story`, `syn`, `serde` /
+  `serde_json`, `uuid`, `git2`). The JSON diagnostic stream from
+  `cargo check --message-format=json` is parsed via `serde_json` —
+  no new dependency is required. The four standalone-resilience
+  conventions (dependency floor, `*_standalone_resilience.rs`,
+  dumb CLI shim, no in-crate LLM subprocess) all survive unchanged.
+
+  Fail-closed-on-dirty-tree posture. The command-wide dirty-tree
+  check remains the first thing `record` does. The new
+  classification step does not introduce a second opinion on tree
+  state.
+
+  Why now. The Phase 0 + dag-primary-lens session that surfaced six
+  scaffold defects is the concrete trigger. Without this story,
+  every future scaffolding pass continues to admit scaffold defects
+  as legitimate compile-reds, and build-rust runs into them as
+  blockers because there is no green to drive a defective scaffold
+  to. Closing the gap restores the meaning of "red" in the
+  red-green contract: rustc says "I cannot find what you named"
+  (the symbol or method the story is asking the implementer to
+  build), and only that.
+depends_on:
+- 15
+related_files:
+- crates/agentic-test-builder/src/**
+- crates/agentic-cli/src/**
+- docs/decisions/0005-red-green-is-a-contract.md
