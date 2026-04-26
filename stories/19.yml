@@ -238,7 +238,7 @@ acceptance:
            c. Wraps it as `let rt: Arc<dyn Runtime> =
               Arc::new(...)`.
            d. Builds a `RunConfig` with story_id=15,
-              signer="sandbox:mock@run-uat-001",
+              signer="sandbox:mock@bf1bb09e-c0c8-4bc6-a6bd-214449e6fc5b",
               build_config.max_inner_loop_iterations=3,
               runs_root=<tempdir>, repo_path=None.
            e. Calls `rt.spawn_claude_session(cfg).await?`.
@@ -254,8 +254,9 @@ acceptance:
            - `<tempdir>/<run-id>/trace.ndjson` contains
              exactly the three canned lines in order.
            - Query the MemStore for `table="runs"`: exactly
-             one row, with `signer == "sandbox:mock@run-uat-
-             001"`, `outcome == "green"`, `iterations` of
+             one row, with
+             `signer == "sandbox:mock@bf1bb09e-c0c8-4bc6-a6bd-214449e6fc5b"`,
+             `outcome == "green"`, `iterations` of
              length 1 (the tool_call/tool_result pair; the
              final assistant turn is not counted as an
              iteration per this story's counting
