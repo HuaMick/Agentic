@@ -106,6 +106,39 @@ acceptance:
       no last evidence row), and the audit trail would lose the
       "this is the story's first red record" signal from day one
       of a new story's life.
+  - file: crates/agentic-test-builder/tests/record_emits_preserved_verdict_for_grandfathered_pre_adr_story.rs
+    justification: |
+      Proves the grandfather detection rule from ADR-0005's
+      sub-amendment ("Pre-ADR-0005 bridge") is materialised by
+      the CLI without a YAML flag, without a synthetic red
+      backfill, and without any in-test perturbation of the
+      evidence directory: given a fixture story whose `status`
+      is `healthy` AND whose `evidence/runs/<id>/` directory does
+      not exist on disk at all (the canonical bridge shape — a
+      story that reached `healthy` either pre-ADR-0005 or via
+      story 10's bootstrap exception), and whose
+      `acceptance.tests[]` names one or more scaffolds that exist
+      on disk and probe green, `agentic test-build record <id>`
+      classifies every named scaffold as `verdict: "preserved"`,
+      writes exactly one new JSONL row at
+      `evidence/runs/<id>/<timestamp>-red.jsonl` carrying that
+      verdict per scaffold, exits 0, and runs no probe. The
+      detection signal is exactly two predicates ANDed: (a) the
+      story's directory under `evidence/runs/` is absent at
+      record-invocation time, and (b) the story's on-disk YAML
+      `status` is `healthy`. After the row lands, the directory
+      exists; a subsequent invocation against the same unchanged
+      story routes through the normal preserved path (three gates
+      do not all pass on a `healthy` story — Gate A demands
+      `under_construction`), so the grandfather classification
+      fires exactly once per story across its lifetime, retiring
+      the bridge state on first record. Without this test, the
+      ADR's "either works" punt on declaration shape stays
+      unresolved at the test boundary and a future refactor could
+      accidentally reintroduce the YAML-flag option, fork-merge
+      the two paths, or forge a synthetic `red` row to satisfy a
+      stricter probe — three drift surfaces this test fences
+      against.
   - file: crates/agentic-test-builder/tests/record_classification_matches_three_gate_rule.rs
     justification: |
       Proves the classifier's gate semantics at the library
@@ -181,6 +214,16 @@ acceptance:
               `evidence/runs/<preserved-id>/<old-timestamp>-red
               .jsonl` row in which that scaffold is the only
               entry and carried `verdict: "red"` at its commit.
+           d. `<grandfathered-id>.yml` with `status: healthy`,
+              two acceptance tests, both scaffolds existing on
+              disk and probing green (built green originally,
+              never had a red record), AND no
+              `evidence/runs/<grandfathered-id>/` directory on
+              disk at all. This is the canonical bridge shape —
+              a story that reached `healthy` either pre-ADR-0005
+              (stories 4, 5) or via the bootstrap exception
+              (story 10) and therefore has no evidence chain
+              yet.
          Stage and commit every fixture change to the scratch
          branch.
 
@@ -217,7 +260,7 @@ acceptance:
              `preserved` entry has neither `red_path` nor
              `diagnostic`.
 
-    Grandfathered-preserve walkthrough (pre-ADR-0005 bridge):
+    Healthy-preserve walkthrough (post-ADR three-gate-fails path):
       8. `git reset --hard` to the scratch-branch commit. Run
          `agentic test-build record <preserved-id>`.
       9. Observe:
@@ -232,6 +275,40 @@ acceptance:
            - The prior evidence row at `evidence/runs/
              <preserved-id>/<old-timestamp>-red.jsonl` is
              still on disk, byte-identical. The chain is
+             append-only.
+
+    Grandfathered-bridge walkthrough (directory-absent path):
+      9a. `git reset --hard` to the scratch-branch commit.
+          Confirm `evidence/runs/<grandfathered-id>/` does NOT
+          exist (`test ! -d evidence/runs/<grandfathered-id>`).
+          Run `agentic test-build record <grandfathered-id>`.
+      9b. Observe:
+           - Process exits 0.
+           - stdout names both scaffolds and reports verdict
+             `preserved` for each. No probe ran (no `cargo
+             check` / `cargo test` output for the grandfathered
+             scaffolds in stdout / stderr).
+           - The directory `evidence/runs/<grandfathered-id>/`
+             now exists.
+           - Exactly one JSONL row appears inside it. Its
+             `verdicts[]` carries one entry per scaffold, each
+             with `verdict: "preserved"`, no `red_path`, no
+             `diagnostic`.
+           - This row is the FIRST in the chain for the story
+             — `ls evidence/runs/<grandfathered-id>/` returns
+             exactly the new file.
+      9c. Without changing the story YAML, re-run `agentic
+          test-build record <grandfathered-id>`.
+      9d. Observe:
+           - Process exits 0.
+           - The classification is unchanged (`preserved` per
+             scaffold) — but this time it routed through the
+             normal three-gate path (Gate A fails because
+             status is `healthy`), not the grandfather branch.
+             The grandfather classification fired exactly once
+             across the story's lifetime.
+           - A second JSONL row appears alongside the first;
+             both carry the same preserved shape. The chain is
              append-only.
 
     Refusal walkthroughs:
@@ -309,16 +386,49 @@ guidance: |
          audit-trail value); on green, `ScaffoldNotRed`.
        - Any gate fails → classify `preserved`: emit the
          `preserved` verdict with no probe.
-    3. The very first evidence row written for a story whose
-       `status` was `healthy` BEFORE ADR-0005 was accepted and
-       whose scaffolds have no prior evidence chain is the
-       grandfathered-bridge case: classify `preserved` directly
-       (the story's pre-ADR-0005 `healthy` signing stands in for
-       the missing `red` row). Detection: no prior
-       `evidence/runs/<id>/*.jsonl` AND `status: healthy`.
-       Subsequent amendments that move the test's contract
-       trigger the normal RE-AUTHOR path and retire the
-       grandfather state.
+    3. Grandfathered-bridge case (resolves ADR-0005 sub-amendment's
+       declaration-shape punt). Detection is exactly two predicates
+       ANDed: the story has NO `evidence/runs/<id>/*.jsonl` row at
+       record-invocation time AND the story's on-disk YAML `status`
+       is `healthy`. When both hold, classify every scaffold named in
+       `acceptance.tests[]` as `preserved` directly — no probe, no
+       three-gate evaluation, no synthetic `red` backfill. The
+       story's existing `healthy` signing stands in for the missing
+       `red` row, and the freshly-written preserved row is the first
+       on-chain record acknowledging that fact. The detection rule
+       deliberately does NOT branch on signing date: any healthy
+       story with no evidence directory hits this path, including
+       (a) the documented pre-ADR-0005 cases (stories 4 and 5),
+       (b) any post-ADR story whose evidence directory was deleted
+       at re-scaffold time and whose tests proceeded green-only
+       (the story 10 bootstrap-exception shape, captured by commit
+       a185be8 — "the record tool refuses ScaffoldNotRed on any
+       green scaffold... Story 10 inherits a bootstrap exception
+       similar to story 15"), and (c) any future story whose
+       directory is absent for any reason while its YAML still
+       declares `status: healthy`. After the first record invocation
+       under this branch the directory exists; subsequent
+       invocations against the same unchanged story route through
+       the normal three-gate path, where Gate A (`status ==
+       "under_construction"`) immediately fails on a `healthy`
+       story and yields a normal `preserved` verdict. The
+       grandfather classification therefore fires AT MOST ONCE per
+       story across its lifetime; the bridge state retires on
+       first record.
+
+       This branch is the ADR sub-amendment's option C ("derive
+       from 'first row is PRESERVED, no prior row exists'"),
+       narrowed to the directory-absent precondition and pinned
+       at the test boundary. The competing options the ADR named
+       (a `grandfathered: true` flag on the evidence row, a flag
+       on the story YAML) are explicitly rejected here: each adds
+       a forgery axis the ADR's git-native posture closed, and
+       neither offers an observable advantage over the directory-
+       absence predicate. If a future incident reveals a case the
+       directory-absence rule cannot classify (e.g. a story whose
+       evidence directory was created by an unrelated process and
+       carries no rows), THAT is the trigger to revisit; until
+       then, the rule stands.
 
   Evidence-row shape. Per-verdict entries extend to three shapes.
   The top-level keys (`run_id`, `story_id`, `commit`, `timestamp`,
