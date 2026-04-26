@@ -1,0 +1,496 @@
+id: 25
+title: "`agentic stories audit` surfaces status-vs-implementation drift"
+outcome: |
+  An operator running `agentic stories audit` against the corpus receives a
+  structured report naming every story whose declared status disagrees with
+  its actual implementation state, so drift between authored intent and
+  shipped state is visible without manual cross-referencing.
+status: proposed
+patterns:
+- standalone-resilient-library
+acceptance:
+  tests:
+  - file: crates/agentic-dashboard/tests/audit_flags_implementation_without_status_flip.rs
+    justification: |
+      Proves category 1 (implementation-without-flip): given a fixture
+      corpus containing one story whose YAML has `status: proposed` AND
+      every path enumerated in its `acceptance.tests[].file` exists on
+      disk AND each of those test files passes when invoked, the audit
+      report names that story id under a category-1 heading and lists
+      each passing test file path that proves the implementation already
+      shipped. Stories whose status is anything other than `proposed`,
+      or whose tests do not all exist, or whose tests do not all pass,
+      are NOT listed under category 1. Without this test, the canonical
+      drift mode this story exists to surface — exactly what tripped
+      stories 16, 18, and 19 during the Phase 0 batch when build-rust
+      forgot to flip `proposed → under_construction` on pickup — is
+      undetectable, and operators continue to discover the violation
+      only by accident weeks later.
+  - file: crates/agentic-dashboard/tests/audit_flags_promotion_ready_under_construction.rs
+    justification: |
+      Proves category 2 (promotion-ready): given a fixture corpus
+      containing one story whose YAML has `status: under_construction`
+      AND every path enumerated in its `acceptance.tests[].file` exists
+      on disk AND each of those test files passes, the audit report
+      names that story id under a category-2 heading and signals that
+      the story is ready for the UAT prove-it gate. A story whose
+      status is `under_construction` but whose tests do not all exist
+      or do not all pass is NOT listed under category 2 (it routes to
+      category 3 or stays absent from the report respectively). Without
+      this test, the audit cannot tell an operator "you have a story
+      sitting at green-but-unsigned" — the most actionable surface,
+      because the next step is a single UAT run rather than any code
+      change.
+  - file: crates/agentic-dashboard/tests/audit_flags_test_builder_not_started.rs
+    justification: |
+      Proves category 3 (test-builder-not-started): given a fixture
+      corpus containing one story whose YAML has `status:
+      under_construction` AND ZERO of the paths enumerated in its
+      `acceptance.tests[].file` exist on disk yet, the audit report
+      names that story id under a category-3 heading. A story with at
+      least one acceptance-test file present on disk does NOT route to
+      category 3 (mixed presence is a different signal — either the
+      test-builder pass partially shipped or a scaffold was deleted;
+      operator decides). Without this test, a stalled test-builder
+      pickup looks identical to a freshly flipped story, and an
+      operator scanning for "what's actually moving forward" cannot
+      distinguish the two.
+  - file: crates/agentic-dashboard/tests/audit_flags_healthy_with_failing_test.rs
+    justification: |
+      Proves category 4 (healthy-with-failing-test) and pins the
+      deduplication contract with `agentic stories health`: given a
+      fixture corpus containing one story whose YAML has `status:
+      healthy` AND at least one acceptance-test file currently fails,
+      the audit report names that story id under a category-4 heading.
+      The audit MUST source its red-test signal from the same
+      classifier `agentic stories health` already uses to flag
+      fell-from-grace stories (test against the same `test_runs` row
+      shape and the same dashboard library entry point), not a parallel
+      reimplementation that could drift. Without this test, two
+      readers of the same evidence (`stories health` and `stories
+      audit`) could disagree about whether a healthy story is currently
+      red, and the corpus gains a second source of truth for a question
+      that has exactly one answer.
+  - file: crates/agentic-dashboard/tests/audit_clean_corpus_reports_no_drift.rs
+    justification: |
+      Proves the empty-report happy path: given a fixture corpus where
+      every story's declared status agrees with its actual
+      implementation state across all four categories — proposed
+      stories with no shipped tests, under_construction stories with
+      partial or red tests, healthy stories with passing tests — the
+      audit report contains zero entries under any of the four
+      categories AND the process exits 0. Without this test, the audit
+      could silently flag false positives on a clean corpus (e.g.
+      counting test absence as drift in a `proposed` story where
+      absence is correct), and operators would lose trust in the
+      report after the first noise-storm.
+  - file: crates/agentic-cli/tests/stories_audit_json_mode.rs
+    justification: |
+      Proves the `--json` contract reaches the operator through the
+      binary: `agentic stories audit --json` against a fixture corpus
+      containing at least one drifted story per category emits stdout
+      that `serde_json::from_str` parses into a value carrying a
+      top-level object with one key per category
+      (`implementation_without_flip`, `promotion_ready`,
+      `test_builder_not_started`, `healthy_with_failing_test`), each
+      mapping to an array of objects naming the offending story id
+      and any per-category context (e.g. the passing test files for
+      category 1, the failing test files for category 4). The same
+      data appears in human-readable form when `--json` is absent,
+      and exit code is 0 in both modes regardless of how many drifts
+      the report contains (the audit reports drift; it does not
+      itself fail on drift). Without this, machine consumers (CI
+      jobs, future dashboards) have to scrape TTY output to learn
+      what drifted, and the symmetry with `agentic stories health
+      --json` (story 3) breaks at the boundary they are most likely
+      to lean on.
+  uat: |
+    Goal: convince yourself that `agentic stories audit` reports every
+    drift category against a fixture corpus, exits 0 on a clean corpus,
+    keeps reporting (does not exit non-zero) when drift is present, and
+    that the `--json` shape mirrors the human-readable categories.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status
+         --porcelain` and confirm it is empty.
+      2. Install the CLI: `wsl bash -c "source ~/.cargo/env && cd
+         /home/code/Agentic && cargo install --path crates/agentic-cli
+         --locked"`. Confirm `command -v agentic` resolves.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. Identify (or author into a scratch fixture corpus directory):
+           - `<cat1-id>`: a story with `status: proposed` whose
+             enumerated `acceptance.tests[].file` paths exist on disk
+             and pass when invoked. (The Phase 0 stories 16, 18, 19
+             match this shape historically; for this UAT, ensure at
+             least one such story exists in the fixture you point the
+             audit at.)
+           - `<cat2-id>`: a story with `status: under_construction`
+             whose tests all exist and pass.
+           - `<cat3-id>`: a story with `status: under_construction`
+             whose enumerated test paths do not yet exist on disk.
+           - `<cat4-id>`: a story with `status: healthy` for which at
+             least one acceptance test currently fails (record a Fail
+             `test_runs` row via story 2's recorder so the dashboard
+             classifier sees it red).
+           - At least one clean control story (any status) whose
+             actual state agrees with its declared status.
+
+    Drift-reporting walkthrough:
+      5. Run `agentic stories audit --store "$AGENTIC_STORE"`. Observe:
+           - Process exits 0 (audit reports drift; it does not fail
+             on drift).
+           - Output is a human-readable report grouped by the four
+             categories, each labelled and ordered identically across
+             invocations for stable diffs.
+           - `<cat1-id>` appears under "implementation-without-flip"
+             with the passing test file paths listed.
+           - `<cat2-id>` appears under "promotion-ready".
+           - `<cat3-id>` appears under "test-builder-not-started".
+           - `<cat4-id>` appears under "healthy-with-failing-test"
+             with the failing test file basename(s) listed.
+           - The clean control story does NOT appear under any
+             category.
+
+    JSON walkthrough:
+      6. Run `agentic stories audit --store "$AGENTIC_STORE" --json |
+         jq .`. Observe:
+           - Output parses as JSON.
+           - Top-level keys include `implementation_without_flip`,
+             `promotion_ready`, `test_builder_not_started`, and
+             `healthy_with_failing_test`, each an array.
+           - Each array entry is an object with at least an `id`
+             field (matching `stories/<id>.yml`'s integer); category-
+             1 entries also carry the list of passing test files,
+             category-4 entries carry the list of failing test files.
+           - The set of ids across all four arrays equals the set of
+             drifted story ids visible in the human-readable run from
+             step 5.
+
+    Clean-corpus walkthrough:
+      7. Either repair every drift in the fixture (flip statuses,
+         remove fixture stories whose tests are absent) or point the
+         audit at a fixture corpus where every story's status agrees
+         with reality. Re-run `agentic stories audit --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 0.
+           - The human-readable report explicitly states that no
+             drift was detected in any of the four categories (a
+             concrete affirmative line, not a silent empty output —
+             "No drift detected" or equivalent).
+           - `--json` returns the same four top-level keys, each
+             mapping to an empty array.
+
+    Read-only walkthrough:
+      8. Re-run the audit from step 5. Confirm `git status
+         --porcelain` is byte-identical to its pre-audit output. The
+         audit does NOT modify any story YAML, does NOT flip any
+         status, does NOT write to `agentic-store`'s evidence tables.
+         Surfacing drift is the contract; resolution is operator
+         judgment.
+
+    Cleanup:
+      9. Restore the fixture corpus to its pre-walkthrough state
+         (`git restore stories/<fixture-paths>` or revert the
+         scratch directory).
+     10. `rm -rf "$AGENTIC_STORE"` to clear the synthetic
+         `test_runs` rows you may have recorded for category 4.
+     11. If you want the installed binary gone:
+         `cargo uninstall agentic-cli`.
+guidance: |
+  This story adds one new CLI verb — `agentic stories audit` — that
+  walks the story corpus and reports four drift categories where
+  declared `status:` disagrees with the actual on-disk and on-store
+  implementation state. The audit is READ-ONLY. It surfaces drift; it
+  does not auto-flip statuses, write evidence rows, or mutate any
+  story YAML. Resolution is operator judgment (the operator may then
+  manually flip a status, run UAT, or amend the story per the
+  defects-amend-the-owning-story rule).
+
+  Why this CLI verb instead of a hook. The original idea was a
+  `PreToolUse` hook or a git pre-commit hook that would catch
+  build-rust forgetting to flip `proposed → under_construction` on
+  pickup. Both options were brittle: a `PreToolUse` hook cannot see
+  the story id being implemented (the hook fires per tool call, not
+  per story), and a git pre-commit hook fires on every commit
+  including non-build-rust ones (the cleanup-pass commit, the
+  guidance-pass commit, the corpus-edit commit) and would either
+  spam-warn or false-fail. The right home is a CLI command that
+  detects drift on demand — operators run it when they want a
+  consistency check; CI may run it as a non-blocking warning step.
+
+  The four drift categories.
+
+    1. Implementation-without-flip. `status: proposed` AND every path
+       in `acceptance.tests[].file` exists on disk AND each test
+       passes. This is the canonical Phase 0 violation: stories 16,
+       18, and 19 each shipped their implementation while still
+       declaring `proposed` because build-rust did not flip the
+       status on pickup. The audit names the story id and the
+       passing test files that prove implementation already
+       happened, so the operator can either flip the status by hand
+       or queue the story for UAT.
+
+    2. Promotion-ready. `status: under_construction` AND every path
+       in `acceptance.tests[].file` exists on disk AND each test
+       passes. This is "ready for UAT" — the story has been worked
+       through to green but no Pass verdict has been recorded yet.
+       Surfacing it tells the operator there is a story sitting one
+       UAT run away from `healthy`. The action is a single
+       `agentic uat <id> --verdict pass` invocation, not a code
+       change.
+
+    3. Test-builder-not-started. `status: under_construction` AND
+       ZERO of the paths in `acceptance.tests[].file` exist on disk
+       yet. This could be legitimate (work just started; test-
+       builder has not yet authored scaffolds) or a stalled
+       test-builder pass. The audit flags it for operator review;
+       the operator decides whether to wait, prod test-builder, or
+       amend the story. A story with a MIXED state (some scaffolds
+       present, some absent) is NOT category 3 — that is its own
+       signal that operator judgment must address separately, and
+       this audit does not pretend to classify it. Mixed-presence
+       stories simply do not appear in the report.
+
+    4. Healthy-with-failing-test. `status: healthy` AND at least one
+       acceptance test currently fails. This overlaps with
+       `agentic stories health`'s fell-from-grace classifier (see
+       story 3's `health_unhealthy_fell_from_grace.rs`). The audit
+       MUST source its red-test signal from the same classifier
+       `agentic stories health` already runs — invoke the dashboard
+       library's classifier under the hood rather than implementing
+       a parallel `cargo test` walk. A second source of truth for
+       "is this test red right now?" is exactly the drift the
+       audit exists to prevent. Implementation hint: the audit's
+       category-4 query is `dashboard::classify(story) ==
+       Unhealthy(reason: tests-fail)` filtered to stories whose
+       on-disk YAML still says `status: healthy`. Build-rust may
+       extract the relevant predicate into a shared library
+       function on `agentic-dashboard` if reuse demands it; the
+       contract is "audit and health agree about test redness,"
+       not "audit re-walks cargo."
+
+  Why the boundary with `agentic stories health` is explicit. Story
+  3's dashboard classifies stories into `proposed`, `under_construction`,
+  `healthy`, `unhealthy`, `error`. The dashboard's job is to answer
+  "what is this story's current health?" The audit's job is
+  different: "where does the declared status disagree with reality?"
+  Categories 1, 2, 3 are not visible to the dashboard at all
+  (the dashboard takes the YAML status as authoritative for proposed
+  and under_construction); only category 4 overlaps. The
+  deduplication contract is that the audit DELEGATES category 4
+  detection to the dashboard's existing classifier rather than
+  reimplementing it. Build-rust may share code via a library entry
+  point on `agentic-dashboard`; what build-rust must NOT do is
+  introduce a second cargo-test-walking codepath inside the audit
+  that could disagree with the dashboard's view of the same
+  evidence rows.
+
+  Pass/fail signal for tests. The audit determines whether a story's
+  acceptance tests pass via the same evidence the dashboard reads:
+  the latest `test_runs` row per story (story 2's contract). The
+  audit does NOT shell out to `cargo test` itself. If a test file
+  exists on disk but no `test_runs` row records its outcome yet,
+  the audit treats that as "test exists but unproven" — for
+  categories 1 and 2, "every test passes" requires both presence
+  AND a Pass verdict in the latest row. A test file present with
+  no row means category 1/2 cannot fire; the story stays absent
+  from the report (this is the ambiguous middle that operator
+  judgment, not the audit, resolves). For category 3, the audit
+  inspects only file presence on disk — `test_runs` is irrelevant
+  because the test does not exist yet.
+
+  Test-runs evidence comes from the same store the dashboard reads
+  (`agentic-store`), accessed via the same `--store <path>` flag
+  and `AGENTIC_STORE` environment variable already in force across
+  the CLI (see story 1's "Store location — default and override"
+  section; this story inherits that behaviour verbatim, no
+  restatement).
+
+  Output shape — human-readable.
+    The default output groups drift by category in a stable order:
+    implementation-without-flip first (the most actionable: a story
+    is provably done but unattested), promotion-ready second,
+    test-builder-not-started third, healthy-with-failing-test last.
+    Each section has a header, then one line per affected story id
+    with any per-category context (passing test files for category
+    1, failing test files for category 4). When no drift is
+    detected, the output is an explicit affirmative line ("No
+    drift detected" or equivalent) — not silent empty stdout, so
+    an operator can tell "audit ran and found nothing" from
+    "audit silently failed."
+
+    Title truncation, color, and other rendering ergonomics are
+    deliberately out of this story's contract — keep the output
+    plain text. A future story may add table rendering if volume
+    justifies it.
+
+  Output shape — `--json`.
+    Top-level keys mirror the four categories, named in
+    snake_case:
+      `implementation_without_flip`,
+      `promotion_ready`,
+      `test_builder_not_started`,
+      `healthy_with_failing_test`.
+    Each maps to an array of objects. The shape inside each entry
+    is at minimum:
+      ```
+      { "id": <integer>, ... }
+      ```
+    Category-1 entries include `passing_tests: ["<path>", ...]`;
+    category-4 entries include `failing_tests: ["<basename>", ...]`
+    matching the same basename shape story 2's `failing_tests`
+    column already uses (so consumers can join across the two
+    JSON outputs cleanly). Empty arrays are emitted as `[]`, not
+    omitted, so consumers don't have to distinguish "missing key"
+    from "no entries."
+
+  Exit-code contract.
+    0 = audit ran successfully, regardless of how many drifts
+        the report contains. Drift is the audit's payload, not its
+        failure mode. CI jobs that want to fail on drift may pipe
+        `--json` into `jq` and assert specific arrays are empty;
+        the audit itself does not make that policy call.
+    Non-zero = audit could not run. Triggers: store unreachable,
+        `stories/` directory missing, malformed YAML in a story
+        file that prevents loading. The audit treats malformed
+        YAML the way `agentic stories health` does — surface the
+        problem, do not crash — but if the malformation prevents
+        even loading the story id, the audit is allowed to fail
+        loudly because it cannot reason about what it cannot read.
+
+  CLI shape — argv (authoritative).
+    `agentic stories audit [--json] [--store <path>]`
+
+    Sibling of `agentic stories health` and `agentic stories test`.
+    No positional argument (no per-id drilldown — drift is a
+    corpus-level question; if an operator wants to inspect one
+    story they read the report or use `agentic stories health
+    <id>`). `--json` selects machine-readable output. `--store`
+    inherits story 1's semantics.
+
+  Why the standalone-resilient-library pattern applies. The audit's
+  job is to surface drift even when "the rest of the system is in
+  flames." If a story's evidence chain is broken, if the dashboard
+  is wedged on one fixture, if the test-runner is unavailable —
+  the audit must still produce a correct report against whatever
+  it CAN read. The audit is a read-only critical-path tool: if it
+  fails when the system is unhealthy, the operator loses the one
+  surface that would tell them where to look. Per the pattern's
+  conventions, the audit's library-level entry point lives in a
+  crate whose dependency floor matches the dashboard's
+  (`agentic-store`, `agentic-story`, the dashboard library
+  itself); the CLI shim does only argv parsing and exit-code
+  mapping; no LLM subprocess; the standalone-resilience test
+  exercises the audit with a fixture corpus and a `MemStore`,
+  proving no orchestrator dependency.
+
+  Crate placement. The library-level audit logic naturally lives
+  alongside the four-status classifier in `agentic-dashboard` —
+  the audit reuses the dashboard's classifier (category 4) and
+  walks the same loaded `Story` values the dashboard already
+  parses. Test paths under `crates/agentic-dashboard/tests/`
+  reflect that placement. If build-rust judges that a separate
+  `agentic-stories-audit` crate is cleaner (the dashboard would
+  then expose its classifier via a public function the audit
+  consumes), that is acceptable; the contract is "audit and
+  health share a single source of truth for test redness," not
+  "audit ships in crate X." Test file paths in this story's
+  `acceptance.tests[]` are pinned regardless of internal crate
+  structure — Rust integration tests live where the surface they
+  exercise lives.
+
+  What this story is NOT.
+    - NOT an enforcement gate. The audit reports; it does not
+      block. CI may consume the JSON output and fail its own
+      build, but `agentic stories audit` itself returns exit 0
+      whenever it ran successfully.
+    - NOT an auto-fixer. The audit does not flip statuses,
+      record verdicts, run UAT, or scaffold tests. Resolution
+      is operator judgment.
+    - NOT a replacement for `agentic stories health`. The
+      dashboard answers "what is this story's current health?";
+      the audit answers "where does declared status disagree
+      with reality?" Both are read-only views over the same
+      evidence; they answer different questions.
+    - NOT a corpus-validation tool (orphan tests, dangling
+      `depends_on` ids, schema-malformation). Those are
+      separate audits — `stories/README.md` mentions
+      `agentic story audit` as the surface for orphan tests
+      and stale proof; if a future story extends this command
+      to cover those categories, it amends THIS story rather
+      than splitting (per defects-amend-the-owning-story).
+      The four categories pinned here are the status-vs-
+      implementation drift slice; corpus-integrity audit is
+      a separate concern with its own justification.
+    - NOT a hook. Hooks were considered and rejected (see
+      "Why this CLI verb instead of a hook" above). The audit
+      is on-demand, operator-driven, never automatic.
+    - NOT a mutator of `test_runs`. The audit reads the
+      latest `test_runs` row per story; it does not run any
+      tests itself and writes nothing.
+
+  Relationship to stories 2, 3, 6, 12.
+    - Story 6 (`agentic-story` loader) — hard prerequisite. The
+      audit walks the loaded `Story` values; the loader's
+      DAG-acyclicity check, its typed-error shapes, and its
+      schema enforcement are inherited unchanged.
+    - Story 3 (`agentic stories health` dashboard) — hard
+      prerequisite AND deduplication target. The audit's
+      category-4 classifier delegates to the dashboard's
+      existing fell-from-grace logic. Without the dashboard,
+      the audit has nothing to ask "is this test red?" without
+      reimplementing the dashboard. With it, the audit becomes
+      a thin layer over already-proven primitives.
+    - Story 2 (`agentic-ci-record`) — provides the `test_runs`
+      row shape the audit consumes via the dashboard's reads.
+      The audit does NOT directly read `test_runs`; it reads
+      the dashboard's classification which in turn reads
+      `test_runs`. One layer of indirection keeps "the audit
+      does not invent a second cargo-test walker" honest.
+    - Story 12 (`agentic stories test`) — sibling under the
+      same `stories` noun. Both extend the `agentic stories`
+      verb family with read-side observability over the
+      corpus DAG. They do not depend on each other; an
+      operator can run audit without ever invoking
+      `stories test`, and vice versa.
+
+  Test file locations.
+    Library-level tests (five tests:
+    `audit_flags_implementation_without_status_flip.rs`,
+    `audit_flags_promotion_ready_under_construction.rs`,
+    `audit_flags_test_builder_not_started.rs`,
+    `audit_flags_healthy_with_failing_test.rs`,
+    `audit_clean_corpus_reports_no_drift.rs`) live under
+    `crates/agentic-dashboard/tests/` as Rust integration
+    tests. They use a `MemStore` from `agentic-store`, seed
+    it with synthetic `test_runs` rows where category 4
+    requires it, point the audit at a temporary `stories/`
+    directory with fixture YAMLs whose statuses and test
+    files are arranged to exercise each category, and assert
+    on the structured report value.
+
+    Binary-level test (one test:
+    `stories_audit_json_mode.rs`) lives under
+    `crates/agentic-cli/tests/` as a Rust integration test
+    driven via `assert_cmd`. It exercises the argv-to-library
+    wire for both human-readable and `--json` output modes
+    against a fixture corpus where multiple categories are
+    populated.
+
+  Phase 0 trigger context. The Phase 0 amendment pipeline (stories
+  16, 18, 19 in particular) shipped implementation while still
+  declaring `status: proposed` because build-rust did not flip the
+  status on pickup. The drift was found weeks later by
+  cross-referencing the corpus by hand. This story is the
+  observable that would have caught it within seconds, on demand.
+  It is also why category 1 is listed first in both the
+  human-readable and JSON output: the most damaging drift mode
+  (implementation exists, attestation does not) is the most
+  prominent in the report.
+depends_on:
+- 3
+- 6
+related_files:
+- crates/agentic-dashboard/src/**
+- crates/agentic-cli/src/**
