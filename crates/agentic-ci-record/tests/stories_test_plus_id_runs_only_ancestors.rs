@@ -9,21 +9,21 @@
 //! code path leading up to my leaf still works" in isolation — which is
 //! the upstream-only lane CI needs for targeted diagnostics.
 //!
-//! The scaffold drives the library directly per the story's
-//! "Test file locations" guidance: a fixture `stories/` directory under a
-//! `TempDir`, a `StubExecutor` that counts and records invocations per
-//! story, and a `MemStore` for `test_runs`. Red today is compile-red: the
-//! `agentic_ci_record::{CiRunner, TestExecutor, ExecutorOutcome}` surface
-//! does not yet exist in `src/lib.rs`.
+//! Additionally pins the kit-vs-bespoke contract per stories/12.yml's
+//! amended justification: the fixture corpus, repo seeding, and stub
+//! executor MUST source from `agentic_test_support`'s shared primitives
+//! (story 26), not bespoke per-file helpers. The deep-modules contract
+//! is observable in this file's `use` block — a reimplementation that
+//! brought back a local `fn write_fixture_story`, `fn setup_fixture_corpus`,
+//! or `struct StubExecutor impl TestExecutor` would fail the contract.
+//! Reference `agents/assets/principles/deep-modules.yml`'s
+//! `application_to_test_scaffolding` for the operational rationale.
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use agentic_ci_record::{CiRunner, ExecutorOutcome, TestExecutor};
+use agentic_ci_record::CiRunner;
 use agentic_store::{MemStore, Store};
-use tempfile::TempDir;
+use agentic_test_support::{FixtureCorpus, RecordingExecutor};
 
 // Fixture DAG (edges are `depends_on`, i.e. child -> parent):
 //
@@ -45,108 +45,23 @@ const ID_TARGET: u32 = 81203;
 const ID_DESC: u32 = 81204;
 const ID_UNRELATED: u32 = 81205;
 
-/// Records which test files the runner asked the executor to run, keyed
-/// by the story whose acceptance.tests[] the files came from. The runner
-/// supplies the story id via its invocation contract; if it does not,
-/// this stub groups by the test-file path's parent-crate hint (not
-/// authoritative — story id is what matters for the ancestor-set check).
-#[derive(Default)]
-struct Calls {
-    /// One entry per executor invocation: (story_id, test_files).
-    invocations: Vec<(u32, Vec<PathBuf>)>,
-}
-
-struct StubExecutor {
-    calls: Arc<Mutex<Calls>>,
-    /// Per-story verdict the stub returns. Defaults to Pass for every
-    /// story; failing_tests always empty.
-    verdicts: HashMap<u32, ExecutorOutcome>,
-}
-
-impl StubExecutor {
-    fn new(calls: Arc<Mutex<Calls>>) -> Self {
-        Self {
-            calls,
-            verdicts: HashMap::new(),
-        }
-    }
-}
-
-impl TestExecutor for StubExecutor {
-    fn run_tests(&self, story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome {
-        self.calls
-            .lock()
-            .expect("calls mutex poisoned")
-            .invocations
-            .push((story_id, test_files.to_vec()));
-        self.verdicts
-            .get(&story_id)
-            .cloned()
-            .unwrap_or_else(ExecutorOutcome::pass)
-    }
-}
-
-fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
-    let deps_yaml = if depends_on.is_empty() {
-        "depends_on: []".to_string()
-    } else {
-        let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
-        format!("depends_on:\n{}", lines.join("\n"))
-    };
-    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
-    let body = format!(
-        r#"id: {id}
-title: "Fixture {id} for story-12 ancestor-selector scaffold"
-
-outcome: |
-  Fixture row for the +<id> selector scaffold.
-
-status: under_construction
-
-patterns: []
-
-acceptance:
-  tests:
-    - file: {test_file}
-      justification: |
-        Present so the fixture is schema-valid. The live scaffold
-        drives the runner against this file via its declared path.
-  uat: |
-    Run the runner with +<id>; assert invocation set.
-
-guidance: |
-  Fixture authored inline. Not a real story.
-
-{deps_yaml}
-"#
-    );
-    fs::write(stories_dir.join(format!("{id}.yml")), body).expect("write fixture story");
-}
-
-fn setup_fixture_corpus() -> TempDir {
-    let tmp = TempDir::new().expect("corpus tempdir");
-    let stories_dir = tmp.path().join("stories");
-    fs::create_dir_all(&stories_dir).expect("stories dir");
-
-    write_fixture_story(&stories_dir, ID_ANC_ROOT, &[]);
-    write_fixture_story(&stories_dir, ID_ANC_MID, &[ID_ANC_ROOT]);
-    write_fixture_story(&stories_dir, ID_TARGET, &[ID_ANC_MID]);
-    write_fixture_story(&stories_dir, ID_DESC, &[ID_TARGET]);
-    write_fixture_story(&stories_dir, ID_UNRELATED, &[]);
-
-    tmp
-}
-
 #[test]
 fn plus_id_selector_invokes_executor_only_for_target_and_transitive_ancestors() {
-    let corpus = setup_fixture_corpus();
-    let stories_dir = corpus.path().join("stories");
+    // Build the five-story DAG via the shared kit primitive — the
+    // local `write_fixture_story` / `setup_fixture_corpus` helpers this
+    // file used to carry are now sourced from `agentic_test_support`
+    // per stories/12.yml's kit-vs-bespoke contract.
+    let corpus = FixtureCorpus::new();
+    corpus.write_story(ID_ANC_ROOT, &[]);
+    corpus.write_story(ID_ANC_MID, &[ID_ANC_ROOT]);
+    corpus.write_story(ID_TARGET, &[ID_ANC_MID]);
+    corpus.write_story(ID_DESC, &[ID_TARGET]);
+    corpus.write_story(ID_UNRELATED, &[]);
+    let stories_dir = corpus.stories_dir();
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
-    let calls = Arc::new(Mutex::new(Calls::default()));
-    let executor = StubExecutor::new(calls.clone());
-
-    let runner = CiRunner::new(store.clone(), Box::new(executor), stories_dir);
+    let executor = RecordingExecutor::default();
+    let runner = CiRunner::new(store.clone(), Box::new(executor.clone()), stories_dir);
 
     // Selector `+TARGET` — ancestors plus target, no descendants.
     let selector = format!("+{ID_TARGET}");
@@ -154,9 +69,8 @@ fn plus_id_selector_invokes_executor_only_for_target_and_transitive_ancestors() 
         .run(&selector)
         .expect("runner must succeed across ancestor set on a clean stub corpus");
 
-    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
-
-    let invoked_story_ids: Vec<u32> = invocations.iter().map(|(id, _)| *id).collect();
+    let recorded = executor.recorded_calls();
+    let invoked_story_ids: Vec<u32> = recorded.iter().map(|call| call.story_id).collect();
 
     // EXACTLY the ancestor set (target + transitive ancestors), once each.
     assert!(
@@ -198,10 +112,10 @@ fn plus_id_selector_invokes_executor_only_for_target_and_transitive_ancestors() 
 
     // Exactly three invocations total — the ancestor set size, nothing more.
     assert_eq!(
-        invocations.len(),
+        recorded.len(),
         3,
         "+{ID_TARGET} must trigger exactly 3 executor calls (ANC_ROOT, ANC_MID, TARGET); got {}: {:?}",
-        invocations.len(),
+        recorded.len(),
         invoked_story_ids
     );
 }

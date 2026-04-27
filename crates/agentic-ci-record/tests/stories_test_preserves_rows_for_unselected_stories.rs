@@ -9,93 +9,39 @@
 //! health (by overwriting their rows with empty or nonsensical values) —
 //! the exact opposite of what a scoped run promises.
 //!
-//! Red today is compile-red: the `agentic_ci_record::{CiRunner,
-//! TestExecutor, ExecutorOutcome}` surface does not yet exist.
+//! Additionally pins the kit-vs-bespoke contract per stories/12.yml's
+//! amended justification: the fixture corpus, repo seeding, and stub
+//! executor MUST source from `agentic_test_support`'s shared primitives
+//! (story 26), not bespoke per-file helpers. The deep-modules contract
+//! is observable in this file's `use` block — a reimplementation that
+//! brought back a local `fn write_fixture_story`, `fn setup_fixture_corpus`,
+//! or `struct StubExecutor impl TestExecutor` would fail the contract.
+//! Reference `agents/assets/principles/deep-modules.yml`'s
+//! `application_to_test_scaffolding` for the operational rationale.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use agentic_ci_record::{CiRunner, ExecutorOutcome, TestExecutor};
+use agentic_ci_record::CiRunner;
 use agentic_store::{MemStore, Store};
+use agentic_test_support::{FixtureCorpus, RecordingExecutor};
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 // Fixture DAG: ANC <- TARGET; OTHER is unrelated (no edges).
 const ID_ANC: u32 = 81251;
 const ID_TARGET: u32 = 81252;
 const ID_OTHER: u32 = 81253;
 
-#[derive(Default)]
-struct Calls {
-    invocations: Vec<(u32, Vec<PathBuf>)>,
-}
-
-struct StubExecutor {
-    calls: Arc<Mutex<Calls>>,
-}
-
-impl TestExecutor for StubExecutor {
-    fn run_tests(&self, story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome {
-        self.calls
-            .lock()
-            .expect("calls mutex poisoned")
-            .invocations
-            .push((story_id, test_files.to_vec()));
-        ExecutorOutcome::pass()
-    }
-}
-
-fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
-    let deps_yaml = if depends_on.is_empty() {
-        "depends_on: []".to_string()
-    } else {
-        let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
-        format!("depends_on:\n{}", lines.join("\n"))
-    };
-    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
-    let body = format!(
-        r#"id: {id}
-title: "Fixture {id} for story-12 preservation scaffold"
-
-outcome: |
-  Fixture row for the preservation scaffold.
-
-status: under_construction
-
-patterns: []
-
-acceptance:
-  tests:
-    - file: {test_file}
-      justification: |
-        Present so the fixture is schema-valid.
-  uat: |
-    Seed OTHER's row; run +TARGET; assert OTHER's row unchanged.
-
-guidance: |
-  Fixture authored inline. Not a real story.
-
-{deps_yaml}
-"#
-    );
-    fs::write(stories_dir.join(format!("{id}.yml")), body).expect("write fixture story");
-}
-
-fn setup_fixture_corpus() -> TempDir {
-    let tmp = TempDir::new().expect("corpus tempdir");
-    let stories_dir = tmp.path().join("stories");
-    fs::create_dir_all(&stories_dir).expect("stories dir");
-    write_fixture_story(&stories_dir, ID_ANC, &[]);
-    write_fixture_story(&stories_dir, ID_TARGET, &[ID_ANC]);
-    write_fixture_story(&stories_dir, ID_OTHER, &[]);
-    tmp
-}
-
 #[test]
 fn scoped_run_leaves_rows_for_unselected_stories_byte_identical() {
-    let corpus = setup_fixture_corpus();
-    let stories_dir = corpus.path().join("stories");
+    // Build the three-story corpus via the shared kit primitive — the
+    // local `write_fixture_story` / `setup_fixture_corpus` helpers this
+    // file used to carry are now sourced from `agentic_test_support`
+    // per stories/12.yml's kit-vs-bespoke contract.
+    let corpus = FixtureCorpus::new();
+    corpus.write_story(ID_ANC, &[]);
+    corpus.write_story(ID_TARGET, &[ID_ANC]);
+    corpus.write_story(ID_OTHER, &[]);
+    let stories_dir = corpus.stories_dir();
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
 
@@ -123,11 +69,8 @@ fn scoped_run_leaves_rows_for_unselected_stories_byte_identical() {
     );
 
     // Run the ancestor selector +TARGET — covers {ANC, TARGET}, NOT OTHER.
-    let calls = Arc::new(Mutex::new(Calls::default()));
-    let executor = StubExecutor {
-        calls: calls.clone(),
-    };
-    let runner = CiRunner::new(store.clone(), Box::new(executor), stories_dir);
+    let executor = RecordingExecutor::default();
+    let runner = CiRunner::new(store.clone(), Box::new(executor.clone()), stories_dir);
     let selector = format!("+{ID_TARGET}");
     runner
         .run(&selector)
@@ -155,9 +98,9 @@ fn scoped_run_leaves_rows_for_unselected_stories_byte_identical() {
     );
 
     // And the executor was invoked — also proves the run actually ran.
-    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
+    let recorded = executor.recorded_calls();
     assert!(
-        !invocations.is_empty(),
+        !recorded.is_empty(),
         "executor must be invoked at least once during a +<id> run; got zero invocations"
     );
 }

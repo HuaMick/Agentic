@@ -11,16 +11,21 @@
 //! run the right tests but write the wrong rows, silently misreporting
 //! the dashboard's read view.
 //!
-//! Red today is compile-red: the `agentic_ci_record::{CiRunner,
-//! TestExecutor, ExecutorOutcome}` surface does not yet exist.
+//! Additionally pins the kit-vs-bespoke contract per stories/12.yml's
+//! amended justification: the fixture corpus, repo seeding, and stub
+//! executor MUST source from `agentic_test_support`'s shared primitives
+//! (story 26), not bespoke per-file helpers. The deep-modules contract
+//! is observable in this file's `use` block — a reimplementation that
+//! brought back a local `fn write_fixture_story`, `fn setup_fixture_corpus`,
+//! or `struct StubExecutor impl TestExecutor` would fail the contract.
+//! Reference `agents/assets/principles/deep-modules.yml`'s
+//! `application_to_test_scaffolding` for the operational rationale.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use agentic_ci_record::{CiRunner, ExecutorOutcome, TestExecutor};
+use agentic_ci_record::CiRunner;
 use agentic_store::{MemStore, Store};
-use tempfile::TempDir;
+use agentic_test_support::{FixtureCorpus, RecordingExecutor};
 
 // Fixture DAG: ANC <- TARGET <- DESC; plus UNRELATED (out of subtree).
 const ID_ANC: u32 = 81241;
@@ -28,85 +33,22 @@ const ID_TARGET: u32 = 81242;
 const ID_DESC: u32 = 81243;
 const ID_UNRELATED: u32 = 81244;
 
-#[derive(Default)]
-struct Calls {
-    invocations: Vec<(u32, Vec<PathBuf>)>,
-}
-
-struct StubExecutor {
-    calls: Arc<Mutex<Calls>>,
-}
-
-impl TestExecutor for StubExecutor {
-    fn run_tests(&self, story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome {
-        self.calls
-            .lock()
-            .expect("calls mutex poisoned")
-            .invocations
-            .push((story_id, test_files.to_vec()));
-        ExecutorOutcome::pass()
-    }
-}
-
-fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
-    let deps_yaml = if depends_on.is_empty() {
-        "depends_on: []".to_string()
-    } else {
-        let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
-        format!("depends_on:\n{}", lines.join("\n"))
-    };
-    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
-    let body = format!(
-        r#"id: {id}
-title: "Fixture {id} for story-12 rows-per-executed scaffold"
-
-outcome: |
-  Fixture row for the one-row-per-executed-story scaffold.
-
-status: under_construction
-
-patterns: []
-
-acceptance:
-  tests:
-    - file: {test_file}
-      justification: |
-        Present so the fixture is schema-valid.
-  uat: |
-    Run the runner; count rows in test_runs.
-
-guidance: |
-  Fixture authored inline. Not a real story.
-
-{deps_yaml}
-"#
-    );
-    fs::write(stories_dir.join(format!("{id}.yml")), body).expect("write fixture story");
-}
-
-fn setup_fixture_corpus() -> TempDir {
-    let tmp = TempDir::new().expect("corpus tempdir");
-    let stories_dir = tmp.path().join("stories");
-    fs::create_dir_all(&stories_dir).expect("stories dir");
-    write_fixture_story(&stories_dir, ID_ANC, &[]);
-    write_fixture_story(&stories_dir, ID_TARGET, &[ID_ANC]);
-    write_fixture_story(&stories_dir, ID_DESC, &[ID_TARGET]);
-    write_fixture_story(&stories_dir, ID_UNRELATED, &[]);
-    tmp
-}
-
 #[test]
 fn full_subtree_run_upserts_exactly_one_row_per_executed_story() {
-    let corpus = setup_fixture_corpus();
-    let stories_dir = corpus.path().join("stories");
+    // Build the four-story DAG via the shared kit primitive — the
+    // local `write_fixture_story` / `setup_fixture_corpus` helpers this
+    // file used to carry are now sourced from `agentic_test_support`
+    // per stories/12.yml's kit-vs-bespoke contract.
+    let corpus = FixtureCorpus::new();
+    corpus.write_story(ID_ANC, &[]);
+    corpus.write_story(ID_TARGET, &[ID_ANC]);
+    corpus.write_story(ID_DESC, &[ID_TARGET]);
+    corpus.write_story(ID_UNRELATED, &[]);
+    let stories_dir = corpus.stories_dir();
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
-    let calls = Arc::new(Mutex::new(Calls::default()));
-    let executor = StubExecutor {
-        calls: calls.clone(),
-    };
-
-    let runner = CiRunner::new(store.clone(), Box::new(executor), stories_dir);
+    let executor = RecordingExecutor::default();
+    let runner = CiRunner::new(store.clone(), Box::new(executor.clone()), stories_dir);
 
     let selector = format!("+{ID_TARGET}+");
     runner
