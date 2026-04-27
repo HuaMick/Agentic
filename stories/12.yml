@@ -161,6 +161,20 @@ acceptance:
       this, the library-level claim is a library-level claim only —
       the binary's argv-to-runner wire could drop the selector on
       the floor.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus
+      and the stub executor wired through the binary's harness MUST be
+      sourced from `agentic_test_support`'s shared primitives (story
+      26), not bespoke per-file helpers. The deep-modules contract
+      enforced via `assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract. The
+      indirection mechanism by which the binary picks up the stub
+      (env var, fixture path, or other) is implementation-detail for
+      test-builder; the contract is that the underlying primitives
+      are the kit's, not bespoke.
   - file: crates/agentic-cli/tests/stories_test_unknown_id_exits_2.rs
     justification: |
       Proves typed refusal reaches the operator through the binary:
@@ -171,6 +185,21 @@ acceptance:
       would tell CI "the suite failed" when no suite ran at all,
       corrupting the distinction between "real fail" and "could not
       run."
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus
+      wired through the binary's harness MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not
+      bespoke per-file helpers. The deep-modules contract enforced via
+      `assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract. The
+      stub-executor banned-shape is named for completeness even though
+      this particular test exercises the unknown-id refusal path
+      before any executor invocation; the import surface is the
+      observable, and the contract pins the imports regardless of
+      which code paths the test exercises.
   uat: |
     Goal: convince yourself that `agentic stories test <selector>`
     runs the acceptance tests for exactly the selected subtree, writes
