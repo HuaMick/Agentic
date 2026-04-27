@@ -19,11 +19,35 @@ importing the kit as a route to introduce assertion helpers.
 
 ## Catalogue
 
-- **FixtureCorpus** — Populated when impl lands in the next commit.
-- **StoryFixture** — Populated when impl lands in the next commit.
-- **FixtureRepo** — Populated when impl lands in the next commit.
-- **RecordingExecutor** — Populated when impl lands in the next commit.
-- **RecordedCall** — Populated when impl lands in the next commit.
+- **FixtureCorpus** — Manages a temporary directory with a `stories/` subdirectory
+  for authoring fixture story YAML. Use this when your test needs a corpus of
+  minimal stories with defined `depends_on` edges. Construct via `new()`,
+  call `write_story()` to author fixture stories, and pass `stories_dir()` to
+  a loader like `agentic_story::Story::load_dir`. The tempdir is automatically
+  deleted when the corpus is dropped.
+
+- **StoryFixture** — An in-memory representation of a fixture story with YAML
+  authoring support. Use this to construct individual stories programmatically
+  via builder-style setters (`with_title()`, `with_outcome()`, etc.) and emit
+  schema-clean YAML via `to_yaml()`. Returned by `FixtureCorpus::write_story()`;
+  typically used indirectly through the corpus interface.
+
+- **FixtureRepo** — A git repository initialized with a committer email and one
+  seed commit. Use this when your test needs a stable git context to capture
+  commit SHAs or verify git state. Initialize via `init_with_email()`, retrieve
+  the full 40-character SHA via `head_sha()`, and optionally create additional
+  commits via `commit_seed()`.
+
+- **RecordingExecutor** — A stub implementation of both `TestExecutor` and
+  `UatExecutor` that records every invocation for inspection. Use this when your
+  test needs to verify that an executor was called with specific arguments
+  without actually running cargo or a real UAT journey. Construct via `default()`,
+  call `recorded_calls()` to inspect the per-call arguments (non-destructive),
+  and drive invocations through the trait methods.
+
+- **RecordedCall** — A per-invocation record capturing the `story_id` and `files`
+  arguments passed to an executor. Returned by `RecordingExecutor::recorded_calls()`;
+  exposes public fields for direct inspection by test assertions.
 
 ## Why this kit exists
 
