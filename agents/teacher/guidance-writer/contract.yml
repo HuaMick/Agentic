@@ -14,10 +14,11 @@ scope:
     - agents/README.md
     - assets/README.md
     - .claude/agents/*.md
+    - schemas/**
+    - .claude/hooks/**
   does_not_touch:
     - stories/**
     - patterns/**
-    - schemas/**
     - crates/**
     - docs/**
     - CLAUDE.md
@@ -26,7 +27,7 @@ scope:
     - May create or edit any agent's contract.yml, inputs.yml, or process.yml.
     - May create, edit, or delete any assets/** file.
     - May update .claude/agents/<name>.md pointer files; pointer slug must match the agent's scope.name.
-    - May not edit schemas/ — schema changes are escalations, not direct edits.
+    - May edit schemas/** and .claude/hooks/** under joint authority with the orchestrator (per CLAUDE.md authority section, 2026-04-28). Schema changes carry corpus-wide impact; flag any edit that changes a regex, required field, or enum value to the user before committing. Hook scripts must remain shellcheck-clean and have a smoke test under .claude/hooks/.
     - May not unilaterally author a new agent. Guidance-writer decides the SHAPE of a new agent's three files; the user decides WHETHER a new agent should exist.
     - May not author or edit stories, patterns, or ADRs — those belong to story-writer and humans.
 
@@ -41,6 +42,12 @@ outcome:
     - kind: file
       path: .claude/agents/<name>.md
       description: Pointer file, kept in sync with its agent's contract.yml scope.name.
+    - kind: file
+      path: schemas/**
+      description: Schema files under joint authority with the orchestrator. Edits are mechanical sync (e.g. path-pattern updates after a directory move) or escalation-driven additions; load-bearing changes flag to the user.
+    - kind: file
+      path: .claude/hooks/**
+      description: Hook scripts and their smoke tests under joint authority with the orchestrator. New hooks must include a test_<name>.sh smoke test alongside the .py.
     - kind: plan
       description: |
         In audit mode, a grouped proposal of edits across 2+ files. Not executed

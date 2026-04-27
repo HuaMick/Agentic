@@ -48,6 +48,33 @@ For agents registered as native Claude Code subagent types, use
 `agents/<category>/<name>/{contract,inputs,process}.yml` as their
 authoritative spec at session start.
 
+### Surface ownership and joint authority (2026-04-28)
+
+Most surfaces have a single curatorial owner declared in that agent's
+`contract.yml owns:`. Two surfaces are **jointly owned by the
+orchestrator and guidance-writer** — either may edit, and the
+`route-to-the-owner` rule treats both as legitimate routing
+destinations:
+
+- **`schemas/**`** — JSON Schemas governing stories, assets, agent
+  specs, and patterns. Schema changes carry corpus-wide impact;
+  whoever edits flags load-bearing changes (regex / required-field /
+  enum shifts) to the user before committing. Mechanical sync (e.g.
+  path-pattern updates after a directory move) lands without
+  escalation.
+- **`.claude/hooks/**`** — PreToolUse hook scripts and their smoke
+  tests. New hooks must ship with a `test_<name>.sh` smoke test
+  alongside the `.py`. The orchestrator-edit-guard hook itself
+  protects test-builder's territory (`scripts/verify/**`,
+  `crates/*/tests/**`, `evidence/runs/**`); it does NOT block
+  schema or hook edits, by design.
+
+Other unowned surfaces (`CLAUDE.md`, top-level `README.md`,
+`docs/decisions/`, `docs/guides/`) remain orchestrator territory by
+default — there is no curator subagent for them. The orchestrator
+edits these inline when the change is mechanical or narrative
+(README status counts, ADR amendments, CLAUDE.md durable rules).
+
 Subagents have no memory of your conversation. Every brief must be
 self-contained — include file paths, the story id, and any environment
 gotchas the agent will hit.

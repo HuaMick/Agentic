@@ -106,20 +106,29 @@ always.
 
 ### Testing
 
-Manual smoke test (no automated test script yet — add
-`test_orchestrator_edit_guard.sh` if/when the hook accumulates
-denied-glob complexity):
+`test_orchestrator_edit_guard.sh` exercises 29 cases — every denied
+glob × Edit/Write, every allowed-orchestrator-territory path,
+subagent fall-through across agent types, non-Edit/Write tools, the
+deliberate Bash-gap (cases that pass with `allow` to put the gap in
+evidence per the hook docstring's rationale), and edge cases
+(empty file_path, missing tool_input, malformed JSON fail-open).
+Run before changing the script:
 
 ```
-echo '{"tool_name": "Edit", "tool_input": {"file_path": "scripts/verify/foo.sh"}}' \
-  | python3 .claude/hooks/orchestrator_edit_guard.py
-# Expected: deny payload naming test-builder as the owner
-
-echo '{"tool_name": "Edit", "tool_input": {"file_path": "crates/agentic-test-support/src/lib.rs"}}' \
-  | python3 .claude/hooks/orchestrator_edit_guard.py
-# Expected: allow (src/, not tests/)
-
-echo '{"agent_type": "test-builder", "tool_name": "Write", "tool_input": {"file_path": "scripts/verify/foo.sh"}}' \
-  | python3 .claude/hooks/orchestrator_edit_guard.py
-# Expected: allow (subagent fall-through)
+bash .claude/hooks/test_orchestrator_edit_guard.sh
 ```
+
+Add a case for any new denied glob, allowed surface, or subagent
+falling through.
+
+The Bash-gap section deliberately asserts `allow` on
+`sed -i scripts/verify/foo.sh`, `tee crates/.../tests/x.rs`,
+`>> evidence/runs/...`, and `rm -rf crates/.../tests/`. These pass to
+*demonstrate* the gap rather than fix it — Bash inspection would
+require parsing arbitrary shell strings (sed/tee/redirection idiom
+variants) and is fragile. The session-orchestrator spec carries the
+contractual rule against shell workarounds; this hook is enforcement
+against accidental drift, not adversarial behavior. If a future
+session decides Bash inspection is worth it, flip those expected
+values to `deny` and update the hook's main() to inspect Bash
+commands.
