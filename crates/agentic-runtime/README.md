@@ -8,7 +8,7 @@ Runs agents. Defines the `Runtime` trait and provides day-one implementation: `C
 
 1. **Pluggable.** Trait-based so we can swap to a PTY/streaming impl later without touching callers.
 2. **Isolates the auth story.** Subscription authentication via local `claude` login lives entirely here. Nothing else in the codebase knows about API keys or OAuth — because there aren't any to know about.
-3. **Testability.** A `MockRuntime` in `agentic-testkit` replays canned NDJSON transcripts for deterministic tests.
+3. **Testability.** A `MockRuntime` (location TBD post `agentic-testkit` retirement — see story 26's `agentic-test-support` kit) replays canned NDJSON transcripts for deterministic tests.
 
 ## Public API sketch
 

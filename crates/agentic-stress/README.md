@@ -35,7 +35,7 @@ pub fn run_scenario(s: &Scenario) -> ScenarioResult;
 
 ## Dependencies
 
-- Depends on: every domain crate (it needs to pressure-test them). Uses `agentic-testkit` for fixtures.
+- Depends on: every domain crate (it needs to pressure-test them). Uses `agentic-test-support` for fixtures.
 - Depended on by: CI only.
 
 ## Design decisions
