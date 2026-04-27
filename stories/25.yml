@@ -5,7 +5,7 @@ outcome: |
   structured report naming every story whose declared status disagrees with
   its actual implementation state, so drift between authored intent and
   shipped state is visible without manual cross-referencing.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
