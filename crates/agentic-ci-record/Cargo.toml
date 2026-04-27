@@ -35,6 +35,12 @@ git2 = { version = "0.19", default-features = false }
 serde_yaml.workspace = true
 
 [dev-dependencies]
+# Story 26: fixture corpus, story authoring, and stub executor for
+# test harnesses. Added by story 12 build phase to resolve the
+# re-authored test's imports. Circular-safe as a dev-dep per Cargo's
+# dev-dependency resolution semantics.
+agentic-test-support = { path = "../agentic-test-support" }
+
 # Story 12: the library-level selector scaffolds build a fixture
 # `stories/` directory under a `TempDir` per test so the developer's
 # real `stories/` is never read. Same idiom the agentic-story loader

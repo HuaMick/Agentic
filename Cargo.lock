@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "agentic-signer",
  "agentic-store",
+ "agentic-test-support",
  "git2",
  "serde_json",
  "serde_yaml",
