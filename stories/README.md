@@ -71,6 +71,8 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 23 | `agentic test-build record` emits mixed red/preserved/re-authored verdicts | under_construction |
 | 24 | `agentic test-build record` rejects scaffold defects masquerading as compile-red | proposed |
 | 25 | `agentic stories audit` surfaces status-vs-implementation drift | proposed |
+| 26 | Extract agentic-test-support | under_construction |
+| 27 | Extend asset system to stories | under_construction |
 
 Stories 1-6 and 11 were previously `healthy`. They auto-reverted to
 `under_construction` during the Phase 0 batch when defects-amend-the-
