@@ -1,0 +1,320 @@
+id: 27
+title: Extend asset system to stories
+outcome: |
+  A story author needing to reference a cross-corpus concept finds and
+  re-uses an existing asset instead of inlining the concept's prose into
+  the story's guidance.
+status: proposed
+patterns: []
+acceptance:
+  tests:
+  - file: crates/agentic-story/tests/loader_accepts_assets_field.rs
+    justification: |
+      Proves the happy path for the new schema field: a story YAML
+      whose root carries `assets: [agents/assets/principles/deep-modules.yml]`
+      loads cleanly through `Story::load` (and `Story::load_dir`) into
+      a typed `Story` value whose `assets` field round-trips as a
+      `Vec<String>` (or equivalent path-typed collection) preserving
+      order and content. Stories without an `assets:` block load with
+      `assets` as the empty default — explicitly absent and explicitly
+      empty are both accepted and observably indistinguishable
+      downstream, matching the existing `patterns:` field's posture.
+      Without this test, ADR-0007's first decision ("story schema gains
+      an `assets:` field") has no loader-level pinning and every
+      downstream consumer would have to re-derive the YAML shape from
+      observation — the same drift that motivated story 17's
+      `load_build_config_is_parsed.rs` for `build_config`.
+  - file: crates/agentic-story/tests/loader_rejects_unknown_asset_path.rs
+    justification: |
+      Proves the existence-check ADR-0007 decision 3 mandates: a story
+      YAML carrying `assets: [agents/assets/nonexistent.yml]` is rejected
+      by the directory loader with a typed error variant whose payload
+      names the missing path verbatim and the source story's id, so an
+      author who mistypes an asset path (or references one that was
+      moved or retired) sees a precise diagnostic rather than a silent
+      acceptance that surfaces as a missing-file panic in some later
+      consumer. The check resolves paths relative to the repo root and
+      runs only in the directory-load path (parity with how
+      `depends_on` and `superseded_by` target-existence are validated
+      per story 6's guidance — single-file load cannot meaningfully
+      validate cross-tree references). Without this test, asset
+      references rot silently as the asset corpus is reorganised, and
+      ADR-0007's whole "structured reference mechanism" rationale
+      collapses to glorified prose citation.
+  - file: crates/agentic-story/tests/asset_schema_accepts_story_consumer.rs
+    justification: |
+      Proves ADR-0007 decision 2: the asset schema's `current_consumers:`
+      regex is widened from agent-spec-triplet paths only to also
+      accept `^stories/[0-9]+\.yml$`. The test loads (or schema-validates)
+      an asset YAML whose `current_consumers:` array contains the
+      string `stories/27.yml` and asserts the validation passes; the
+      converse case — an asset listing a malformed pseudo-story path
+      like `stories/abc.yml` or `stories/27.yaml` — must still fail.
+      The test pins the EXACT widened regex from ADR-0007
+      (`^(agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\.yml|stories/[0-9]+\.yml)$`)
+      so a future schema edit cannot silently narrow the consumer
+      vocabulary back. Without this test, decision 2 is convention,
+      not contract — an asset author or auditor could declare a story
+      consumer the schema would actually reject, and the discovery
+      would happen at the wrong layer.
+  - file: crates/agentic-story/tests/asset_consumer_reciprocity_audit.rs
+    justification: |
+      Proves ADR-0007 decision 4 (cross-corpus reciprocity) at
+      corpus level: the test loads the live `stories/` directory and
+      the live `agents/assets/` tree and asserts that for every asset
+      whose `current_consumers:` list names a story, that story's
+      `assets:` field references the asset; and conversely, for every
+      story declaring an asset, the asset's `current_consumers:` lists
+      the story. Both directions matter and are checked separately —
+      a one-sided edge is exactly the silent drift the audit exists
+      to catch. The test runs against the real corpus rather than a
+      fixture because reciprocity is a property of the corpus as
+      shipped, not a property of a synthetic minimal example.
+      Without this test, an author can declare an asset on a story
+      without back-filling `current_consumers:` (or rename a story
+      and orphan its asset edge) and the corpus will silently lose
+      the reach-visibility ADR-0007 set out to gain.
+  - file: scripts/verify/asset_consumer_minimum.sh
+    justification: |
+      Proves the asset schema's `minItems: 1` invariant on
+      `current_consumers:` holds at corpus level: the script
+      enumerates every asset YAML under `agents/assets/` and refuses
+      with a non-zero exit if any asset's `current_consumers:` is
+      absent, empty, or `[]`. This catches the orphan-asset shape
+      the asset schema's `description` already names as a defect
+      ("An asset with zero current_consumers is an orphan and must
+      be deleted or adopted"), but at the corpus boundary rather
+      than at single-file load time — schema validation alone can
+      pass on a freshly-written orphan asset because the `[]` is
+      simply omitted by the author. Without this verifier, ADR-0007's
+      "the asset corpus visibly serves both halves of the system"
+      consequence has no continuous-integration anchor; an asset
+      whose last consumer was retired could linger orphan-shaped
+      indefinitely.
+  uat: |
+    Goal: convince yourself that a story author can declare a
+    cross-corpus asset on a new story, that the loader accepts the
+    declaration when the asset exists and rejects it precisely when
+    it does not, and that the reciprocity link between the asset's
+    `current_consumers:` and the story's `assets:` is visible from
+    both sides.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status
+         --porcelain` and confirm the working tree is empty.
+      2. Confirm the loader and verifier surfaces are wired
+         post-build:
+           - `wsl bash -c "source ~/.cargo/env && cd
+             /home/code/Agentic && cargo build -p agentic-story"`
+             succeeds.
+           - The `agentic stories health` CLI (story 3) is
+             installed and resolves on `command -v agentic`. A
+             missing or stale CLI is acceptable for the loader-
+             only walkthroughs (steps 4-6); it is required for
+             step 7.
+      3. Pick a scratch directory you will use as a fixture
+         `stories/` corpus. Copy any currently-valid story (e.g.
+         `stories/1.yml`) into it as a baseline.
+
+    Asset-declared walkthrough:
+      4. In your scratch corpus, author a new story file `99.yml`
+         (any unused id) whose `id:` matches the filename and whose
+         `assets:` block reads:
+           ```
+           assets:
+             - agents/assets/principles/deep-modules.yml
+           ```
+         Confirm the asset path exists on disk
+         (`ls agents/assets/principles/deep-modules.yml`).
+         Run the loader against the scratch directory (via the
+         same `examples/load_smoke.rs` style story 6's UAT uses,
+         or via `agentic stories health` against a corpus argument
+         once that is wired). Observe: exit 0, the story parses,
+         the printed `Story` value's `assets` field contains the
+         single declared path verbatim.
+
+    Unknown-asset walkthrough:
+      5. Edit `99.yml` so `assets:` reads
+         `[agents/assets/nonexistent.yml]`. Re-run the loader.
+         Observe: non-zero exit, an error naming the offending
+         path (`agents/assets/nonexistent.yml`) AND the source
+         story id (99). The diagnostic is precise enough that a
+         reader can fix the typo without opening the schema.
+
+    Asset-side reciprocity walkthrough:
+      6. Restore `99.yml`'s `assets:` to the deep-modules path.
+         Open `agents/assets/principles/deep-modules.yml` and
+         observe its `current_consumers:` block — it currently
+         lists three agent-triplet paths. Add a fourth entry
+         `stories/99.yml` to the list (a temporary edit; you
+         will revert in cleanup). Run a schema validator (or the
+         loader's asset-side validation surface) over the asset.
+         Observe: the schema accepts the new entry; the asset
+         validates. Now flip the entry to `stories/abc.yml` (an
+         intentionally malformed pseudo-id). Re-validate.
+         Observe: schema rejects the entry, naming the regex
+         the path failed.
+
+    Corpus reciprocity walkthrough:
+      7. Move `99.yml` into the live `stories/` directory (or
+         re-point the audit at the scratch corpus). Without
+         editing `agents/assets/principles/deep-modules.yml`'s
+         `current_consumers:` to include `stories/99.yml`, run
+         the reciprocity audit (the test or a future audit
+         surface that wraps it). Observe: the audit reports a
+         one-sided edge — story 99 declares the asset, the
+         asset does not back-reference the story. Add
+         `stories/99.yml` to the asset's `current_consumers:`
+         list. Re-run the audit. Observe: the audit passes; both
+         sides now agree.
+
+    Orphan-asset walkthrough:
+      8. Run `bash scripts/verify/asset_consumer_minimum.sh`.
+         Observe: exit 0, every asset under `agents/assets/`
+         has at least one declared consumer.
+      9. Briefly create a stub asset
+         `agents/assets/principles/scratch-orphan.yml` containing
+         `name: scratch-orphan`, `description: temporary`, and an
+         empty `current_consumers: []`. Re-run the verifier.
+         Observe: non-zero exit, the orphan path is named in
+         the diagnostic.
+
+    Cleanup:
+     10. Delete `99.yml` from wherever you placed it (scratch or
+         live `stories/`).
+     11. Revert any edits to
+         `agents/assets/principles/deep-modules.yml`
+         (`git restore agents/assets/principles/deep-modules.yml`).
+     12. Delete the scratch orphan
+         `agents/assets/principles/scratch-orphan.yml` if you
+         created it.
+     13. Remove the scratch fixture directory.
+     14. Confirm `git status --porcelain` is empty.
+guidance: |
+  Architectural context lives in `docs/decisions/0007-stories-consume-assets.md`.
+  This guidance section pins the schema and validation invariants this
+  story ships; ADR-0007 is the authoritative source for the rationale
+  (why a separate `assets:` field rather than overloading `patterns:`,
+  why widen the `current_consumers:` regex rather than rename the
+  directory, why the migration is opt-in). Do not restate ADR-0007 here.
+
+  Schema invariants this story pins.
+    1. `schemas/story.schema.json` gains a root-level `assets:` array
+       property. Items are repo-root-relative strings matching
+       `^agents/assets/.*\.ya?ml$`. Default `[]`. The story-writer
+       always writes the field explicitly when the story declares
+       assets; absent and `[]` are both accepted and observably
+       equivalent post-load (matching the existing `patterns:` field).
+    2. `schemas/asset.schema.json`'s `current_consumers[]` regex
+       widens from
+       `^agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\.yml$`
+       to
+       `^(agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\.yml|stories/[0-9]+\.yml)$`.
+       The `minItems: 1` invariant on `current_consumers:` is
+       preserved unchanged — every asset must still declare at least
+       one consumer.
+
+  Rebuild brief — what implementation needs to do.
+    This is a NEW field on existing artefacts, not a refactor of
+    existing code. Build-rust extends `agentic-story`'s loader
+    surface to:
+      (a) Round-trip the new `assets: Vec<String>` (or path-typed)
+          field through `Story::load` and `Story::load_dir` with
+          the same observability the existing `patterns: Vec<String>`
+          field already has.
+      (b) Validate every entry resolves to an existing file under
+          the repo's `agents/assets/` tree at directory-load time
+          (parity with how `depends_on` and `superseded_by` target-
+          existence are validated). Single-file load cannot
+          meaningfully validate cross-tree existence; that is the
+          existing precedent and applies here unchanged.
+      (c) Surface a typed error variant for the unknown-path case
+          carrying both the offending path AND the source story
+          id. Naming is build-rust's call; the contract is "the
+          variant is distinct enough that a caller can match on
+          it without parsing the message."
+    The asset-schema regex widening is a single edit to
+    `schemas/asset.schema.json` per ADR-0007 decision 2; the
+    orchestrator (or human) lands the schema edit alongside this
+    story's test-builder + build-rust cycle, per the schema-
+    coordination posture story 6's guidance documents.
+
+  Migration posture — opt-in, not forced.
+    Existing stories that inline asset prose into their guidance
+    (e.g. story 6's references to `agents/assets/definitions/identifier-
+    forms.yml`) MAY migrate the references into `assets:` declarations
+    as a follow-up amendment. There is no forced corpus-wide rewrite.
+    Story 27's outcome is the MECHANISM — a working `assets:` field
+    plus its reciprocity invariants — not a sweep of every existing
+    inlined reference. Stories that already work as-is keep working.
+    New stories use the mechanism by default.
+
+  Why this story does not retroactively declare its own assets.
+    The mechanism story 27 ships is the very mechanism it would use
+    to declare its own assets. Self-referencing through an unbuilt
+    field is incoherent; story 27's `assets:` is `[]` deliberately,
+    not by oversight. The first story authored AGAINST the
+    mechanism (a downstream story-writer pass on any new story) is
+    where `assets:` first carries content.
+
+  Reciprocity is a property of the corpus, not a single file.
+    The fourth acceptance test (`asset_consumer_reciprocity_audit.rs`)
+    runs against the live corpus rather than a synthetic fixture
+    because reciprocity is a corpus-level invariant — the same
+    posture the loader's `depends_on` cycle check takes. A
+    fixture-based version would prove the algorithm; the corpus-
+    based version proves the corpus is actually reciprocal at the
+    moment the test runs. Both halves matter; the test asserts the
+    second.
+
+  What this story is NOT.
+    - NOT a rename of `agents/assets/` to top-level `assets/`.
+      ADR-0007's "Alternatives considered" defers that move
+      explicitly; revisit when the asset corpus has grown enough
+      that path drift produces real reader confusion.
+    - NOT a merge of `patterns/` into `agents/assets/`. Patterns
+      and assets remain separate concepts with separate schemas;
+      a story may declare both. ADR-0007 decision 1 names this
+      explicitly.
+    - NOT an enforcement of asset usage. Stories with `assets: []`
+      are valid forever; the field is opt-in. The schema
+      requires the field's PRESENCE only when the author wants
+      to declare an asset edge.
+    - NOT a change to how agents reference assets. Agents continue
+      to reference assets via `inputs.yml required_reading:` —
+      the existing path is unchanged. This story adds a parallel
+      mechanism for stories, not a replacement for the agent
+      mechanism.
+
+  Relationship to story 6.
+    Story 6 owns the loader's parse-time contract and amends with
+    every new field the schema grows (story 17 added `build_config`,
+    story 21 added `retired` + `superseded_by` + `retired_reason`).
+    Story 27 follows the same pattern: the new `assets:` field
+    triggers a story 6 amendment to absorb the round-trip + path-
+    existence validation tests into the loader's surface. Per the
+    eventual-consistency posture, story 27 declares its own contract
+    (the field's observable shape and its corpus-level reciprocity
+    invariant) and depends on story 6 for the loader to actually
+    parse the field. Story 6's amendment captures the new field's
+    loader-side tests; story 27 captures the schema, reciprocity,
+    and corpus-minimum tests this story owns directly. Both sit
+    red until the pipeline converges.
+
+  Test file locations.
+    Four loader-and-schema-level tests live under
+    `crates/agentic-story/tests/` as Rust integration tests
+    (`loader_accepts_assets_field.rs`,
+    `loader_rejects_unknown_asset_path.rs`,
+    `asset_schema_accepts_story_consumer.rs`,
+    `asset_consumer_reciprocity_audit.rs`). The fifth test is a
+    shell verifier under `scripts/verify/asset_consumer_minimum.sh`
+    because its scope is corpus-wide enumeration with a non-zero
+    exit on orphan presence — the kind of check that fits a shell
+    walker more cleanly than a Rust integration harness.
+depends_on:
+- 6
+related_files:
+- crates/agentic-story/src/**
+- schemas/story.schema.json
+- schemas/asset.schema.json
