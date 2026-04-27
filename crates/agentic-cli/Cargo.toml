@@ -22,6 +22,12 @@ git2 = { version = "0.19", default-features = false }
 dirs = "5"
 
 [dev-dependencies]
+# Story 26: fixture corpus, story authoring, and stub executor for
+# test harnesses. Added by story 12 build phase to resolve the
+# re-authored test's imports. Circular-safe as a dev-dep per Cargo's
+# dev-dependency resolution semantics.
+agentic-test-support = { path = "../agentic-test-support" }
+
 # Stories 1 + 3: the integration tests drive the compiled `agentic`
 # binary via argv (not the library), so the tests must be able to
 # resolve the binary path and inspect its exit code, stdout, stderr.

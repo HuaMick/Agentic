@@ -24,6 +24,7 @@ dependencies = [
  "agentic-store",
  "agentic-story",
  "agentic-test-builder",
+ "agentic-test-support",
  "agentic-uat",
  "assert_cmd",
  "clap",
