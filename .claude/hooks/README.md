@@ -58,3 +58,68 @@ Add a case for any new allowlist entry or new denied path.
 Scripts are invoked as `python3 $CLAUDE_PROJECT_DIR/.claude/hooks/<file>.py`
 from `.claude/settings.json`. Python 3 is required on the host running
 Claude Code. `shlex` and `fnmatch` are stdlib — no third-party deps.
+
+## `orchestrator_edit_guard.py`
+
+A `PreToolUse` hook that programmatically enforces the
+`route-to-the-owner` rule from
+`agents/orchestration/session-orchestrator/process.yml`. The
+orchestrator's spec says it must NOT edit subagent-owned surfaces
+directly — every byte to those paths routes through the owning
+agent. Spec-only enforcement proved insufficient (commit 3f4568d:
+the orchestrator edited `scripts/verify/asset_consumer_minimum.sh`
+directly, with a self-acknowledged "should have been routed
+through test-builder" note in the commit message).
+
+### What it enforces
+
+The hook fires only when the calling context has no `agent_type` /
+`agent_id` (i.e., the orchestrating Claude session). Any subagent
+falls through with `allow` — their own contracts handle their
+internal boundaries.
+
+| Tool         | Path glob             | Owning agent                                    |
+| ------------ | --------------------- | ----------------------------------------------- |
+| `Edit`/`Write` | `scripts/verify/**`   | test-builder (`contract.yml owns: scripts/verify/**`) |
+| `Edit`/`Write` | `crates/*/tests/**`   | test-builder (ADR-0005)                         |
+| `Edit`/`Write` | `evidence/runs/**`    | test-builder (ADR-0005)                         |
+
+### What it deliberately does NOT enforce
+
+- **`Bash` workarounds** (`sed -i`, `tee`, `>`, `>>`) on the same
+  paths. Adding Bash inspection requires parsing arbitrary shell
+  strings and is fragile; the better fix when an orchestrator reaches
+  for a Bash workaround is a shape change (spawn the owning subagent),
+  not a tighter regex. The session-orchestrator spec carries that
+  contract.
+- `stories/**` writes from the orchestrator. Build-rust's hook
+  already permits the single-line status-flip on `stories/*.yml`
+  for build-rust; story-writer owns broader writes. If orchestrator
+  edits to `stories/**` become a recurring drift, add a third
+  glob entry here.
+
+### How decisions reach Claude
+
+Same as `build_rust_guard.py`: stdout JSON with
+`permissionDecision` + `permissionDecisionReason` on deny. Exit 0
+always.
+
+### Testing
+
+Manual smoke test (no automated test script yet — add
+`test_orchestrator_edit_guard.sh` if/when the hook accumulates
+denied-glob complexity):
+
+```
+echo '{"tool_name": "Edit", "tool_input": {"file_path": "scripts/verify/foo.sh"}}' \
+  | python3 .claude/hooks/orchestrator_edit_guard.py
+# Expected: deny payload naming test-builder as the owner
+
+echo '{"tool_name": "Edit", "tool_input": {"file_path": "crates/agentic-test-support/src/lib.rs"}}' \
+  | python3 .claude/hooks/orchestrator_edit_guard.py
+# Expected: allow (src/, not tests/)
+
+echo '{"agent_type": "test-builder", "tool_name": "Write", "tool_input": {"file_path": "scripts/verify/foo.sh"}}' \
+  | python3 .claude/hooks/orchestrator_edit_guard.py
+# Expected: allow (subagent fall-through)
+```
