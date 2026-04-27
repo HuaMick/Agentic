@@ -39,6 +39,14 @@ members = [
     # red-state probe can fire. The real `[dependencies]` block
     # lands when build-rust picks the story up.
     "crates/agentic-story-build",
+    # Story 26 un-defer: shell-only. The `agentic-test-support` crate
+    # hosts shared test fixture primitives: `FixtureCorpus`, `StoryFixture`,
+    # `FixtureRepo`, `RecordingExecutor`, and `RecordedCall`. The crate is
+    # admitted to the workspace as a shell so test-builder can author
+    # scaffolds against it in the next step. Tests fail compile-red on
+    # missing methods; that is the intended outcome. The real `impl` blocks
+    # land when build-rust picks the story up.
+    "crates/agentic-test-support",
 ]
 
 [workspace.package]

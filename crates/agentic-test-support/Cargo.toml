@@ -1,0 +1,32 @@
+[package]
+name = "agentic-test-support"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Story 26: fixture corpus YAML authoring and round-trip validation.
+agentic-story = { path = "../agentic-story" }
+
+# Story 26: recording executor stub for test harnesses.
+agentic-ci-record = { path = "../agentic-ci-record" }
+
+# Story 26: executor traits that fixtures implement.
+agentic-uat = { path = "../agentic-uat" }
+
+# Story 26: tempdir lifecycle for FixtureCorpus.
+tempfile.workspace = true
+
+# Story 26: YAML authoring for StoryFixture.
+serde.workspace = true
+serde_yaml.workspace = true
+
+# Story 26: git initialization with committer email for FixtureRepo.
+# Version and default-features match agentic-ci-record's pin.
+git2 = { version = "0.19", default-features = false }
+
+[dev-dependencies]
+# Story 26: the kit's own integration tests in `tests/` resolve
+# `extern crate agentic_test_support` against this crate.
+agentic-test-support = { path = "." }
