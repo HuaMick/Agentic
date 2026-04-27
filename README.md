@@ -2,7 +2,7 @@
 
 A Rust-based agent orchestration system built around story-driven development.
 
-**Status:** Phase 2 / Phase 0 batch in flight. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Five stories currently `healthy` (9, 10, 12, 13, 15); fourteen `under_construction` as the Phase 0 batch (signer resolver, runtime un-deferral, run recorder, sandbox launcher) is implemented and previously-healthy stories cycle through amendment for newly-discovered defects (per the defects-amend-the-owning-story rule); two `proposed` (24, 25). Three retired (7, 8, 14). The `dag-primary-lens` epic (stories 10-13) is complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes three top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test`, and `agentic test-build [plan|record]`.
+**Status:** Phase 2 / Phase 0 batch in flight. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Four stories currently `healthy` (9, 10, 13, 15); seventeen `under_construction` as the Phase 0 batch (signer resolver, runtime un-deferral, run recorder, sandbox launcher) is implemented and previously-healthy stories cycle through amendment for newly-discovered defects (per the defects-amend-the-owning-story rule); two `proposed` (24, 25). Three retired (7, 8, 14). The `dag-primary-lens` epic (stories 10-13) is complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes three top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test`, and `agentic test-build [plan|record]`.
 
 ## What this is
 
@@ -56,19 +56,24 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 
 ## Current state
 
-**Healthy:** stories 9, 10, 12, 13, 15. The **`dag-primary-lens`** epic
+**Healthy:** stories 9, 10, 13, 15. The **`dag-primary-lens`** epic
 (`epics/live/dag-primary-lens/`) is **complete** — stories 10, 11, 12,
 and 13 shifted the system's mental model from "flat list of stories"
 to "DAG with frontier-of-work, blast-radius drilldown, UAT
-ancestor-gating, and subtree-scoped CI." Story 11 has since been
-auto-reverted to `under_construction` for an amendment.
+ancestor-gating, and subtree-scoped CI." Stories 11 and 12 have since
+been auto-reverted to `under_construction` for amendments (12 most
+recently for the kit-vs-bespoke contract pinning on its ci-record
+acceptance entries).
 
-**Under construction (14):** stories 1, 2, 3, 4, 5, 6, 11, 16, 17, 18,
-19, 20, 21, 23. Stories 1-6 and 11 were previously healthy and have
-been auto-reverted as defects-amend-the-owning-story added new
-acceptance tests during the Phase 0 batch (signer resolver,
+**Under construction (17):** stories 1, 2, 3, 4, 5, 6, 11, 12, 16, 17,
+18, 19, 20, 21, 23, 26, 27. Stories 1-6, 11, and 12 were previously
+healthy and have been auto-reverted as defects-amend-the-owning-story
+added new acceptance tests during the Phase 0 batch (signer resolver,
 agentic-runtime, run recorder, sandbox launcher). Stories 16-21 and 23
-are net-new Phase 0 work in progress.
+are net-new Phase 0 work in progress. Stories 26 (extract
+`agentic-test-support` kit) and 27 (extend asset system to stories) are
+the most recent additions, both blocked on Phase-0 promotion before they
+can UAT to `healthy`.
 
 **Proposed (2):** story 24 (`agentic test-build record` diagnostic
 classifier; tightens probe to E0432/E0599 only) and story 25 (`agentic

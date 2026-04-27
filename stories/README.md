@@ -59,7 +59,7 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 9 | Scope dashboard staleness to each story's declared `related_files` | healthy |
 | 10 | Render the story corpus as a DAG with frontier-of-work view and blast-radius drilldown | healthy |
 | 11 | UAT refuses to sign Pass for a story standing on an unproven ancestor | under_construction |
-| 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | healthy |
+| 12 | Scope `agentic stories test <selector>` runs to a DAG subtree | under_construction |
 | 13 | Classify a story as unhealthy when any transitive ancestor is not healthy | healthy |
 | 15 | test-build is a plan-and-record CLI whose user writes the scaffolds | healthy |
 | 16 | Persist one run row per inner-loop invocation with a tee'd NDJSON trace | under_construction |
@@ -74,15 +74,16 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 26 | Extract agentic-test-support | under_construction |
 | 27 | Extend asset system to stories | under_construction |
 
-Stories 1-6 and 11 were previously `healthy`. They auto-reverted to
-`under_construction` during the Phase 0 batch when defects-amend-the-
+Stories 1-6, 11, and 12 were previously `healthy`. They auto-reverted
+to `under_construction` during the Phase 0 batch when defects-amend-the-
 owning-story added new acceptance tests (e.g. signer wiring on top of
 story 1's UAT path, signer wiring on top of story 2's `test_runs`
-shape, related contract tightenings as the runtime/sandbox stories
-exposed downstream gaps). The fact that they are not currently green
-is what the system is supposed to surface — the moment a defect lands,
-proof is invalidated, and a new red-green cycle drives the tightening
-back to a Pass verdict.
+shape, the kit-vs-bespoke contract pinning on story 12's ci-record
+acceptance entries, related contract tightenings as the runtime/sandbox
+stories exposed downstream gaps). The fact that they are not currently
+green is what the system is supposed to surface — the moment a defect
+lands, proof is invalidated, and a new red-green cycle drives the
+tightening back to a Pass verdict.
 
 Story 8 (CLI wiring) was folded into stories 1 and 3 on 2026-04-19 after an
 audit found the split was along library/binary crate boundaries rather
