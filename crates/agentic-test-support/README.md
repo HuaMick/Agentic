@@ -4,6 +4,10 @@ Shared test fixture primitives for the agentic workspace. This crate provides
 setup, fixture, and stub-executor material that would otherwise be reimplemented
 across multiple test files.
 
+Single `lib.rs` by design — the interface is the five-name `pub` surface, not
+the file layout. See the `lib.rs` head comment for the future-trigger that
+would justify splitting (~6 primitives or ~800-1000 lines).
+
 ## REWARD-HACKING GUARDRAIL — non-negotiable
 
 Assertions stay bespoke per test on purpose. The shared kit ships setup/fixture

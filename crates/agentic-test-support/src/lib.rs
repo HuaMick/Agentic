@@ -4,6 +4,19 @@
 //! would otherwise be reimplemented across multiple test files. It ships
 //! fixture machinery only — no assertion helpers. See the README for the
 //! catalogue of available primitives.
+//!
+//! # Single-file by design
+//!
+//! The kit is intentionally a single `lib.rs` with five public names.
+//! The interface boundary is the `pub` surface — what callers `use` —
+//! not the file layout behind it. Splitting into per-primitive modules
+//! would invert the deep-modules principle this kit exists to embody:
+//! treating internal seams as architecturally load-bearing inside a
+//! kit whose whole thesis is the opposite. Revisit the split when the
+//! kit grows past ~6 primitives or ~800-1000 lines; at that point the
+//! split is justified by accumulated friction. Until then, the
+//! catalogue lives here, in one file, with banner comments separating
+//! the five primitives.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
