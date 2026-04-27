@@ -3,7 +3,7 @@
 //!
 //! Justification (from stories/27.yml): proves the happy path for the new
 //! schema field — a story YAML whose root carries
-//! `assets: [agents/assets/principles/deep-modules.yml]` loads cleanly
+//! `assets: [assets/principles/deep-modules.yml]` loads cleanly
 //! through `Story::load` (and `Story::load_dir`) into a typed `Story`
 //! value whose `assets` field round-trips as a `Vec<String>` (or
 //! equivalent path-typed collection) preserving order and content.
@@ -13,7 +13,7 @@
 //! `patterns:` field's posture.
 //!
 //! Per ADR-0007 decision 1 the story schema gains a root-level array
-//! `assets:` whose items match `^agents/assets/.*\.ya?ml$`, defaulting
+//! `assets:` whose items match `^assets/.*\.ya?ml$`, defaulting
 //! to `[]`. The scaffold writes a fixture YAML carrying a single
 //! `assets:` entry and a sibling fixture that omits `assets:` entirely;
 //! both must load, the first preserving the entry verbatim, the second
@@ -47,7 +47,7 @@ status: proposed
 patterns: []
 
 assets:
-  - agents/assets/principles/deep-modules.yml
+  - assets/principles/deep-modules.yml
 
 acceptance:
   tests:
@@ -110,7 +110,7 @@ fn loader_accepts_assets_field_round_trips_and_defaults_to_empty() {
     let with_story: Story =
         Story::load(&with_path).expect("a story declaring assets must load successfully");
 
-    let expected_with: Vec<String> = vec!["agents/assets/principles/deep-modules.yml".to_string()];
+    let expected_with: Vec<String> = vec!["assets/principles/deep-modules.yml".to_string()];
     assert_eq!(
         with_story.assets, expected_with,
         "assets must round-trip as a Vec<String> with content and order \

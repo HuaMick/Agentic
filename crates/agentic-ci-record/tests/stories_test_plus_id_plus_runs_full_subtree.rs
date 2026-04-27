@@ -23,7 +23,7 @@
 //! is observable in this file's `use` block — a reimplementation that
 //! brought back a local `fn write_fixture_story`, `fn setup_fixture_corpus`,
 //! or `struct StubExecutor impl TestExecutor` would fail the contract.
-//! Reference `agents/assets/principles/deep-modules.yml`'s
+//! Reference `assets/principles/deep-modules.yml`'s
 //! `application_to_test_scaffolding` for the operational rationale.
 
 use std::sync::Arc;

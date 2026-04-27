@@ -4,7 +4,7 @@
 //!
 //! Justification (from stories/27.yml): proves ADR-0007 decision 4
 //! (cross-corpus reciprocity) at corpus level — the test loads the
-//! live `stories/` directory and the live `agents/assets/` tree and
+//! live `stories/` directory and the live `assets/` tree and
 //! asserts that for every asset whose `current_consumers:` list
 //! names a story, that story's `assets:` field references the asset;
 //! and conversely, for every story declaring an asset, the asset's
@@ -69,7 +69,7 @@ fn asset_consumer_reciprocity_audit_reports_no_dangling_edges_in_either_directio
     //   1. For every story under `stories/*.yml`, every asset path
     //      in its `assets:` field must back-reference the story in
     //      that asset's `current_consumers:` list.
-    //   2. For every asset under `agents/assets/**/*.yml`, every
+    //   2. For every asset under `assets/**/*.yml`, every
     //      story-shaped entry in its `current_consumers:` list
     //      (anything matching `^stories/[0-9]+\.yml$`) must point
     //      at a story that declares the asset in its `assets:`

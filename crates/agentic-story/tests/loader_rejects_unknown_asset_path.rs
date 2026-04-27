@@ -3,7 +3,7 @@
 //!
 //! Justification (from stories/27.yml): proves the existence-check
 //! ADR-0007 decision 3 mandates — a story YAML carrying
-//! `assets: [agents/assets/nonexistent.yml]` is rejected by the
+//! `assets: [assets/nonexistent.yml]` is rejected by the
 //! directory loader with a typed error variant whose payload names
 //! the missing path verbatim and the source story's id, so an author
 //! who mistypes an asset path (or references one that was moved or
@@ -42,7 +42,7 @@ use agentic_story::{Story, StoryError};
 use tempfile::TempDir;
 
 /// Write a story whose `assets:` array references a single bogus path.
-/// The path is deliberately under `agents/assets/` (so the path-shape
+/// The path is deliberately under `assets/` (so the path-shape
 /// regex passes at schema layer) but names a file that does not exist
 /// on disk — that is what the directory loader's existence check
 /// must catch.
@@ -83,13 +83,13 @@ depends_on: []
 #[test]
 fn loader_rejects_unknown_asset_path_with_typed_error_naming_path_and_source_id() {
     // Arrange: one story whose assets array references a path under
-    // `agents/assets/` that does not exist on disk. We use a tempdir
+    // `assets/` that does not exist on disk. We use a tempdir
     // for the stories corpus; the asset path is repo-root-relative
     // by ADR-0007 contract — the loader resolves it relative to the
     // repo root, not the stories tempdir, so a path that is bogus
     // anywhere is bogus everywhere.
     let tmp = TempDir::new().expect("create temp dir");
-    let bad_asset = "agents/assets/nonexistent.yml";
+    let bad_asset = "assets/nonexistent.yml";
     write_story_with_bad_asset(tmp.path(), 273, bad_asset);
 
     // Act: directory loader must enforce cross-tree existence on

@@ -9,7 +9,7 @@
 # authored asset that simply OMITS the `current_consumers:` key
 # entirely passes any per-file check that does not require the field.
 # This verifier runs at corpus boundary: it enumerates every asset
-# YAML under `agents/assets/` and refuses with a non-zero exit if any
+# YAML under `assets/` and refuses with a non-zero exit if any
 # asset's `current_consumers:` is absent, empty, or `[]`. Catches the
 # orphan-asset shape the asset schema's `description` already names
 # as a defect ("An asset with zero current_consumers is an orphan and
@@ -21,7 +21,7 @@
 #   asset_consumer_minimum.sh [--help]
 #
 #   Inputs:
-#     (none)  -- the verifier walks `agents/assets/` from the repo root.
+#     (none)  -- the verifier walks `assets/` from the repo root.
 #
 #   Exit codes:
 #     0  every asset has at least one consumer; the corpus self-test
@@ -62,7 +62,7 @@ print_usage() {
   cat <<'EOF'
 Usage: asset_consumer_minimum.sh [--help]
 
-Walk every asset YAML under agents/assets/ and refuse with a non-zero
+Walk every asset YAML under assets/ and refuse with a non-zero
 exit if any asset's current_consumers: is absent, empty, or [].
 
 Options:
@@ -243,7 +243,7 @@ if ! REPO_ROOT="$(find_repo_root "$PWD")"; then
   fi
 fi
 
-ASSET_DIR="$REPO_ROOT/agents/assets"
+ASSET_DIR="$REPO_ROOT/assets"
 
 # ---------------------------------------------------------------------------
 # Dependency check: python3 with PyYAML must be available.

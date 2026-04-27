@@ -2,7 +2,7 @@
 //! initialises a tempdir git repo with `committer.email` set, lands one
 //! initial commit, and `head_sha()` returns a 40-character lowercase hex
 //! string matching the canonical `commit` form in
-//! `agents/assets/definitions/identifier-forms.yml` (declared in story
+//! `assets/definitions/identifier-forms.yml` (declared in story
 //! 26's `assets:` field).
 //!
 //! Justification (from stories/26.yml): pins the git-seeding primitive
@@ -49,7 +49,7 @@ fn fixture_repo_init_seeds_committer_email_and_returns_head_sha() {
     assert!(
         canonical.is_match(&sha),
         "FixtureRepo::head_sha() must return a 40-char lowercase hex SHA \
-         per agents/assets/definitions/identifier-forms.yml; got `{sha}` \
+         per assets/definitions/identifier-forms.yml; got `{sha}` \
          (length {len})",
         len = sha.len()
     );

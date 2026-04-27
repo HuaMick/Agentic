@@ -5,7 +5,7 @@
 //! asserts no `pub use`, `pub fn`, or `pub struct` declaration whose
 //! name matches `^(assert|expect|verify|check)_` exists. Rationale is
 //! the REWARD-HACKING GUARDRAIL paragraph in
-//! `agents/assets/principles/deep-modules.yml`'s
+//! `assets/principles/deep-modules.yml`'s
 //! `application_to_test_scaffolding` section: a shared assertion helper
 //! is a single point a future agent can route around to make N tests
 //! pass with one change, converting the per-test red-state contract
@@ -55,7 +55,7 @@ fn no_assertion_helpers_exported_in_public_surface() {
         banned_hits.is_empty(),
         "agentic-test-support/src/lib.rs MUST NOT export any name matching \
          `^(assert|expect|verify|check)_` — the REWARD-HACKING GUARDRAIL \
-         in agents/assets/principles/deep-modules.yml \
+         in assets/principles/deep-modules.yml \
          (application_to_test_scaffolding) bans assertion helpers \
          unconditionally. Offending lines: {banned_hits:?}"
     );
