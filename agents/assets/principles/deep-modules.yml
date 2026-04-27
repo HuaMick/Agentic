@@ -154,6 +154,17 @@ application_to_implementation: |
   imported concept per test file; large hidden implementation. Deep
   by construction.
 
+  Note: file-count is NOT the interface. A 400-line single-file module
+  exposing one type can be deeper than five 80-line modules each
+  exposing one type — the public surface is what callers see, and
+  internal seams between files are not architecturally load-bearing
+  inside a deep module. Splitting a kit-style crate into per-primitive
+  files to "tidy up" inverts the principle: it widens the cognitive
+  surface (more files to chase) without shrinking the `pub` surface
+  (the same names callers import). The trigger to split is accumulated
+  friction (e.g. ~6+ primitives or ~800-1000 lines), not aesthetic
+  preference for smaller files.
+
 anti_patterns:
   - "Splitting a story to make it 'agent-sized' when the resulting
      parts do not pass the deletion test (deleting either part leaves
