@@ -205,3 +205,4 @@ current_consumers:
   - agents/planner/story-writer/inputs.yml
   - agents/test/test-builder/inputs.yml
   - agents/build/build-rust/inputs.yml
+  - stories/26.yml
