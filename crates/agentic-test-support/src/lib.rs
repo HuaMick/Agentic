@@ -283,7 +283,7 @@ impl FixtureRepo {
     /// Return the full 40-character lowercase hex SHA of HEAD.
     ///
     /// The returned SHA matches the canonical `commit` form in
-    /// `agents/assets/definitions/identifier-forms.yml`:
+    /// `assets/definitions/identifier-forms.yml`:
     /// `^[0-9a-f]{40}$` — full SHA, no abbreviation.
     pub fn head_sha(&self) -> String {
         let head = self.repo.head().expect("get HEAD");

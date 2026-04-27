@@ -768,7 +768,7 @@ fn validate_asset_paths(stories: &[Story]) -> Result<(), StoryError> {
 
 /// Audit the live corpus for cross-corpus asset reciprocity per ADR-0007
 /// decision 4. Loads all stories from `<repo_root>/stories/` and all
-/// assets from `<repo_root>/agents/assets/` and asserts both directions
+/// assets from `<repo_root>/assets/` and asserts both directions
 /// of the reciprocity invariant:
 ///
 /// 1. For every story declaring an asset in its `assets:` field, the
@@ -817,7 +817,7 @@ pub fn audit_asset_reciprocity(repo_root: &Path) -> Result<(), AuditError> {
 
     // Check direction 2: for every asset listing a story in current_consumers,
     // the story's assets field must reference the asset.
-    let assets_dir = repo_root.join("agents/assets");
+    let assets_dir = repo_root.join("assets");
     if assets_dir.exists() {
         walk_assets_dir(&assets_dir, &assets_dir, &story_map, repo_root)?;
     }

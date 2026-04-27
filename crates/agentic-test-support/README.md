@@ -55,7 +55,7 @@ importing the kit as a route to introduce assertion helpers.
 
 ## Why this kit exists
 
-The deep-modules principle (reference `agents/assets/principles/deep-modules.yml`)
+The deep-modules principle (reference `assets/principles/deep-modules.yml`)
 establishes that setup, fixture, and stub-executor material recurs across N test
 files when a shared primitive does not exist — the deletion-test failure case
 where the module that should exist is missing and N parallel copies are filling
