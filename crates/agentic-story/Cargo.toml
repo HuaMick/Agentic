@@ -17,3 +17,17 @@ serde_yaml.workspace = true
 # `TempDir` so the live `stories/` directory at repo root is never
 # touched. `tempfile` is already a workspace dev-dep (story 5).
 tempfile.workspace = true
+
+# Story 27: serde_json + regex are needed by the asset-schema-and-
+# corpus tests under tests/ (asset_schema_accepts_story_consumer.rs
+# parses `schemas/asset.schema.json` as JSON and exercises the
+# `current_consumers[].pattern` regex; asset_consumer_reciprocity_audit.rs
+# is compile-red on a missing fn but is in the same dev-dep harness).
+# `serde_json` is workspace-managed (declared in the root
+# `[workspace.dependencies]` since story 4); `regex` is added as a
+# direct dev-dep here because it is not currently a workspace dep
+# and adding it to the workspace root is outside test-builder's
+# authority. Narrow `[dev-dependencies]` carve-out per
+# agents/test/test-builder/contract.yml.
+serde_json.workspace = true
+regex = "1"
