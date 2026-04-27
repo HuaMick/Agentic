@@ -5,7 +5,7 @@ outcome: |
   executes the acceptance-test suites only for the stories in the
   selected DAG subtree, so a commit touching one leaf of the corpus
   does not burn the whole test surface to prove itself.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -50,6 +50,18 @@ acceptance:
       story 10's positional-argument contract (where bare `<id>` is a
       specific operation) and operators would have to guess whether
       `agentic stories test 10` runs one story or pulls in the subtree.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract. The
+      pilot RE-AUTHOR migration tracks under story 26's outcome but
+      lives here per the test-file 1-to-1 binding rule.
   - file: crates/agentic-ci-record/tests/stories_test_records_one_row_per_story_executed.rs
     justification: |
       Proves the bookkeeping invariant: after `CiRunner::run("+<id>+")`
