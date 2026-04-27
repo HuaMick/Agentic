@@ -43,6 +43,15 @@ pub struct BuildConfig {
     pub models: Vec<String>,
 }
 
+/// Minimal Asset structure for parsing the `current_consumers:` field
+/// during reciprocity audits. Only the `current_consumers` field is
+/// relevant for the audit; other asset properties are ignored.
+#[derive(Debug, Deserialize)]
+struct RawAsset {
+    #[serde(default)]
+    current_consumers: Vec<String>,
+}
+
 /// A fully-validated story loaded from disk.
 ///
 /// Constructing a `Story` has already enforced the schema and — when
@@ -56,6 +65,7 @@ pub struct Story {
     pub outcome: String,
     pub status: Status,
     pub patterns: Vec<String>,
+    pub assets: Vec<String>,
     pub acceptance: Acceptance,
     pub guidance: String,
     pub depends_on: Vec<u32>,
@@ -121,6 +131,11 @@ pub enum StoryError {
         expected: String,
         found: String,
     },
+    /// A story's `assets:` entry points to a file that does not exist.
+    /// Validation occurs at directory-load time (per ADR-0007 decision 3),
+    /// not at single-file load time, matching the pattern for `depends_on`
+    /// and `superseded_by` references.
+    AssetNotFound { path: PathBuf, source_id: u32 },
 }
 
 impl std::fmt::Display for StoryError {
@@ -180,11 +195,60 @@ impl std::fmt::Display for StoryError {
                      found {found}"
                 )
             }
+            StoryError::AssetNotFound { path, source_id } => {
+                write!(
+                    f,
+                    "story {source_id} references non-existent asset: {}",
+                    path.display()
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for StoryError {}
+
+/// Error reported by [`audit_asset_reciprocity`] when the live corpus
+/// has a dangling cross-corpus asset reference (one direction of the
+/// two-way reciprocity invariant is broken).
+#[derive(Debug)]
+pub enum AuditError {
+    /// A story declares an asset in its `assets:` field, but the asset's
+    /// `current_consumers:` list does not reference the story back.
+    StoryAssetNotBackReferenced { story_id: u32, asset_path: String },
+    /// An asset lists a story in its `current_consumers:` field, but the
+    /// story's `assets:` field does not reference the asset back.
+    AssetStoryNotBackReferenced { asset_path: String, story_id: u32 },
+}
+
+impl std::fmt::Display for AuditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuditError::StoryAssetNotBackReferenced {
+                story_id,
+                asset_path,
+            } => {
+                write!(
+                    f,
+                    "story {story_id} declares asset {asset_path} but the asset \
+                     does not list the story in its current_consumers"
+                )
+            }
+            AuditError::AssetStoryNotBackReferenced {
+                asset_path,
+                story_id,
+            } => {
+                write!(
+                    f,
+                    "asset {asset_path} lists story {story_id} in its \
+                     current_consumers but the story does not declare the asset"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for AuditError {}
 
 impl Story {
     /// Load one `stories/<id>.yml` file.
@@ -231,6 +295,7 @@ impl Story {
         }
         detect_cycles(&stories)?;
         detect_superseded_by_cycles(&stories)?;
+        validate_asset_paths(&stories)?;
         Ok(stories)
     }
 }
@@ -279,6 +344,8 @@ struct RawStory {
     status: String,
     #[serde(default)]
     patterns: Vec<String>,
+    #[serde(default)]
+    assets: Vec<String>,
     acceptance: RawAcceptance,
     guidance: String,
     #[serde(default)]
@@ -461,6 +528,7 @@ fn parse_story(path: &Path, text: &str) -> Result<Story, StoryError> {
         outcome: raw.outcome,
         status,
         patterns: raw.patterns,
+        assets: raw.assets,
         acceptance: Acceptance {
             tests: raw
                 .acceptance
@@ -654,6 +722,176 @@ fn detect_superseded_by_cycles(stories: &[Story]) -> Result<(), StoryError> {
         if color.get(&node).copied() == Some(Color::White) {
             if let Err(participants) = dfs_superseded(node, &graph, &mut color, &mut stack) {
                 return Err(StoryError::SupersededByCycle { participants });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate that every asset path referenced in the stories' `assets:`
+/// fields resolves to an existing file on disk. Resolves paths relative
+/// to the repo root (matching the pattern used for other cross-tree
+/// references like `depends_on` and `superseded_by`). Per ADR-0007
+/// decision 3, this validation runs only at directory-load time, not
+/// at single-file load time.
+fn validate_asset_paths(stories: &[Story]) -> Result<(), StoryError> {
+    // Find the repo root by walking up from the current executable's location.
+    let mut repo_root = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Walk up until we find a .git directory.
+    while !repo_root.join(".git").exists() {
+        if !repo_root.pop() {
+            // Fallback: if we can't find .git, assume current dir.
+            repo_root = PathBuf::from(".");
+            break;
+        }
+    }
+
+    for story in stories {
+        for asset_path in &story.assets {
+            let full_path = repo_root.join(asset_path);
+            if !full_path.exists() {
+                return Err(StoryError::AssetNotFound {
+                    path: PathBuf::from(asset_path),
+                    source_id: story.id,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Audit the live corpus for cross-corpus asset reciprocity per ADR-0007
+/// decision 4. Loads all stories from `<repo_root>/stories/` and all
+/// assets from `<repo_root>/agents/assets/` and asserts both directions
+/// of the reciprocity invariant:
+///
+/// 1. For every story declaring an asset in its `assets:` field, the
+///    asset's `current_consumers:` must list the story.
+/// 2. For every asset listing a story in its `current_consumers:`, the
+///    story's `assets:` field must reference the asset.
+///
+/// Returns `Ok(())` if the corpus is fully reciprocal, or an `AuditError`
+/// naming the first dangling edge found (in either direction).
+pub fn audit_asset_reciprocity(repo_root: &Path) -> Result<(), AuditError> {
+    // Load all stories from <repo_root>/stories/.
+    let stories_dir = repo_root.join("stories");
+    let stories = if stories_dir.exists() {
+        Story::load_dir(&stories_dir)
+            .unwrap_or_else(|e| panic!("failed to load stories directory: {e}"))
+    } else {
+        Vec::new()
+    };
+
+    // Index stories by ID for fast lookup.
+    let story_map: HashMap<u32, &Story> = stories.iter().map(|s| (s.id, s)).collect();
+
+    // Check direction 1: for every story declaring an asset, the asset's
+    // current_consumers must list the story.
+    for story in &stories {
+        for asset_path in &story.assets {
+            let asset_file = repo_root.join(asset_path);
+            if !asset_file.exists() {
+                continue; // Skip if asset doesn't exist (other validators catch this)
+            }
+
+            let text = fs::read_to_string(&asset_file)
+                .unwrap_or_else(|e| panic!("failed to read asset {}: {e}", asset_file.display()));
+            let asset: RawAsset = serde_yaml::from_str(&text)
+                .unwrap_or_else(|e| panic!("failed to parse asset {}: {e}", asset_file.display()));
+
+            let story_consumer = format!("stories/{}.yml", story.id);
+            if !asset.current_consumers.contains(&story_consumer) {
+                return Err(AuditError::StoryAssetNotBackReferenced {
+                    story_id: story.id,
+                    asset_path: asset_path.clone(),
+                });
+            }
+        }
+    }
+
+    // Check direction 2: for every asset listing a story in current_consumers,
+    // the story's assets field must reference the asset.
+    let assets_dir = repo_root.join("agents/assets");
+    if assets_dir.exists() {
+        walk_assets_dir(&assets_dir, &assets_dir, &story_map, repo_root)?;
+    }
+
+    Ok(())
+}
+
+/// Recursively walk the assets directory, checking that every story-shaped
+/// entry in any asset's `current_consumers:` field is back-referenced by
+/// that story's `assets:` field.
+fn walk_assets_dir(
+    dir: &Path,
+    assets_base: &Path,
+    story_map: &HashMap<u32, &Story>,
+    repo_root: &Path,
+) -> Result<(), AuditError> {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()), // Skip if we can't read the directory
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recursively walk subdirectories
+            walk_assets_dir(&path, assets_base, story_map, repo_root)?;
+        } else if path.extension().and_then(|s| s.to_str()) == Some("yml") {
+            // Load the asset and check its story consumers.
+            let text = match fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            let asset: RawAsset = match serde_yaml::from_str(&text) {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+
+            // Compute the asset path relative to repo root for error messages.
+            let asset_rel_path = path
+                .strip_prefix(repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+
+            // Check each story-shaped consumer.
+            for consumer in &asset.current_consumers {
+                // Only check story-shaped paths (matching ^stories/[0-9]+\.yml$)
+                if let Some(story_id_str) = consumer.strip_prefix("stories/").and_then(|s| {
+                    s.strip_suffix(".yml").and_then(|id| {
+                        if id.chars().all(|c| c.is_ascii_digit()) {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    })
+                }) {
+                    if let Ok(story_id) = story_id_str.parse::<u32>() {
+                        if let Some(story) = story_map.get(&story_id) {
+                            // Check that this story declares the asset.
+                            if !story.assets.contains(&asset_rel_path) {
+                                return Err(AuditError::AssetStoryNotBackReferenced {
+                                    asset_path: asset_rel_path,
+                                    story_id,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
     }
