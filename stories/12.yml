@@ -141,16 +141,6 @@ acceptance:
       zero rows to `test_runs`. Without this, a typo or stale id
       produces either a panic or a silent zero-story run
       indistinguishable from "the subtree happened to be empty."
-
-      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
-      repo seeding, and stub executor MUST be sourced from
-      `agentic_test_support`'s shared primitives (story 26), not bespoke
-      per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
-      `application_to_test_scaffolding` is observable in this test's
-      imports — a reimplementation that brought back a local
-      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
-      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_cycle_rejected.rs
     justification: |
       Proves the invariant defence at the CI boundary: given a
@@ -160,18 +150,6 @@ acceptance:
       executor zero times, and writes zero rows. Without this, a
       cycle would produce infinite traversal, infinite test runs, or a
       panic — each strictly worse than a typed refusal.
-
-      Additionally pins the kit-vs-bespoke contract: the cyclic fixture
-      corpus, repo seeding, and stub executor MUST be sourced from
-      `agentic_test_support`'s shared primitives (story 26), not bespoke
-      per-file helpers — the kit's `FixtureCorpus::write_story(id, deps)`
-      writer covers the cycle case unchanged because cycle detection
-      lives in the loader's traversal, not the writer. The deep-modules
-      contract enforced via `agents/assets/principles/deep-modules.yml`'s
-      `application_to_test_scaffolding` is observable in this test's
-      imports — a reimplementation that brought back a local
-      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
-      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-cli/tests/stories_test_selectors_via_binary.rs
     justification: |
       Proves the selector argv reaches the runner through the binary:
