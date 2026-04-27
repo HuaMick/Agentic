@@ -26,7 +26,7 @@
     "status": {
       "type": "string",
       "enum": ["proposed", "under_construction", "healthy", "unhealthy", "retired"],
-      "description": "Lifecycle state. `proposed` and `under_construction` are written by the story-writer or humans. `healthy` is written only by `agentic uat` on a Pass verdict. `unhealthy` is computed by the dashboard from evidence and is never written to disk. `retired` is a terminal off-tree state."
+      "description": "Lifecycle state. `proposed` is written by humans (story authoring) or the story-writer (creation/curation). The `proposed → under_construction` transition is written by `build-rust` at start-of-implementation as the first commit before any code edits, per `agents/build/build-rust/contract.yml` and the carve-out in `.claude/hooks/build_rust_guard.py`. The story-writer may also write `under_construction` when auto-reverting a previously-`healthy` story under the defects-amend-the-owning-story loop. `healthy` is written only by `agentic uat` on a Pass verdict. `unhealthy` is computed by the dashboard from evidence and is never written to disk. `retired` is a terminal off-tree state."
     },
     "patterns": {
       "type": "array",
