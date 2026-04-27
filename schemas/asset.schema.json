@@ -22,9 +22,9 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\\.yml$"
+        "pattern": "^(agents/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/(contract|inputs|process)\\.yml|stories/[0-9]+\\.yml)$"
       },
-      "description": "Paths (repo-root-relative) to the agent spec files that currently reference this asset. At least one entry required. Guidance-writer audits check that every listed consumer genuinely contains a reference to this asset's path."
+      "description": "Paths (repo-root-relative) to the consumers of this asset. Two consumer shapes are valid: agent spec triplet files (the original consumer class) and story files (added per ADR-0007 decision 2 so stories can also reference cross-corpus concepts). At least one entry required. Reciprocity with each story consumer's assets: field is a corpus-level invariant per ADR-0007 decision 4; guidance-writer / story-writer audits check that every listed consumer genuinely references this asset's path."
     }
   },
   "additionalProperties": true
