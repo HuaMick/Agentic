@@ -214,6 +214,36 @@ guidance:
         the signal, with no bookkeeping field; a schema-embedded signal
         (e.g. `acceptance.tests[].revised_at`) was considered and
         rejected as drift-prone.
+    - name: prefer-shared-scaffold
+      detail: |
+        Operational application of `agents/assets/principles/deep-modules.yml`
+        to scaffold authorship. Mirrors story-writer's `consolidate-over-fragment`
+        posture for tests.
+
+        Before authoring any setup, fixture, or stub-executor code in a NEW
+        scaffold (SCAFFOLD or RE-AUTHOR classifications only — see the
+        "Classify every acceptance.tests[] entry" step), the first session
+        actions are:
+          1. Glob `crates/agentic-test-support/src/**/*.rs` to enumerate
+             primitives. If the path does not exist, the kit has not yet
+             been extracted and all scaffolds are bespoke.
+          2. Read `crates/agentic-test-support/README.md` for the catalogue.
+
+        Then for each primitive in the kit, decide: does it cover the case?
+        Use it if so. Once the kit exists, expect at minimum:
+          - `agentic_test_support::FixtureCorpus` for `stories/` tempdir setup.
+          - `agentic_test_support::FixtureRepo` for git-init plus email seeding.
+          - `agentic_test_support::RecordingExecutor` for TestExecutor /
+            UatExecutor stubs.
+
+        A new bespoke fixture helper is the JUSTIFIED EXCEPTION, not the
+        default. Document in the run summary which primitives were considered
+        and which were used. "I did not know it existed" is not an acceptable
+        answer — the Glob and README read above prevent it.
+
+        This rule does NOT relax `amendment-gated-test-edit`. PRESERVED tests
+        stay preserved; preferring the kit applies to SCAFFOLD and RE-AUTHOR
+        only. The kit changes the materials, not the authority.
     - Never write production source. `crates/*/src/**` is explicitly forbidden in contract.yml and that is the whole point of this agent — authoring tests without being able to make them pass.
     - Dev-dependency edits are narrowly scoped. You MAY add an entry to `[dev-dependencies]` in `crates/<target-crate>/Cargo.toml` when a scaffold's `use` of it would otherwise fail to compile. You MAY NOT edit `[dependencies]`, the workspace-root `Cargo.toml`, any other crate's `Cargo.toml`, or `Cargo.lock`. Every dev-dep added must appear in the run summary with the scaffold that demanded it.
     - The test's name and its red-state diagnostic (panic message for runtime-red, compile error for compile-red) both derive from the acceptance.tests[].justification. The goal is that a failed test run reads the justification back to a human with no extra context — that is what makes red-state evidence self-describing.
@@ -240,6 +270,8 @@ guidance:
     - Overwriting an existing test file because "mine is better" or to "tidy" its assertions. The only authorised path into an existing test file is RE-AUTHOR, and RE-AUTHOR fires only when the amendment gates pass (see rule `amendment-gated-test-edit`). Taste-driven rewrites of a test that is still proving the current justification are a contract violation.
     - "Editing an existing test file without producing a new red-state evidence row in the same commit. The evidence row IS the proof that the edit was validated red; a split commit (edit now, evidence later) forfeits the per-commit atomicity invariant and is indistinguishable from silently re-reddening the test on a healthy story. If you cannot commit edit + evidence together, do not edit."
     - "Editing an existing test file on a `healthy` or `unhealthy` story. The three amendment gates require `under_construction`; any other status makes the edit an unacknowledged contract change, because the story's verdict is already recorded against the pre-edit test."
+    - "Authoring a hand-rolled `fn write_fixture_story(...)`, `fn setup_fixture_corpus()`, `fn init_repo_with_email(...)`, or a bespoke `struct StubExecutor` impl when an `agentic_test_support` primitive covers the case. The kit is the default; bespoke is the documented exception. The Glob-then-README step in `prefer-shared-scaffold` is the cheapest defence."
+    - "Importing `agentic_test_support` as a route to introduce ASSERTION helpers into a test, OR proposing to add an `assert_*` / `expect_*` / `verify_*` / `check_*` export to the kit. The kit ships only setup/fixture material on purpose; assertions stay bespoke per test so each one remains a hard contract a future agent cannot route around with a green-by-default shared expector. See `agents/assets/principles/deep-modules.yml` `application_to_test_scaffolding`."
     - Deriving a test name from the file path instead of the justification. The justification is the contract; the path is a location.
     - Editing `[dependencies]`, the workspace-root `Cargo.toml`, `Cargo.lock`, or any Cargo.toml outside the target crate — runtime-dep choices remain build-rust's or an ADR's concern. The narrow dev-deps carve-out (see the dev-dependency rule) does not extend to any of these.
     - Skipping the `git status --porcelain` precheck. Red-state evidence on a dirty tree is forgeable and the whole artefact is then worthless.

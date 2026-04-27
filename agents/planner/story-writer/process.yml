@@ -154,6 +154,17 @@ guidance:
         avoided if the prior story was accurate enough?" If yes, the
         existing story has a gap; the action is UPDATE, not NEW.
 
+        Operational grounding: see
+        `agents/assets/principles/deep-modules.yml`
+        (`application_to_story_authoring`). The asset adds the deletion
+        test as a tie-breaker — when on the fence about splitting vs
+        consolidating, imagine retiring the candidate via
+        `superseded_by`; if the corpus's coverage of the underlying
+        capability is unchanged (UAT walkthroughs, build-rust runs,
+        dashboard queries see no gap), the candidate was shallow and
+        consolidation is correct. Do not duplicate the asset's content
+        here; reference it.
+
         Source: legacy/AgenticEngineering/modules/AgenticGuidance/agents/build/build-story-writer/process.yml:186-189
         and legacy/AgenticEngineering/docs/userstories/Planning/10_feedback_recovery.yml
         ("Two stories validating the same CLI surface is the fragmentation

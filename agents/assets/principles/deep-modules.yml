@@ -1,0 +1,207 @@
+name: deep-modules
+description: |
+  A deep module is one whose public interface is small relative to the
+  implementation it hides; a shallow module exposes a wide interface for
+  thin behaviour. This asset adopts the deep-modules principle as a
+  cross-cutting design heuristic for story authoring, test scaffolding,
+  and crate-level Rust surfaces. Reference this file from any agent that
+  judges where a boundary belongs — do not restate the principle in the
+  agent's own spec. Attribution: Ousterhout, *A Philosophy of Software
+  Design* (the originating source). Surfaced for our purposes via Matt
+  Pocock's `improve-codebase-architecture` skill, which translates
+  Ousterhout's framing into the deletion-test heuristic and the three
+  friction signals reproduced below.
+
+definition: |
+  A module's interface is a cost paid by every caller (names to learn,
+  invariants to preserve, parameters to thread). The functionality the
+  module provides is the benefit. The deep-modules principle says: pay
+  the interface cost only when the hidden functionality justifies it.
+
+  Deep module: small public surface (few names, few parameters), large
+  hidden implementation (real machinery, real invariants). Callers see
+  one concept and trust it; complexity is contained behind the boundary.
+
+  Shallow module: wide public surface (many names, many parameters)
+  relative to the work it does. Callers must understand both the
+  interface AND the implementation it leaks; the boundary buys nothing.
+
+  The same asymmetry applies above the function level. A story is a
+  module whose interface is its outcome+UAT and whose implementation is
+  the work it covers. A crate is a module whose interface is its `pub`
+  surface and whose implementation is `src/`. A test scaffold helper is
+  a module whose interface is its function signature and whose
+  implementation is the fixture it constructs. The deletion test below
+  applies in all three layers.
+
+deletion_test: |
+  The single sharpest heuristic, verbatim from Pocock's framing:
+
+    "Imagine deleting the module. If complexity vanishes, it was a
+    pass-through. If complexity reappears across N callers, it was
+    earning its keep."
+
+  Worked example — `write_fixture_story`:
+    Imagine deleting the helper `fn write_fixture_story(stories_dir,
+    id, depends_on)` from `crates/agentic-ci-record/tests/`. Complexity
+    does NOT vanish — it reappears identically in 8 caller test files,
+    each of which now has to inline the same YAML-writing snippet,
+    handle the same `depends_on` formatting, and re-derive the same
+    file path shape. The helper was earning its keep across 8 callers,
+    yet it does not exist as a shared module — it exists as 8 copies
+    of the same shallow helper. That is the deletion test failing in
+    the opposite direction: the module was needed but never created.
+    The remedy is to extract a single deep module (e.g.
+    `agentic_test_support::FixtureCorpus::write_story(...)`) whose
+    interface is one method and whose implementation hides the YAML
+    shape, the path derivation, and the `depends_on` formatting from
+    every caller.
+
+friction_signals: |
+  Three Pocock signals that a module is too shallow (paraphrased from
+  `improve-codebase-architecture`):
+
+    1. Bouncing between many small modules to understand one concept.
+       If a reader has to chase a behaviour across 4+ files to assemble
+       it in their head, the seams between those files are not earning
+       their cost.
+
+    2. Interface nearly as complex as the implementation. When the
+       function signature plus its doc comment plus the caller-side
+       glue add up to roughly the same conceptual weight as the body,
+       the module is mostly interface. Inline it or widen its scope so
+       the boundary buys something.
+
+    3. Pure functions extracted solely for testability where the real
+       bugs hide in how they're called. A helper that exists only so a
+       unit test can target it in isolation often hides the integration
+       seam where defects actually occur. The richer-fixture
+       composition that exercises the real call site usually pins
+       behaviour better than the extracted pure function ever did.
+
+application_to_story_authoring: |
+  The principle sharpens story-writer's existing `consolidate-over-fragment`
+  rule. Operational addition: a story is too shallow if EITHER
+
+    - its outcome can be obtained only by composing 2+ other stories'
+      outcomes (the story is a pass-through; deleting it loses no
+      capability the corpus could not still describe), OR
+
+    - its guidance section repeats framing already present in another
+      story's guidance (the story is duplicating an interface its
+      neighbour already pays for).
+
+  The deletion test is the tie-breaker when the agent is on the fence
+  about splitting vs consolidating a candidate story: imagine retiring
+  the candidate via `superseded_by`. If the corpus's coverage of the
+  underlying capability is unchanged (callers — i.e. UAT walkthroughs,
+  build-rust runs, dashboard queries — see no gap), the story was
+  shallow and the consolidation is correct.
+
+  Queued worked examples (NOT action items for the agent reading this
+  asset; these are documented for a future story-corpus consolidation
+  effort, sequenced after the test-support kit lands):
+
+    - Stories 11 + 13 — both encode "ancestors must be healthy", on
+      opposite sides of the store. Two interfaces for one rule.
+    - Stories 1 + 2 + 3 — triple the signer-composition framing. Three
+      interfaces for one composition.
+    - Stories 16 + 18 + 19 + 20 — scatter sandbox-execution concerns
+      across four stories that share a single user journey.
+
+  Treat these as evidence that the principle has bite in the existing
+  corpus, not as a backlog to act on while doing unrelated work.
+
+application_to_test_scaffolding: |
+  Setup, fixture, and stub-executor material that recurs across N test
+  files is a deletion-test failure of the worst kind: the module that
+  *should* exist (the shared fixture primitive) is missing, and N
+  parallel copies are filling its absence. Such material belongs in
+  `crates/agentic-test-support/` (the shared kit, to be extracted in
+  Session 2 / story 26). Once the kit exists, it is the DEFAULT for
+  every new SCAFFOLD or RE-AUTHOR; bespoke fixtures are the documented
+  exception, not the path of least resistance.
+
+  REWARD-HACKING GUARDRAIL — non-negotiable:
+    Assertions stay bespoke per test on purpose. The shared kit ships
+    setup/fixture material only. No `assert_*`, `expect_*`, `verify_*`,
+    or `check_*` helpers — exported or otherwise. The reason is hard:
+    a shared assertion helper is a single point a future agent can
+    route around to make N tests pass with one change, which converts
+    the per-test red-state contract into a green-by-default convention
+    and silently re-enables every legacy failure mode the prove-it
+    gate is designed to prevent. Each test's assertion block is the
+    place its observable is pinned, and that pinning must remain
+    per-test. See test-builder's `prefer-shared-scaffold` rule for the
+    operational application and the matching anti-pattern that bans
+    importing the kit as a route to introduce assertion helpers.
+
+application_to_implementation: |
+  Build-rust judges every crate-level `pub` surface against deep-modules.
+  Adding a public method to a crate's surface "for testability" is the
+  shallow-module reflex: the new export widens the interface without
+  adding hidden functionality, and usually exists only because the test
+  could not be written through composition of richer fixtures. Reach
+  for the richer fixture first; widen `pub` surface only when an actual
+  caller (not a test scaffold's convenience) needs the new name.
+
+  Worked example (forward-looking): `crates/agentic-test-support/`
+  itself, once extracted, will be the canonical demonstration — a
+  public surface of approximately five names (`FixtureCorpus`,
+  `StoryFixture`, `FixtureRepo`, `RecordingExecutor`, `RecordedCall`)
+  hiding substantial fixture machinery (tempdir lifecycle, YAML
+  authoring, git seeding, executor recording state). Five names; one
+  imported concept per test file; large hidden implementation. Deep
+  by construction.
+
+anti_patterns:
+  - "Splitting a story to make it 'agent-sized' when the resulting
+     parts do not pass the deletion test (deleting either part leaves
+     the corpus's coverage of the underlying capability identical
+     because the other part already covers it). Story scope is set by
+     the user journey and the deletion test, not by perceived agent
+     bandwidth."
+  - "Authoring a hand-rolled fixture helper (e.g. a local
+     `fn write_fixture_story`, `fn setup_fixture_corpus`,
+     `fn init_repo_with_email`, or a bespoke `struct StubExecutor`
+     impl) when an `agentic_test_support` primitive already covers the
+     case. Forward-looking: the kit is extracted in story 26; until it
+     exists, all scaffolds are bespoke and this anti-pattern activates
+     the moment the kit lands. Test-builder's `prefer-shared-scaffold`
+     rule is the operational guard."
+  - "Importing `agentic_test_support` as a route to introduce a SHARED
+     assertion (`assert_*`, `expect_*`, `verify_*`, `check_*`), or
+     proposing to add such a helper to the kit. The kit is fixture-only
+     on purpose; a shared assertion is the reward-hacking single point
+     described in `application_to_test_scaffolding` and is banned
+     unconditionally."
+  - "Adding a public method to a crate's surface 'for testability'
+     when the test could be written through existing public methods by
+     composing a richer fixture. The new export widens the interface
+     without adding hidden functionality and is the shallow-module
+     reflex `application_to_implementation` warns against."
+
+reference_pattern:
+  in_inputs_yml: |
+    Under `required_reading`, include a bullet:
+      - path: agents/assets/principles/deep-modules.yml
+        reason: |
+          The deep-modules principle this agent applies to <story
+          authoring | scaffold authorship | crate-level pub surfaces>.
+          Read every session; the operational application is named in
+          this agent's process.yml (the relevant rule under
+          `guidance.rules`).
+  in_process_yml: |
+    Where the workflow names the principle's operational application,
+    reference this file inline rather than restating its content. For
+    test-builder, the reference lands in the `prefer-shared-scaffold`
+    rule under `guidance.rules`. For story-writer, the reference is one
+    paragraph appended to the existing `consolidate-over-fragment`
+    rule's `detail`, naming this asset as the source of the deletion-
+    test tie-breaker. For build-rust, the reference is a brief rule
+    under `guidance.rules` applied to crate-level `pub` surfaces.
+
+current_consumers:
+  - agents/planner/story-writer/inputs.yml
+  - agents/test/test-builder/inputs.yml
+  - agents/build/build-rust/inputs.yml

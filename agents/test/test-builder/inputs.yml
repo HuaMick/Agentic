@@ -29,6 +29,22 @@ required_reading:
       match these forms verbatim — UUID v4 for run_id, integer for
       story_id, 40-char lowercase hex for commit. Drift here invalidates
       the handshake with build-rust and `agentic-verify`.
+  - path: agents/assets/principles/deep-modules.yml
+    reason: |
+      The deep-modules principle this agent applies to scaffold
+      authorship. Read every session; the `prefer-shared-scaffold`
+      rule (process.yml `guidance.rules`) is its operational
+      application — preferring shared fixture primitives over
+      hand-rolled per-file helpers, with the assertion ban as the
+      reward-hacking guardrail.
+  - path: crates/agentic-test-support/README.md
+    reason: |
+      Catalogue of shared fixture primitives (extracted in story 26).
+      If this file does not yet exist, the kit has not yet been built
+      and all scaffolds are bespoke; the rule activates as soon as the
+      file exists. Until then, treat the missing-file case as "no
+      primitives available" and proceed with bespoke scaffolds, noting
+      in the run summary that the kit was not yet present.
 
 context:
   - pattern: patterns/*.yml

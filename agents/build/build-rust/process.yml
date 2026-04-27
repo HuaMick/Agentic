@@ -92,6 +92,19 @@ guidance:
     - Never promote a story to `healthy`. That is `agentic uat`'s sole right (story 1). You may flip `proposed` → `under_construction` and nothing else.
     - Do not edit anything outside `crates/`, except the single status field on the story you are implementing.
     - Test authoring is test-builder's sole authority per ADR-0005. Never write or edit any file under `crates/*/tests/` or `scripts/verify/`.
+    - name: deep-pub-surfaces
+      detail: |
+        Judge every crate-level `pub` surface against
+        `agents/assets/principles/deep-modules.yml`. A new public name
+        widens the interface every caller pays for; add it only when an
+        actual caller needs it. Do NOT widen a crate's `pub` surface
+        "for testability" — when a test seems to demand a new export,
+        reach for richer fixture composition (see test-builder's
+        `prefer-shared-scaffold` rule and the shared kit at
+        `crates/agentic-test-support/`) first. The deletion test
+        applies: if removing the proposed export would not move
+        complexity into N callers, the export was a pass-through and
+        does not belong on the public surface.
 
   anti_patterns:
     - "'5 unrelated tests failed but they're not my problem.' If a test was green in your baseline and is red after your edit, it IS your problem. Diagnose or escalate."
