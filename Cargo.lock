@@ -136,6 +136,7 @@ dependencies = [
  "agentic-test-support",
  "agentic-uat",
  "git2",
+ "regex",
  "serde",
  "serde_yaml",
  "tempfile",

@@ -30,3 +30,15 @@ git2 = { version = "0.19", default-features = false }
 # Story 26: the kit's own integration tests in `tests/` resolve
 # `extern crate agentic_test_support` against this crate.
 agentic-test-support = { path = "." }
+
+# Story 26: the
+# `fixture_repo_init_seeds_committer_email_and_returns_head_sha.rs` and
+# `no_assertion_helpers_exported_in_public_surface.rs` scaffolds match
+# the canonical `commit` shape (`^[0-9a-f]{40}$`) and the banned-prefix
+# guardrail (`^pub (use|fn|struct)\s+(assert|expect|verify|check)_`)
+# via regex. `regex` is not currently a workspace-level dep and adding
+# it to the workspace root is outside test-builder's authority. Narrow
+# `[dev-dependencies]` carve-out per
+# agents/test/test-builder/contract.yml; matches the same precedent set
+# by `crates/agentic-story/Cargo.toml` for story 27 scaffolds.
+regex = "1"
