@@ -256,9 +256,11 @@ guidance: |
       kit ever lands, that is the moment to extract a pattern.
       Until then, the deep-modules asset (declared via `assets:`)
       carries the design rationale.
-    - NOT a directory rename of `assets/`. ADR-0007's
-      "Alternatives considered" defers that move; it is unrelated
-      to this story.
+    - NOT the directory rename `agents/assets/` -> `assets/`. That
+      rename was eventually done on 2026-04-28 under an amendment
+      to ADR-0007's decision 5; this story did not own that move
+      (story 26 ships the kit; the rename is a corpus-wide path
+      change unrelated to kit extraction).
     - NOT an enforcement of kit usage on every new scaffold.
       The operational rule "prefer the kit when it covers the
       case" lives in test-builder's `prefer-shared-scaffold` rule

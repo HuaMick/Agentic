@@ -195,8 +195,11 @@ guidance: |
   This guidance section pins the schema and validation invariants this
   story ships; ADR-0007 is the authoritative source for the rationale
   (why a separate `assets:` field rather than overloading `patterns:`,
-  why widen the `current_consumers:` regex rather than rename the
-  directory, why the migration is opt-in). Do not restate ADR-0007 here.
+  why the `current_consumers:` regex was widened to admit story
+  consumers, why the migration is opt-in; the directory rename to
+  top-level `assets/` was a separate amendment to ADR-0007 landed on
+  2026-04-28 and is not what this story ships). Do not restate
+  ADR-0007 here.
 
   Schema invariants this story pins.
     1. `schemas/story.schema.json` gains a root-level `assets:` array
@@ -268,10 +271,13 @@ guidance: |
     second.
 
   What this story is NOT.
-    - NOT a rename of `assets/` to top-level `assets/`.
-      ADR-0007's "Alternatives considered" defers that move
-      explicitly; revisit when the asset corpus has grown enough
-      that path drift produces real reader confusion.
+    - NOT the directory rename `agents/assets/` -> `assets/`. That
+      rename was originally deferred per ADR-0007's "Alternatives
+      considered" and eventually done on 2026-04-28 under an
+      amendment to that ADR. This story (which adds the `assets:`
+      field mechanism) did not own the directory move; the rename
+      and this story's mechanism are independent decisions that
+      both shipped against ADR-0007.
     - NOT a merge of `patterns/` into `assets/`. Patterns
       and assets remain separate concepts with separate schemas;
       a story may declare both. ADR-0007 decision 1 names this
