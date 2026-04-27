@@ -9,16 +9,25 @@
 //! would have to guess whether `agentic stories test 10` runs one story
 //! or pulls in the subtree.
 //!
-//! Red today is compile-red: the `agentic_ci_record::{CiRunner,
-//! TestExecutor, ExecutorOutcome}` surface does not yet exist.
+//! Additionally pins the kit-vs-bespoke contract per stories/12.yml's
+//! amended justification: the fixture corpus, repo seeding, and stub
+//! executor MUST source from `agentic_test_support`'s shared primitives
+//! (story 26), not bespoke per-file helpers. The deep-modules contract
+//! is observable in this file's `use` block — a reimplementation that
+//! brought back a local `fn write_fixture_story`, `fn setup_fixture_corpus`,
+//! or `struct StubExecutor impl TestExecutor` would fail the contract.
+//!
+//! Red today is compile-red: `agentic_test_support` is not yet declared
+//! as a dev-dependency on `agentic-ci-record`. The kit imports below
+//! resolve to `unresolved import` until build-rust adds the dev-dep in
+//! the next commit (the kit-adoption pilot's intentional intermediate
+//! red surface).
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use agentic_ci_record::{CiRunner, ExecutorOutcome, TestExecutor};
+use agentic_ci_record::CiRunner;
 use agentic_store::{MemStore, Store};
-use tempfile::TempDir;
+use agentic_test_support::{FixtureCorpus, RecordingExecutor};
 
 // Fixture DAG: target has both an ancestor and a descendant. Bare-id
 // selection must exclude both sides.
@@ -26,101 +35,36 @@ const ID_ANC: u32 = 81231;
 const ID_TARGET: u32 = 81232;
 const ID_DESC: u32 = 81233;
 
-#[derive(Default)]
-struct Calls {
-    invocations: Vec<(u32, Vec<PathBuf>)>,
-}
-
-struct StubExecutor {
-    calls: Arc<Mutex<Calls>>,
-}
-
-impl TestExecutor for StubExecutor {
-    fn run_tests(&self, story_id: u32, test_files: &[PathBuf]) -> ExecutorOutcome {
-        self.calls
-            .lock()
-            .expect("calls mutex poisoned")
-            .invocations
-            .push((story_id, test_files.to_vec()));
-        ExecutorOutcome::pass()
-    }
-}
-
-fn write_fixture_story(stories_dir: &Path, id: u32, depends_on: &[u32]) {
-    let deps_yaml = if depends_on.is_empty() {
-        "depends_on: []".to_string()
-    } else {
-        let lines: Vec<String> = depends_on.iter().map(|d| format!("  - {d}")).collect();
-        format!("depends_on:\n{}", lines.join("\n"))
-    };
-    let test_file = format!("crates/agentic-ci-record/tests/fixture_story_{id}.rs");
-    let body = format!(
-        r#"id: {id}
-title: "Fixture {id} for story-12 bare-id scaffold"
-
-outcome: |
-  Fixture row for the bare-<id> selector scaffold.
-
-status: under_construction
-
-patterns: []
-
-acceptance:
-  tests:
-    - file: {test_file}
-      justification: |
-        Present so the fixture is schema-valid.
-  uat: |
-    Run the runner with <id>; assert invocation set is just {{id}}.
-
-guidance: |
-  Fixture authored inline. Not a real story.
-
-{deps_yaml}
-"#
-    );
-    fs::write(stories_dir.join(format!("{id}.yml")), body).expect("write fixture story");
-}
-
-fn setup_fixture_corpus() -> TempDir {
-    let tmp = TempDir::new().expect("corpus tempdir");
-    let stories_dir = tmp.path().join("stories");
-    fs::create_dir_all(&stories_dir).expect("stories dir");
-
-    write_fixture_story(&stories_dir, ID_ANC, &[]);
-    write_fixture_story(&stories_dir, ID_TARGET, &[ID_ANC]);
-    write_fixture_story(&stories_dir, ID_DESC, &[ID_TARGET]);
-
-    tmp
-}
-
 #[test]
 fn bare_id_selector_invokes_executor_only_for_the_exact_story() {
-    let corpus = setup_fixture_corpus();
-    let stories_dir = corpus.path().join("stories");
+    // Build the three-story DAG via the shared kit primitive — the
+    // local `write_fixture_story` / `setup_fixture_corpus` helpers this
+    // file used to carry are now sourced from `agentic_test_support`
+    // per stories/12.yml's kit-vs-bespoke contract.
+    let corpus = FixtureCorpus::new();
+    corpus.write_story(ID_ANC, &[]);
+    corpus.write_story(ID_TARGET, &[ID_ANC]);
+    corpus.write_story(ID_DESC, &[ID_TARGET]);
+    let stories_dir = corpus.stories_dir();
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
-    let calls = Arc::new(Mutex::new(Calls::default()));
-    let executor = StubExecutor {
-        calls: calls.clone(),
-    };
-
-    let runner = CiRunner::new(store.clone(), Box::new(executor), stories_dir);
+    let executor = RecordingExecutor::default();
+    let runner = CiRunner::new(store.clone(), Box::new(executor.clone()), stories_dir);
 
     let selector = format!("{ID_TARGET}");
     runner
         .run(&selector)
         .expect("runner must succeed on bare-id selector");
 
-    let invocations = &calls.lock().expect("calls mutex poisoned").invocations;
-    let invoked: Vec<u32> = invocations.iter().map(|(id, _)| *id).collect();
+    let recorded = executor.recorded_calls();
+    let invoked: Vec<u32> = recorded.iter().map(|call| call.story_id).collect();
 
     // Exactly one invocation, for the exact target.
     assert_eq!(
-        invocations.len(),
+        recorded.len(),
         1,
         "bare-<id> must trigger exactly ONE executor call; got {}: {:?}",
-        invocations.len(),
+        recorded.len(),
         invoked
     );
     assert_eq!(
