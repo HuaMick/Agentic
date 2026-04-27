@@ -76,6 +76,15 @@ git2 = { version = "0.19", default-features = false }
 # the CLI sees argv. Same `assert_cmd` pin as `agentic-cli`'s tests.
 assert_cmd = "2"
 
+# Story 25: the audit scaffolds construct fixture corpora via
+# `FixtureCorpus` from `agentic-test-support` rather than rolling
+# bespoke per-file `setup_fixture_corpus` helpers. Per the
+# `prefer-shared-scaffold` rule (test-builder process.yml) and the
+# deep-modules principle (assets/principles/deep-modules.yml), the
+# kit is the default for tempdir/stories-dir lifecycle in scaffolds
+# even when the test still authors custom YAML for `acceptance.tests`.
+agentic-test-support = { path = "../agentic-test-support" }
+
 # Note: `agentic-cli` is NOT a dev-dep here because it has no lib
 # target and Cargo would ignore the line with a warning. `assert_cmd`
 # falls back to searching the workspace `target/` directory for the
