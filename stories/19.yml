@@ -140,7 +140,7 @@ acceptance:
       Proves the signer composition with story 18: given a
       `RunConfig` whose `signer` resolves to a sandbox
       signer matching the form in
-      `agents/assets/definitions/identifier-forms.yml`,
+      `assets/definitions/identifier-forms.yml`,
       the `runs` row the runtime writes via
       `RunRecorder::start(...)` carries that exact string
       in its `signer` field. The runtime does NOT generate
@@ -464,7 +464,7 @@ guidance: |
 
   `RunConfig` shape (auditable).
     Canonical string forms for `run_id` and `signer` are
-    defined in `agents/assets/definitions/identifier-forms.yml`;
+    defined in `assets/definitions/identifier-forms.yml`;
     `RunConfig::validate()` rejects values that do not match.
     ```
     pub struct RunConfig {

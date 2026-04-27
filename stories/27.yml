@@ -11,7 +11,7 @@ acceptance:
   - file: crates/agentic-story/tests/loader_accepts_assets_field.rs
     justification: |
       Proves the happy path for the new schema field: a story YAML
-      whose root carries `assets: [agents/assets/principles/deep-modules.yml]`
+      whose root carries `assets: [assets/principles/deep-modules.yml]`
       loads cleanly through `Story::load` (and `Story::load_dir`) into
       a typed `Story` value whose `assets` field round-trips as a
       `Vec<String>` (or equivalent path-typed collection) preserving
@@ -27,7 +27,7 @@ acceptance:
   - file: crates/agentic-story/tests/loader_rejects_unknown_asset_path.rs
     justification: |
       Proves the existence-check ADR-0007 decision 3 mandates: a story
-      YAML carrying `assets: [agents/assets/nonexistent.yml]` is rejected
+      YAML carrying `assets: [assets/nonexistent.yml]` is rejected
       by the directory loader with a typed error variant whose payload
       names the missing path verbatim and the source story's id, so an
       author who mistypes an asset path (or references one that was
@@ -61,7 +61,7 @@ acceptance:
     justification: |
       Proves ADR-0007 decision 4 (cross-corpus reciprocity) at
       corpus level: the test loads the live `stories/` directory and
-      the live `agents/assets/` tree and asserts that for every asset
+      the live `assets/` tree and asserts that for every asset
       whose `current_consumers:` list names a story, that story's
       `assets:` field references the asset; and conversely, for every
       story declaring an asset, the asset's `current_consumers:` lists
@@ -78,7 +78,7 @@ acceptance:
     justification: |
       Proves the asset schema's `minItems: 1` invariant on
       `current_consumers:` holds at corpus level: the script
-      enumerates every asset YAML under `agents/assets/` and refuses
+      enumerates every asset YAML under `assets/` and refuses
       with a non-zero exit if any asset's `current_consumers:` is
       absent, empty, or `[]`. This catches the orphan-asset shape
       the asset schema's `description` already names as a defect
@@ -122,10 +122,10 @@ acceptance:
          `assets:` block reads:
            ```
            assets:
-             - agents/assets/principles/deep-modules.yml
+             - assets/principles/deep-modules.yml
            ```
          Confirm the asset path exists on disk
-         (`ls agents/assets/principles/deep-modules.yml`).
+         (`ls assets/principles/deep-modules.yml`).
          Run the loader against the scratch directory (via the
          same `examples/load_smoke.rs` style story 6's UAT uses,
          or via `agentic stories health` against a corpus argument
@@ -135,15 +135,15 @@ acceptance:
 
     Unknown-asset walkthrough:
       5. Edit `99.yml` so `assets:` reads
-         `[agents/assets/nonexistent.yml]`. Re-run the loader.
+         `[assets/nonexistent.yml]`. Re-run the loader.
          Observe: non-zero exit, an error naming the offending
-         path (`agents/assets/nonexistent.yml`) AND the source
+         path (`assets/nonexistent.yml`) AND the source
          story id (99). The diagnostic is precise enough that a
          reader can fix the typo without opening the schema.
 
     Asset-side reciprocity walkthrough:
       6. Restore `99.yml`'s `assets:` to the deep-modules path.
-         Open `agents/assets/principles/deep-modules.yml` and
+         Open `assets/principles/deep-modules.yml` and
          observe its `current_consumers:` block — it currently
          lists three agent-triplet paths. Add a fourth entry
          `stories/99.yml` to the list (a temporary edit; you
@@ -158,7 +158,7 @@ acceptance:
     Corpus reciprocity walkthrough:
       7. Move `99.yml` into the live `stories/` directory (or
          re-point the audit at the scratch corpus). Without
-         editing `agents/assets/principles/deep-modules.yml`'s
+         editing `assets/principles/deep-modules.yml`'s
          `current_consumers:` to include `stories/99.yml`, run
          the reciprocity audit (the test or a future audit
          surface that wraps it). Observe: the audit reports a
@@ -170,10 +170,10 @@ acceptance:
 
     Orphan-asset walkthrough:
       8. Run `bash scripts/verify/asset_consumer_minimum.sh`.
-         Observe: exit 0, every asset under `agents/assets/`
+         Observe: exit 0, every asset under `assets/`
          has at least one declared consumer.
       9. Briefly create a stub asset
-         `agents/assets/principles/scratch-orphan.yml` containing
+         `assets/principles/scratch-orphan.yml` containing
          `name: scratch-orphan`, `description: temporary`, and an
          empty `current_consumers: []`. Re-run the verifier.
          Observe: non-zero exit, the orphan path is named in
@@ -183,10 +183,10 @@ acceptance:
      10. Delete `99.yml` from wherever you placed it (scratch or
          live `stories/`).
      11. Revert any edits to
-         `agents/assets/principles/deep-modules.yml`
-         (`git restore agents/assets/principles/deep-modules.yml`).
+         `assets/principles/deep-modules.yml`
+         (`git restore assets/principles/deep-modules.yml`).
      12. Delete the scratch orphan
-         `agents/assets/principles/scratch-orphan.yml` if you
+         `assets/principles/scratch-orphan.yml` if you
          created it.
      13. Remove the scratch fixture directory.
      14. Confirm `git status --porcelain` is empty.
@@ -201,7 +201,7 @@ guidance: |
   Schema invariants this story pins.
     1. `schemas/story.schema.json` gains a root-level `assets:` array
        property. Items are repo-root-relative strings matching
-       `^agents/assets/.*\.ya?ml$`. Default `[]`. The story-writer
+       `^assets/.*\.ya?ml$`. Default `[]`. The story-writer
        always writes the field explicitly when the story declares
        assets; absent and `[]` are both accepted and observably
        equivalent post-load (matching the existing `patterns:` field).
@@ -223,7 +223,7 @@ guidance: |
           the same observability the existing `patterns: Vec<String>`
           field already has.
       (b) Validate every entry resolves to an existing file under
-          the repo's `agents/assets/` tree at directory-load time
+          the repo's `assets/` tree at directory-load time
           (parity with how `depends_on` and `superseded_by` target-
           existence are validated). Single-file load cannot
           meaningfully validate cross-tree existence; that is the
@@ -241,7 +241,7 @@ guidance: |
 
   Migration posture — opt-in, not forced.
     Existing stories that inline asset prose into their guidance
-    (e.g. story 6's references to `agents/assets/definitions/identifier-
+    (e.g. story 6's references to `assets/definitions/identifier-
     forms.yml`) MAY migrate the references into `assets:` declarations
     as a follow-up amendment. There is no forced corpus-wide rewrite.
     Story 27's outcome is the MECHANISM — a working `assets:` field
@@ -268,11 +268,11 @@ guidance: |
     second.
 
   What this story is NOT.
-    - NOT a rename of `agents/assets/` to top-level `assets/`.
+    - NOT a rename of `assets/` to top-level `assets/`.
       ADR-0007's "Alternatives considered" defers that move
       explicitly; revisit when the asset corpus has grown enough
       that path drift produces real reader confusion.
-    - NOT a merge of `patterns/` into `agents/assets/`. Patterns
+    - NOT a merge of `patterns/` into `assets/`. Patterns
       and assets remain separate concepts with separate schemas;
       a story may declare both. ADR-0007 decision 1 names this
       explicitly.

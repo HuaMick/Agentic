@@ -58,7 +58,7 @@ acceptance:
       Proves the `--json` contract at the library boundary: emits
       an object with `stories[]` and `summary{}` keys, includes
       commit fields in the canonical form documented in
-      `agents/assets/definitions/identifier-forms.yml` (not
+      `assets/definitions/identifier-forms.yml` (not
       truncated), preserves the same data as the table mode, and
       is parseable by `serde_json` round-trip. Without this
       downstream tooling (CI status checks, future web UI) cannot
@@ -347,7 +347,7 @@ guidance: |
 
   `--json` contract.
     Top-level shape (`<commit>` takes the canonical form in
-    `agents/assets/definitions/identifier-forms.yml`):
+    `assets/definitions/identifier-forms.yml`):
       ```json
       {
         "stories": [

@@ -427,7 +427,7 @@ guidance: |
   Row shape, field-by-field (the authoritative reference).
     Canonical string forms for `run_id`, `signer`, `story_id`, and
     SHA fields are defined in
-    `agents/assets/definitions/identifier-forms.yml`; match those
+    `assets/definitions/identifier-forms.yml`; match those
     forms exactly when emitting or parsing this row.
     ```
     run_id:                string (see identifier-forms.yml: run_id)

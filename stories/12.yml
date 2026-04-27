@@ -25,7 +25,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
@@ -44,7 +44,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
@@ -66,7 +66,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
@@ -85,7 +85,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
@@ -108,7 +108,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
@@ -127,7 +127,7 @@ acceptance:
       repo seeding, and stub executor MUST be sourced from
       `agentic_test_support`'s shared primitives (story 26), not bespoke
       per-file helpers. The deep-modules contract enforced via
-      `agents/assets/principles/deep-modules.yml`'s
+      `assets/principles/deep-modules.yml`'s
       `application_to_test_scaffolding` is observable in this test's
       imports — a reimplementation that brought back a local
       `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct

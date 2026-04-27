@@ -165,7 +165,7 @@ acceptance:
       `run-id`, `signer`, `start-sha`, and `runs-path` keys
       (see Decision 8 in guidance for the body template;
       `signer` and `start-sha` use the canonical forms in
-      `agents/assets/definitions/identifier-forms.yml`).
+      `assets/definitions/identifier-forms.yml`).
       After the merge, the run row is updated:
       `branch_state.merged == true` and
       `branch_state.merge_shas` contains exactly one sha
@@ -225,7 +225,7 @@ acceptance:
       produces exactly two tags that resolve to the same
       image ID — `agentic-sandbox:<sha>` where `<sha>` is
       the commit form documented in
-      `agents/assets/definitions/identifier-forms.yml`
+      `assets/definitions/identifier-forms.yml`
       (captured from `git rev-parse HEAD`), and
       `agentic-sandbox:latest`. `StoryBuild::resolve_image_tag`
       defaults to `agentic-sandbox:<sha-at-host-invocation>`
@@ -511,7 +511,7 @@ guidance: |
 
   Decision 3 — per-commit SHA image tag with `latest` alias.
     `agentic-sandbox:<sha>` (where `<sha>` is the commit form
-    documented in `agents/assets/definitions/identifier-forms.yml`)
+    documented in `assets/definitions/identifier-forms.yml`)
     is the authoritative tag; `agentic-sandbox:latest` is a
     convenience alias that always points at the last-built
     image. Three reasons:
@@ -624,7 +624,7 @@ guidance: |
     against the corpus.
     Body (`<run-id>`, `<signer>`, `<start-sha>`, `<end-sha>`
     take the canonical forms from
-    `agents/assets/definitions/identifier-forms.yml` —
+    `assets/definitions/identifier-forms.yml` —
     sandbox signer for `<signer>`, full commit SHA for the
     sha fields, run_id UUID for `<run-id>`):
       ```

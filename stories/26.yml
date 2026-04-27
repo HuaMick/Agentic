@@ -9,8 +9,8 @@ status: under_construction
 patterns: []
 
 assets:
-  - agents/assets/principles/deep-modules.yml
-  - agents/assets/definitions/identifier-forms.yml
+  - assets/principles/deep-modules.yml
+  - assets/definitions/identifier-forms.yml
 
 acceptance:
   tests:
@@ -51,7 +51,7 @@ acceptance:
         repo with `committer.email` set, lands one initial commit, and
         `head_sha()` returns a 40-character lowercase hex string matching
         the `commit` form in
-        `agents/assets/definitions/identifier-forms.yml` (declared in
+        `assets/definitions/identifier-forms.yml` (declared in
         this story's `assets:`). The test asserts the regex
         `^[0-9a-f]{40}$` literally so a future drift to a 7- or 8-char
         abbreviated SHA — exactly the failure
@@ -83,7 +83,7 @@ acceptance:
         asserts no `pub use`, `pub fn`, or `pub struct` declaration
         whose name matches `^(assert|expect|verify|check)_` exists. The
         rationale is the REWARD-HACKING GUARDRAIL paragraph in
-        `agents/assets/principles/deep-modules.yml`'s
+        `assets/principles/deep-modules.yml`'s
         `application_to_test_scaffolding` section (declared in this
         story's `assets:`): a shared assertion helper is a single point
         a future agent can route around to make N tests pass with one
@@ -126,7 +126,7 @@ acceptance:
     fixture helpers in
     `crates/agentic-ci-record/tests/stories_test_bare_id_runs_single_story.rs`
     are gone, replaced by kit imports — the deletion-test worked
-    example in `agents/assets/principles/deep-modules.yml` cited
+    example in `assets/principles/deep-modules.yml` cited
     that exact file as the deletion-test failing case.
 
     Setup:
@@ -204,9 +204,9 @@ acceptance:
 
 guidance: |
   Cross-corpus context lives in
-  `agents/assets/principles/deep-modules.yml` (the principle this story
+  `assets/principles/deep-modules.yml` (the principle this story
   embodies, declared in this story's `assets:` field) and
-  `agents/assets/definitions/identifier-forms.yml` (the canonical SHA
+  `assets/definitions/identifier-forms.yml` (the canonical SHA
   shape `FixtureRepo::head_sha()` matches, also declared via `assets:`).
   This guidance section pins only what the asset declarations do not —
   the shape of the kit, the names it exports, and what this story
@@ -256,7 +256,7 @@ guidance: |
       kit ever lands, that is the moment to extract a pattern.
       Until then, the deep-modules asset (declared via `assets:`)
       carries the design rationale.
-    - NOT a directory rename of `agents/assets/`. ADR-0007's
+    - NOT a directory rename of `assets/`. ADR-0007's
       "Alternatives considered" defers that move; it is unrelated
       to this story.
     - NOT an enforcement of kit usage on every new scaffold.
@@ -271,7 +271,7 @@ guidance: |
     This story declares two assets; per ADR-0007 decision 4, both
     assets' `current_consumers:` lists must include `stories/26.yml`
     once story 26 lands as a tracked file. Story-writer does not
-    own `agents/assets/**` (see `contract.yml` `does_not_touch:`),
+    own `assets/**` (see `contract.yml` `does_not_touch:`),
     so the back-fill is the orchestrator's step before story 27's
     reciprocity audit can pass cleanly. Authoring this declaration
     here is correct; the back-fill is the matched move on the

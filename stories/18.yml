@@ -83,7 +83,7 @@ acceptance:
       source (`flag`, `env`, or `git`). Non-whitespace
       strings of any shape — `"a"`, `"not-an-email"`,
       `"operator-17"`, plus a sandbox signer matching the
-      form in `agents/assets/definitions/identifier-forms.yml`
+      form in `assets/definitions/identifier-forms.yml`
       — are accepted verbatim. Specifically, no email-shape
       regex is applied: a signer is a free-form non-empty
       identity string. This pins the decision so a future
@@ -171,7 +171,7 @@ acceptance:
       model and a generated run_id, the child process's
       environment contains `AGENTIC_SIGNER` composed per
       the sandbox signer form in
-      `agents/assets/definitions/identifier-forms.yml`
+      `assets/definitions/identifier-forms.yml`
       (model and run_id placeholders match the asset's
       shape exactly — the asset's drift_warning notes the
       historical short-id mistake this test fences). The
@@ -496,7 +496,7 @@ guidance: |
     a claude subprocess on behalf of a run, it composes
     the child's `AGENTIC_SIGNER` env var per the sandbox
     signer form documented in
-    `agents/assets/definitions/identifier-forms.yml` —
+    `assets/definitions/identifier-forms.yml` —
     `<model>` from `RunConfig.models[0]` (or a single
     `model` field if the runtime pins one per spawn),
     `<run_id>` from the run id generated for this
