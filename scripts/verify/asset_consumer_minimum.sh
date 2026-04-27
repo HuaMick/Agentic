@@ -42,15 +42,14 @@
 #
 # Dependencies
 # ------------
-# Requires `yq` (mikefarah v4) to parse `current_consumers:` out of
-# each asset YAML reliably. The same dependency-shape the existing
-# `scripts/agentic-search.sh` documents; unlike that script there is
-# no awk fallback here because the orphan-detection contract requires
-# distinguishing "field absent", "field present but empty array",
-# and "field present with N>=1 entries" -- a distinction the awk
-# parser cannot make portably across YAML scalar shapes. If yq is
-# not installed the verifier exits 1 with a diagnostic naming the
-# missing dependency.
+# Requires `python3` with PyYAML (the standard WSL/Linux/macOS
+# baseline). The orphan-detection contract requires distinguishing
+# "field absent", "field present but empty array", and "field present
+# with N>=1 entries" across both flow-style (`current_consumers: []`)
+# and block-style (`current_consumers:\n - foo`) YAML shapes -- a
+# distinction the awk parser in scripts/agentic-search.sh cannot make
+# portably. PyYAML's safe loader handles both shapes uniformly. If
+# python3 or PyYAML is missing the verifier exits 1 with a diagnostic.
 # =============================================================================
 
 set -euo pipefail
@@ -111,27 +110,34 @@ find_repo_root() {
 # foo`) YAML shapes the corpus uses interchangeably.
 classify_consumers() {
   local file="$1"
-  # `yq -r '... // ""'` returns the empty string when the field is
-  # absent, `[]` when explicitly empty, or one entry per line for
-  # non-empty arrays. We classify on the line count after filtering
-  # empties.
-  local raw
-  raw="$(yq -r '.current_consumers // "ABSENT_SENTINEL"' "$file" 2>/dev/null \
-         || die_runtime "yq failed to parse $file")"
-
-  if [[ "$raw" == "ABSENT_SENTINEL" ]]; then
-    printf 'ABSENT\n'
-    return 0
-  fi
-  # Distinguish "[]" (yq prints empty string for empty array under -r)
-  # from a non-empty array.
-  local count
-  count="$(printf '%s\n' "$raw" | sed '/^$/d' | wc -l | tr -d ' ')"
-  if [[ "$count" -eq 0 ]]; then
-    printf 'EMPTY\n'
-  else
-    printf 'COUNT:%s\n' "$count"
-  fi
+  # PyYAML safe-loads the asset YAML and emits one of three sentinels:
+  # ABSENT (field missing), EMPTY (field present but []/null), or
+  # COUNT:<n> (n>=1 entries). Handles flow-style and block-style
+  # uniformly via PyYAML's safe_load.
+  python3 - "$file" <<'PY' || die_runtime "python3/PyYAML failed to parse $1"
+import sys, yaml
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+except Exception as exc:
+    sys.stderr.write(f"parse-error: {exc}\n")
+    sys.exit(1)
+if not isinstance(data, dict):
+    print("ABSENT")
+    sys.exit(0)
+if "current_consumers" not in data:
+    print("ABSENT")
+    sys.exit(0)
+val = data["current_consumers"]
+if val is None or (isinstance(val, list) and len(val) == 0):
+    print("EMPTY")
+    sys.exit(0)
+if isinstance(val, list):
+    print(f"COUNT:{len(val)}")
+    sys.exit(0)
+sys.stderr.write(f"unexpected current_consumers shape: {type(val).__name__}\n")
+sys.exit(1)
+PY
 }
 
 # Walk an asset directory and emit diagnostics for orphans.
@@ -240,11 +246,14 @@ fi
 ASSET_DIR="$REPO_ROOT/agents/assets"
 
 # ---------------------------------------------------------------------------
-# Dependency check: yq must be installed.
+# Dependency check: python3 with PyYAML must be available.
 # ---------------------------------------------------------------------------
 
-if ! command -v yq >/dev/null 2>&1; then
-  die_runtime "yq (mikefarah v4) is required to parse current_consumers reliably; install yq and re-run"
+if ! command -v python3 >/dev/null 2>&1; then
+  die_runtime "python3 is required to parse current_consumers reliably; install python3 and re-run"
+fi
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+  die_runtime "PyYAML is required (python3 -c 'import yaml' failed); install python3-yaml and re-run"
 fi
 
 # ---------------------------------------------------------------------------
