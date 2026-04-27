@@ -20,6 +20,16 @@ acceptance:
       prove "the code path leading up to my leaf still works" in
       isolation — which is the upstream-only lane CI needs for
       targeted diagnostics.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_id_plus_runs_only_descendants.rs
     justification: |
       Proves the `<id>+` selector at the library boundary:
@@ -29,6 +39,16 @@ acceptance:
       outside that descendant set. Without this, an operator changing
       an upstream contract cannot prove "nothing I broke is
       downstream" without running the world.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_plus_id_plus_runs_full_subtree.rs
     justification: |
       Proves the `+<id>+` selector at the library boundary:
@@ -41,6 +61,16 @@ acceptance:
       dashboard's subtree drilldown is missing — operators debugging a
       regression in a mid-DAG story have no single command that
       covers both sides of the impact radius.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_bare_id_runs_single_story.rs
     justification: |
       Proves the bare-id case at the library boundary: `CiRunner::run("<id>")`
@@ -73,6 +103,16 @@ acceptance:
       any) are untouched. Without this, the runner could run the right
       tests but write the wrong rows, silently misreporting the
       dashboard's read view.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_preserves_rows_for_unselected_stories.rs
     justification: |
       Proves the isolation contract: given a prior `test_runs` row for
@@ -82,6 +122,16 @@ acceptance:
       selector could silently invalidate unrelated stories' health (by
       overwriting their rows with empty or nonsensical values) — the
       exact opposite of what a scoped run promises.
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_unknown_id.rs
     justification: |
       Proves clean failure on bad input at the library boundary:
@@ -91,6 +141,16 @@ acceptance:
       zero rows to `test_runs`. Without this, a typo or stale id
       produces either a panic or a silent zero-story run
       indistinguishable from "the subtree happened to be empty."
+
+      Additionally pins the kit-vs-bespoke contract: the fixture corpus,
+      repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers. The deep-modules contract enforced via
+      `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-ci-record/tests/stories_test_cycle_rejected.rs
     justification: |
       Proves the invariant defence at the CI boundary: given a
@@ -100,6 +160,18 @@ acceptance:
       executor zero times, and writes zero rows. Without this, a
       cycle would produce infinite traversal, infinite test runs, or a
       panic — each strictly worse than a typed refusal.
+
+      Additionally pins the kit-vs-bespoke contract: the cyclic fixture
+      corpus, repo seeding, and stub executor MUST be sourced from
+      `agentic_test_support`'s shared primitives (story 26), not bespoke
+      per-file helpers — the kit's `FixtureCorpus::write_story(id, deps)`
+      writer covers the cycle case unchanged because cycle detection
+      lives in the loader's traversal, not the writer. The deep-modules
+      contract enforced via `agents/assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` is observable in this test's
+      imports — a reimplementation that brought back a local
+      `fn write_fixture_story`, `fn setup_fixture_corpus`, or `struct
+      StubExecutor impl TestExecutor` would fail this contract.
   - file: crates/agentic-cli/tests/stories_test_selectors_via_binary.rs
     justification: |
       Proves the selector argv reaches the runner through the binary:
