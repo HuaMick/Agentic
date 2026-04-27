@@ -4,7 +4,7 @@ outcome: |
   A test author writing an acceptance scaffold for any workspace crate finds
   and reuses shared fixture primitives instead of reimplementing setup
   helpers per file.
-status: proposed
+status: under_construction
 
 patterns: []
 
