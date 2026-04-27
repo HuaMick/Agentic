@@ -1,7 +1,7 @@
 workflow:
   session_start:
     - Read every file listed in inputs.yml `required_reading`.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
     - Run `git status --porcelain` and `git log --oneline -n 5` once to know the workspace's current commit and dirt state. The orchestrator does not gate on dirt itself, but it surfaces a dirty tree to the user before spawning any agent that does.
 
   modes:
@@ -240,7 +240,7 @@ guidance:
         the missing capability rather than improvising an
         in-conversation iteration loop.
 
-    - See agents/assets/guidelines/reference-claude-md.yml.
+    - See assets/guidelines/reference-claude-md.yml.
 
   anti_patterns:
     - |

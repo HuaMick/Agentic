@@ -1,6 +1,6 @@
 required_reading:
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
+    reason: See assets/guidelines/reference-claude-md.yml.
   - path: schemas/agent-contract.schema.json
     reason: Validate every agent's contract.yml against this.
   - path: schemas/agent-inputs.schema.json
@@ -9,13 +9,13 @@ required_reading:
     reason: Validate every agent's process.yml against this.
   - path: agents/README.md
     reason: Roster of active agents and the three-file shape. Update when the roster changes.
-  - path: agents/assets/README.md
+  - path: assets/README.md
     reason: Asset layer conventions (subdirectory semantics, extraction rule).
 
 context:
   - pattern: agents/**/*.yml
     reason: Existing agent specs — duplication check, cross-reference validation, drift detection.
-  - pattern: agents/assets/**/*.yml
+  - pattern: assets/**/*.yml
     reason: Existing assets — scan before extracting to avoid duplicate extraction.
   - pattern: .claude/agents/*.md
     reason: Pointer files — must stay in sync with their agent's contract.yml scope.name.

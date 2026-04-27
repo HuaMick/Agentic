@@ -5,7 +5,7 @@ workflow:
     - Read the story's `acceptance.uat:` block in full, verbatim. Do not summarise it; the prose is the authoritative walkthrough.
     - Run `git status --porcelain` once. Non-empty output is a fail-closed condition for the whole session — report and stop. The UAT verdict is commit-signed; a dirty tree forfeits the signing guarantee.
     - Run `git rev-parse HEAD` and record the commit hash that the eventual verdict will be signed against.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
 
   steps:
     - step: Confirm the story id and status.
@@ -154,7 +154,7 @@ workflow:
 guidance:
   rules:
     - The first observable check of every session is `git status --porcelain`. Non-empty output is a fail-closed condition — the UAT verdict is commit-signed, and a dirty tree forfeits that guarantee at signing time regardless of anything else the walkthrough observes.
-    - Read the story's `acceptance.uat:` block verbatim, every session. The prose IS the walkthrough; a summary is a drift vector. See agents/assets/definitions/session-start-memory.yml.
+    - Read the story's `acceptance.uat:` block verbatim, every session. The prose IS the walkthrough; a summary is a drift vector. See assets/definitions/session-start-memory.yml.
     - Execute every command exactly as the prose shows it. Same flags, same argument order, same quoting. A "cleaner" invocation is a different invocation, and the observable it produces no longer answers the story's question.
     - Capture observations before judging. For every observable named in the prose, write down what was observed AND the prose's expectation; the Pass/Fail column is a comparison of those two, not an intuition. If the comparison is ambiguous, flag and stop — do not guess.
     - Scratch artefacts are allowed when and only when the UAT prose explicitly names their path. Every such artefact must be deleted before `agentic uat` is invoked; the CLI fail-closes on a dirty tree, and a scratch artefact that survives the run forfeits the signing guarantee.

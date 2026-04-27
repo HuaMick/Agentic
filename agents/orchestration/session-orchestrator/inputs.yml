@@ -1,6 +1,6 @@
 required_reading:
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
+    reason: See assets/guidelines/reference-claude-md.yml.
   - path: README.md
     reason: |
       Current project state — what is shipped, what is in flight, what

@@ -1,8 +1,8 @@
 required_reading:
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
+    reason: See assets/guidelines/reference-claude-md.yml.
   - path: schemas/story.schema.json
-    reason: See agents/assets/definitions/story-schema-contract.yml.
+    reason: See assets/definitions/story-schema-contract.yml.
   - path: docs/guides/story-authoring.md
     reason: |
       The authoring rules that produced the story. Read the
@@ -22,14 +22,14 @@ required_reading:
       The story you are scaffolding. Read in full, including `guidance` —
       the guidance block often names the fixture shape or resilience
       claim a test scaffold must put into the panic message.
-  - path: agents/assets/definitions/identifier-forms.yml
+  - path: assets/definitions/identifier-forms.yml
     reason: |
       Canonical forms of run_id, story_id, and commit (and the signer
       string downstream rows reference). Evidence rows you write must
       match these forms verbatim — UUID v4 for run_id, integer for
       story_id, 40-char lowercase hex for commit. Drift here invalidates
       the handshake with build-rust and `agentic-verify`.
-  - path: agents/assets/principles/deep-modules.yml
+  - path: assets/principles/deep-modules.yml
     reason: |
       The deep-modules principle this agent applies to scaffold
       authorship. Read every session; the `prefer-shared-scaffold`

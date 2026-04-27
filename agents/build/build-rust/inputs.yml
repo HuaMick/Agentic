@@ -1,8 +1,8 @@
 required_reading:
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
+    reason: See assets/guidelines/reference-claude-md.yml.
   - path: schemas/story.schema.json
-    reason: See agents/assets/definitions/story-schema-contract.yml.
+    reason: See assets/definitions/story-schema-contract.yml.
   - path: stories/<id>.yml
     reason: |
       The actual story you are implementing. Required input. Read in full,
@@ -13,14 +13,14 @@ required_reading:
       Architectural Decision Records. Read every ADR the story or its
       patterns reference. Especially ADR-0002 (store trait, no direct DB
       access) and ADR-0003 (subscription auth via local claude binary).
-  - path: agents/assets/definitions/identifier-forms.yml
+  - path: assets/definitions/identifier-forms.yml
     reason: |
       Canonical forms of run_id, signer, story_id, and commit. When you
       implement a producer or parser for any of these (stories 16, 18,
       19, 20, 23), match the forms verbatim. The underscore-vs-hyphen
       kind of drift in `sandbox:<model>@<run_id>` is the bug class this
       asset exists to prevent.
-  - path: agents/assets/principles/deep-modules.yml
+  - path: assets/principles/deep-modules.yml
     reason: |
       The deep-modules principle this agent applies to crate-level
       `pub` surfaces. Read every session; the operational application

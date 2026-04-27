@@ -1,6 +1,6 @@
 required_reading:
   - path: schemas/story.schema.json
-    reason: See agents/assets/definitions/story-schema-contract.yml.
+    reason: See assets/definitions/story-schema-contract.yml.
   - path: schemas/pattern.schema.json
     reason: Pattern schema — validate every draft against this.
   - path: docs/guides/story-authoring.md
@@ -14,8 +14,8 @@ required_reading:
   - path: stories/README.md
     reason: Corpus conventions — test-file 1-to-1 binding and the two canonical test-file locations (`crates/<crate>/tests/*.rs`, `scripts/verify/*.sh`). Load-bearing for cross-corpus invariant checks.
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
-  - path: agents/assets/principles/deep-modules.yml
+    reason: See assets/guidelines/reference-claude-md.yml.
+  - path: assets/principles/deep-modules.yml
     reason: |
       The deep-modules principle this agent applies to story scoping.
       Read every session; the operational application sharpens the

@@ -1,7 +1,7 @@
 workflow:
   session_start:
     - Read every file listed in inputs.yml `required_reading`.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
     - Read the `question` parameter verbatim. Do not paraphrase it; the verbatim text is what every `findings[].claim` will quote.
 
   steps:
@@ -39,7 +39,7 @@ workflow:
           - "What did ADR-K decide about W?" → `docs/decisions/<K>.md`
             (the ADR is the decision), NOT CLAUDE.md's reference to it.
           - "Is asset A referenced by agent B?" → asset A's
-            `current_consumers` array under `agents/assets/<...>/A.yml`,
+            `current_consumers` array under `assets/<...>/A.yml`,
             NOT a grep for the asset's slug elsewhere (greps catch
             mentions; consumer lists catch ownership).
         When uncertain which source is authoritative, prefer the one
@@ -108,7 +108,7 @@ guidance:
       speculation. When the corpus is silent, return `agrees: false`
       with `actual: "could not determine — no authoritative source found"`
       and `evidence_path: "no authoritative source found"`.
-    - See agents/assets/guidelines/reference-claude-md.yml.
+    - See assets/guidelines/reference-claude-md.yml.
 
   anti_patterns:
     - |
@@ -160,7 +160,7 @@ guidance:
       `assumption_violations` severity to `high`. The investigator
       does not fix it; the orchestrator routes the fix to the right
       authoring agent (story-writer for stories, guidance-writer for
-      agents/assets/, etc.).
+      assets/, etc.).
     - |
       The question requires reading a file the investigator's tool
       grant cannot reach (binary blob, unmounted volume): STOP.

@@ -1,7 +1,7 @@
 workflow:
   session_start:
     - Read every file listed in inputs.yml `required_reading`.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
 
   modes:
     directed:
@@ -73,7 +73,7 @@ workflow:
       when: Proactive consistency pass over stories, patterns, or both.
       steps:
         - step: Scope.
-          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+          detail: See assets/definitions/audit-mode-protocol.yml.
         - step: Scan.
           detail: |
             Look for:
@@ -99,19 +99,19 @@ workflow:
               and conversely, a guidance carve-out whose pattern appears in
               `patterns:`. See `patterns-guidance-coherence`.
         - step: Produce a plan.
-          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+          detail: See assets/definitions/audit-mode-protocol.yml.
         - step: Confirm with user.
-          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+          detail: See assets/definitions/audit-mode-protocol.yml.
         - step: Execute.
-          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+          detail: See assets/definitions/audit-mode-protocol.yml.
         - step: Summarize.
-          detail: See agents/assets/definitions/audit-mode-protocol.yml.
+          detail: See assets/definitions/audit-mode-protocol.yml.
 
 guidance:
   rules:
     - Read schemas and authoring guides at session start. Every session.
     - First action in directed mode (story work) is `scripts/agentic-search.sh`. A write without a documented search is a failure.
-    - See agents/assets/guidelines/edit-first-curation.yml.
+    - See assets/guidelines/edit-first-curation.yml.
     - Reference patterns instead of restating them. Scan patterns/ before writing guidance.
     - Extract to pattern when guidance repeats across 2+ stories. Update referring stories in the same pass.
     - "All schema rules apply. Required fields non-empty. `status: proposed` on new stories. Use the next free integer ID for stories."
@@ -155,7 +155,7 @@ guidance:
         existing story has a gap; the action is UPDATE, not NEW.
 
         Operational grounding: see
-        `agents/assets/principles/deep-modules.yml`
+        `assets/principles/deep-modules.yml`
         (`application_to_story_authoring`). The asset adds the deletion
         test as a tie-breaker — when on the fence about splitting vs
         consolidating, imagine retiring the candidate via
@@ -379,7 +379,7 @@ guidance:
     - Optimistic UAT without observable checks.
     - Single aggregate justification for multiple tests — each test gets its own.
     - Inventing schema fields not in the schema.
-    - See agents/assets/guidelines/no-proof-preservation.yml.
+    - See assets/guidelines/no-proof-preservation.yml.
     - Patterns documenting generic literature rather than local convention.
     - Patterns extracted prematurely (from 0 or 1 stories).
 

@@ -8,7 +8,7 @@ scope:
     native Explore subagent (which is general codebase exploration); this
     agent verifies assertions against Agentic-specific corpus structure —
     stories, agent specs, evidence files, schemas, ADRs, patterns,
-    `.claude/agents/*` pointers, and `agents/assets/`. Spawned in parallel
+    `.claude/agents/*` pointers, and `assets/`. Spawned in parallel
     by session-orchestrator (one investigator per question) so the
     orchestrator can fan out independent claim-verifications cheaply.
 

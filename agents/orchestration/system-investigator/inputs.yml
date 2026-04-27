@@ -1,6 +1,6 @@
 required_reading:
   - path: CLAUDE.md
-    reason: See agents/assets/guidelines/reference-claude-md.yml.
+    reason: See assets/guidelines/reference-claude-md.yml.
   - path: agents/README.md
     reason: |
       Authoritative roster of active agents and their categories. Many
@@ -16,7 +16,7 @@ context:
     reason: Per-agent workflow and rules — for claims about how an agent behaves.
   - pattern: agents/**/inputs.yml
     reason: Per-agent tool grants and required reading — for claims about what an agent reads or what tools it holds.
-  - pattern: agents/assets/**/*.yml
+  - pattern: assets/**/*.yml
     reason: Shared asset definitions and consumer lists — for claims about which agents reference which assets.
   - pattern: schemas/*.schema.json
     reason: Authoritative artefact shapes — for claims about valid statuses, required fields, enum values.

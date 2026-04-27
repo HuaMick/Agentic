@@ -4,7 +4,7 @@ workflow:
     - Read every pattern named in the story's `patterns:` field.
     - Read the README of every crate whose `tests/` directory this story writes into.
     - Run `git status --porcelain` once. Non-empty output is a fail-closed condition for the whole session — report and stop.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
 
   steps:
     - step: Confirm scope.
@@ -191,7 +191,7 @@ workflow:
 guidance:
   rules:
     - The first observable check of every session is `git status --porcelain`. Non-empty output is a fail-closed condition — the red-state record is only meaningful if it is a committable atomic, and a dirty tree forfeits that claim.
-    - Read each file listed in required_reading every session. See agents/assets/definitions/session-start-memory.yml.
+    - Read each file listed in required_reading every session. See assets/definitions/session-start-memory.yml.
     - "A scaffold that does not fail is a defect. Never suppress with `#[ignore]`, `#[cfg(..)]`, `assert!(true)`, unreachable code guards, or a trailing `panic!(\"red: ...\")` after real assertions (the trailing-panic pattern is what makes a scaffold uncodifiable — even a perfect implementation cannot make it stop firing)."
     - name: amendment-gated-test-edit
       detail: |
@@ -216,7 +216,7 @@ guidance:
         rejected as drift-prone.
     - name: prefer-shared-scaffold
       detail: |
-        Operational application of `agents/assets/principles/deep-modules.yml`
+        Operational application of `assets/principles/deep-modules.yml`
         to scaffold authorship. Mirrors story-writer's `consolidate-over-fragment`
         posture for tests.
 
@@ -271,7 +271,7 @@ guidance:
     - "Editing an existing test file without producing a new red-state evidence row in the same commit. The evidence row IS the proof that the edit was validated red; a split commit (edit now, evidence later) forfeits the per-commit atomicity invariant and is indistinguishable from silently re-reddening the test on a healthy story. If you cannot commit edit + evidence together, do not edit."
     - "Editing an existing test file on a `healthy` or `unhealthy` story. The three amendment gates require `under_construction`; any other status makes the edit an unacknowledged contract change, because the story's verdict is already recorded against the pre-edit test."
     - "Authoring a hand-rolled `fn write_fixture_story(...)`, `fn setup_fixture_corpus()`, `fn init_repo_with_email(...)`, or a bespoke `struct StubExecutor` impl when an `agentic_test_support` primitive covers the case. The kit is the default; bespoke is the documented exception. The Glob-then-README step in `prefer-shared-scaffold` is the cheapest defence."
-    - "Importing `agentic_test_support` as a route to introduce ASSERTION helpers into a test, OR proposing to add an `assert_*` / `expect_*` / `verify_*` / `check_*` export to the kit. The kit ships only setup/fixture material on purpose; assertions stay bespoke per test so each one remains a hard contract a future agent cannot route around with a green-by-default shared expector. See `agents/assets/principles/deep-modules.yml` `application_to_test_scaffolding`."
+    - "Importing `agentic_test_support` as a route to introduce ASSERTION helpers into a test, OR proposing to add an `assert_*` / `expect_*` / `verify_*` / `check_*` export to the kit. The kit ships only setup/fixture material on purpose; assertions stay bespoke per test so each one remains a hard contract a future agent cannot route around with a green-by-default shared expector. See `assets/principles/deep-modules.yml` `application_to_test_scaffolding`."
     - Deriving a test name from the file path instead of the justification. The justification is the contract; the path is a location.
     - Editing `[dependencies]`, the workspace-root `Cargo.toml`, `Cargo.lock`, or any Cargo.toml outside the target crate — runtime-dep choices remain build-rust's or an ADR's concern. The narrow dev-deps carve-out (see the dev-dependency rule) does not extend to any of these.
     - Skipping the `git status --porcelain` precheck. Red-state evidence on a dirty tree is forgeable and the whole artefact is then worthless.

@@ -10,9 +10,9 @@ scope:
     - agents/**/contract.yml
     - agents/**/inputs.yml
     - agents/**/process.yml
-    - agents/assets/**
+    - assets/**
     - agents/README.md
-    - agents/assets/README.md
+    - assets/README.md
     - .claude/agents/*.md
   does_not_touch:
     - stories/**
@@ -24,7 +24,7 @@ scope:
     - evidence/**
   authority:
     - May create or edit any agent's contract.yml, inputs.yml, or process.yml.
-    - May create, edit, or delete any agents/assets/** file.
+    - May create, edit, or delete any assets/** file.
     - May update .claude/agents/<name>.md pointer files; pointer slug must match the agent's scope.name.
     - May not edit schemas/ — schema changes are escalations, not direct edits.
     - May not unilaterally author a new agent. Guidance-writer decides the SHAPE of a new agent's three files; the user decides WHETHER a new agent should exist.
@@ -36,7 +36,7 @@ outcome:
       path: agents/<category>/<name>/{contract,inputs,process}.yml
       description: Edited or new agent spec files (three per agent).
     - kind: file
-      path: agents/assets/**
+      path: assets/**
       description: Edited or new shared asset files (definitions, guidelines, examples, templates).
     - kind: file
       path: .claude/agents/<name>.md

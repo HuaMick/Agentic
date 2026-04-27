@@ -4,7 +4,7 @@ workflow:
     - Read every pattern named in the story's `patterns:` field.
     - Read the README of every crate the story will touch.
     - Run `cargo test --workspace --no-fail-fast` once to record the regression baseline. If the workspace does not yet compile, the baseline is "no tests yet" — note this.
-    - See agents/assets/definitions/session-start-memory.yml.
+    - See assets/definitions/session-start-memory.yml.
 
   steps:
     - step: Confirm scope.
@@ -95,7 +95,7 @@ guidance:
     - name: deep-pub-surfaces
       detail: |
         Judge every crate-level `pub` surface against
-        `agents/assets/principles/deep-modules.yml`. A new public name
+        `assets/principles/deep-modules.yml`. A new public name
         widens the interface every caller pays for; add it only when an
         actual caller needs it. Do NOT widen a crate's `pub` surface
         "for testability" — when a test seems to demand a new export,

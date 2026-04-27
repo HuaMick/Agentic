@@ -20,10 +20,11 @@ The schemas enforce exactly these five buckets (scope, outcome, inputs, workflow
 
 ## Assets
 
-`assets/` holds definitions, guidelines, examples, templates referenced by agents at runtime. Schema-validated so agents don't silently miss fields. Anything that would be "shared between agents" lives here — there is no separate `shared/` directory.
+`assets/` holds principles, definitions, guidelines, examples, templates referenced by agents at runtime. Schema-validated so agents don't silently miss fields. Anything that would be "shared between agents" lives here — there is no separate `shared/` directory.
 
-Current content (see [`agents/assets/README.md`](assets/README.md) for the full layout and extraction rules):
+Current content (see [`assets/README.md`](../assets/README.md) for the full layout and extraction rules):
 
+- `principles/deep-modules.yml` — Ousterhout-via-Pocock deep-modules heuristic (interface cost vs hidden functionality; deletion test; three friction signals). Referenced by story-writer, test-builder, and build-rust.
 - `definitions/tools-base.yml` — canonical base toolset every agent needs.
 - `definitions/session-start-memory.yml` — do-not-trust-prior-session clause referenced from every agent's `workflow.session_start`.
 - `definitions/audit-mode-protocol.yml` — shared six-step protocol for any curator with an `audit` mode (Scope, Scan, Plan, Confirm, Execute, Summarize).
