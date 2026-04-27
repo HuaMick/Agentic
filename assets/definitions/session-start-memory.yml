@@ -24,7 +24,7 @@ rationale:
 reference_pattern:
   in_process_yml: |
     Under workflow.session_start, include a bullet:
-      - See agents/assets/definitions/session-start-memory.yml.
+      - See assets/definitions/session-start-memory.yml.
     The preceding bullet in every agent should still be:
       - Read every file listed in inputs.yml `required_reading`.
 

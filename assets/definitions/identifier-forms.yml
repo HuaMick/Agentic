@@ -86,7 +86,7 @@ forms:
 reference_pattern:
   in_inputs_yml: |
     Under `required_reading`, include a bullet:
-      - path: agents/assets/definitions/identifier-forms.yml
+      - path: assets/definitions/identifier-forms.yml
         reason: |
           Canonical forms of run_id, signer, story_id, and commit — match
           these exactly when authoring fixtures or implementing producers.
@@ -94,7 +94,7 @@ reference_pattern:
     Where the workflow names one of these identifiers (e.g. test-builder's
     "Record red-state evidence" step naming `run_id`, `commit`,
     `story_id`), reference this file inline rather than re-quoting the
-    pattern: "see agents/assets/definitions/identifier-forms.yml for the
+    pattern: "see assets/definitions/identifier-forms.yml for the
     canonical form."
 
 current_consumers:

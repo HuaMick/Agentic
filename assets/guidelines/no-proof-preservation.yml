@@ -36,7 +36,7 @@ scope_hint: |
 reference_pattern:
   in_process_yml: |
     Under guidance.anti_patterns, write a single-line entry that points here:
-      - See agents/assets/guidelines/no-proof-preservation.yml.
+      - See assets/guidelines/no-proof-preservation.yml.
     Do not restate the anti-pattern inline.
 
 current_consumers:

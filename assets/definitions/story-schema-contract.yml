@@ -89,7 +89,7 @@ reference_pattern:
   in_inputs_yml: |
     Under required_reading, write:
       - path: schemas/story.schema.json
-        reason: See agents/assets/definitions/story-schema-contract.yml.
+        reason: See assets/definitions/story-schema-contract.yml.
 
 current_consumers:
   - agents/planner/story-writer/inputs.yml

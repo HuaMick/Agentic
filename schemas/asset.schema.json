@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentic.dev/schemas/asset.schema.json",
   "title": "Asset",
-  "description": "Bounded contract for every file under agents/assets/**. An asset must declare WHAT it is (name + description) and WHO uses it (current_consumers). The body shape varies by asset category (definitions, guidelines, examples, templates) so additional properties are permitted — but the contract is enforced. An asset with zero current_consumers is an orphan and must be deleted or adopted per guidance-writer's escalation rules.",
+  "description": "Bounded contract for every file under assets/**. An asset must declare WHAT it is (name + description) and WHO uses it (current_consumers). The body shape varies by asset category (principles, definitions, guidelines, examples, templates) so additional properties are permitted — but the contract is enforced. An asset with zero current_consumers is an orphan and must be deleted or adopted per guidance-writer's escalation rules.",
   "type": "object",
   "required": ["name", "description", "current_consumers"],
   "properties": {

@@ -32,7 +32,7 @@ scope_hint:
 reference_pattern:
   in_process_yml: |
     Under guidance.rules, write a single-line rule that points here:
-      - See agents/assets/guidelines/edit-first-curation.yml.
+      - See assets/guidelines/edit-first-curation.yml.
     Do not restate the rule inline; agents that disagree with the default
     should surface a proposal to revise this asset, not quietly diverge.
 

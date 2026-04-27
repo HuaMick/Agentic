@@ -195,7 +195,7 @@ anti_patterns:
 reference_pattern:
   in_inputs_yml: |
     Under `required_reading`, include a bullet:
-      - path: agents/assets/principles/deep-modules.yml
+      - path: assets/principles/deep-modules.yml
         reason: |
           The deep-modules principle this agent applies to <story
           authoring | scaffold authorship | crate-level pub surfaces>.

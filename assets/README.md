@@ -1,10 +1,15 @@
-# agents/assets/
+# assets/
 
-Reusable building blocks referenced by multiple agents. The DRY layer for
-agent definitions.
+Reusable building blocks referenced by multiple agents and stories. The
+DRY layer for cross-corpus concepts. Lives at top-level (was
+`agents/assets/` until 2026-04-28; renamed once stories also became
+consumers per ADR-0007 — the `agents/` prefix understated the reach).
 
 ## Subdirectory conventions
 
+- **`principles/`** — Cross-cutting design heuristics applied across
+  many surfaces (story authoring, scaffolding, crate-level APIs).
+  Principles describe *how to judge*. Currently houses `deep-modules.yml`.
 - **`definitions/`** — Foundational concepts: shared tool sets, role
   vocabularies, schema contracts. Definitions describe *what something is*.
 - **`guidelines/`** — Behavioural rules and operational guidance: when to
@@ -17,17 +22,22 @@ agent definitions.
 ## Extraction rule
 
 Same as the story-writer's pattern extraction rule: extract to an asset
-when 2+ agents would share the content. Speculation (one current consumer
-plus a hoped-for future one) does not justify extraction. The previously
-empty `agents/shared/` directory was deleted and folded into here for the
-same reason — it had no content because no concrete duplication justified it.
+when 2+ consumers would share the content. Consumers may be agents OR
+stories per ADR-0007. Speculation (one current consumer plus a hoped-for
+future one) does not justify extraction.
 
-When you author a new agent and find yourself restating something already
-in `assets/`, reference the asset instead. When you find yourself restating
-something not in `assets/` for the second time, extract it.
+When you author a new agent or story and find yourself restating
+something already in `assets/`, reference the asset instead. When you
+find yourself restating something not in `assets/` for the second time,
+extract it.
 
 ## Current assets
 
+- `principles/deep-modules.yml` — Ousterhout-via-Pocock deep-modules
+  heuristic (interface cost vs hidden functionality; deletion test;
+  three friction signals). Referenced by story-writer, test-builder,
+  build-rust, and stories that need the deletion test inline (story 26
+  is the canonical consumer).
 - `definitions/tools-base.yml` — canonical base toolset every agent needs.
 - `definitions/session-start-memory.yml` — the do-not-trust-prior-session
   clause, referenced from every agent's `workflow.session_start`.

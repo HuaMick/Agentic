@@ -83,7 +83,7 @@ the appropriate subagent — context discipline matters.
 - **Edit before write.** Stories, patterns, agent specs, and assets —
   search the existing corpus before authoring new. Each curator agent
   enforces this in its own process.yml.
-- **Reference, don't restate.** If content already exists in `agents/assets/`
+- **Reference, don't restate.** If content already exists in `assets/`
   or in CLAUDE.md or in an ADR, reference it. Copy-paste duplication is
   drift waiting to happen.
 
@@ -101,8 +101,11 @@ the appropriate subagent — context discipline matters.
 - **Agent** — a YAML-defined role under `agents/<category>/<name>/`. Five
   buckets total across three files: `scope` + `outcome` (contract.yml),
   `inputs` (inputs.yml), `workflow` + `guidance` (process.yml).
-- **Asset** — shared content under `agents/assets/`, referenced by 2+
-  agents. Required fields: `name`, `description`, `current_consumers`.
+- **Asset** — shared content under `assets/` (top-level since 2026-04-28
+  per ADR-0007 amendment; was `agents/assets/`). Referenced by 2+
+  consumers — agents (via `inputs.yml required_reading:`) or stories
+  (via `assets:` field per ADR-0007). Required fields: `name`,
+  `description`, `current_consumers`.
 
 For the current agent roster and their authority boundaries, see
 `agents/README.md`. Per-agent contracts live at

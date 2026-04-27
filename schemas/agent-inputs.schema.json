@@ -19,7 +19,7 @@
           "reason": { "type": "string", "minLength": 1 }
         }
       },
-      "description": "Files the agent reads at session start, every session. At least one entry. Use `reason: See agents/assets/guidelines/<file>.yml` when a shared guideline applies."
+      "description": "Files the agent reads at session start, every session. At least one entry. Use `reason: See assets/guidelines/<file>.yml` when a shared guideline applies."
     },
     "context": {
       "type": "array",
@@ -61,7 +61,7 @@
         "type": "string",
         "enum": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Task", "WebFetch", "WebSearch", "NotebookEdit"]
       },
-      "description": "Claude Code tool grant. The base set is Read,Glob,Grep,Write,Edit,Bash — see agents/assets/definitions/tools-base.yml. Add only what the agent genuinely needs."
+      "description": "Claude Code tool grant. The base set is Read,Glob,Grep,Write,Edit,Bash — see assets/definitions/tools-base.yml. Add only what the agent genuinely needs."
     },
     "commands": {
       "type": "array",

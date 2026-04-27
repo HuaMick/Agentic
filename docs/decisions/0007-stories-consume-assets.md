@@ -45,7 +45,7 @@ new schema-validated field.**
 
 1. **Story schema gains an `assets:` field.** Array of asset paths
    (repo-root-relative), defaults to `[]`. Items match
-   `^agents/assets/.*\.ya?ml$`. Stories declare assets the same way
+   `^assets/.*\.ya?ml$`. Stories declare assets the same way
    they declare patterns — alongside `patterns:`, not merged with it.
    Patterns and assets stay separate concepts: patterns are story-
    specific design templates with their own schema; assets are cross-
@@ -69,12 +69,11 @@ new schema-validated field.**
    list the story. A reciprocity-audit fn (story 27) catches drift in
    either direction.
 
-5. **Asset paths are unchanged.** The `agents/assets/` directory stays
-   put for now. The path is mildly misleading once stories also
-   consume — semantically the directory is "shared assets," not
-   "agent-only assets" — but renaming to `assets/` would force an
-   atomic update of every reference in every consumer, with no
-   functional gain. Defer the rename.
+5. **Asset paths.** ~~The `agents/assets/` directory stays put for
+   now.~~ The directory was renamed to top-level `assets/` on
+   2026-04-28 — see "Decision update" at the bottom of this ADR. The
+   `agents/` prefix understated the reach once stories became
+   consumers; the new path matches the semantics.
 
 ## Migration
 
@@ -99,12 +98,14 @@ assets have different schemas (`pattern.schema.json` requires
 category). Merging forces one shape to lose information. Keeping them
 sibling is cleaner.
 
-**Move `agents/assets/` to top-level `assets/` now.** Deferred. Path
-semantics improve but the cost is updating every `inputs.yml`
-`required_reading:` reference, every story that wants to declare
-assets, and every README that names the path — all in one atomic
-commit. The upside is cosmetic; the cost is real. Revisit when the
-asset corpus has grown enough that the path drift becomes friction.
+**Move `agents/assets/` to top-level `assets/` now.** ~~Deferred.~~
+**Done 2026-04-28** — see "Decision update" below. The original
+deferral cited path semantics as cosmetic and the rename cost as real.
+The user reversed this on 2026-04-28 under a "address foundational
+work now, don't defer" directive: while still in foundational mode
+the path drift compounds for every new consumer (every new story's
+`assets:` field, every new agent's `required_reading:` block) and the
+rename only gets more expensive over time, not less.
 
 **Grow `patterns:` to also accept asset paths.** Rejected. The schema
 field's name would lie about its contents; the audit semantics would
@@ -122,7 +123,7 @@ story side cannot harvest it.
 **Gained:**
 
 - Story guidance shortens. A story that needs the deletion-test
-  heuristic declares `assets: [agents/assets/principles/deep-modules.yml]`
+  heuristic declares `assets: [assets/principles/deep-modules.yml]`
   rather than inlining the body.
 - Cross-corpus reciprocity becomes machine-checkable. The audit fn
   catches drift in either direction.
@@ -135,22 +136,52 @@ story side cannot harvest it.
 - Two more places to remember (story author must check both
   `patterns:` and `assets:`). Mitigated by schema validation —
   forgetting one produces a load-time error, not a silent gap.
-- The `agents/assets/` path is mildly misleading. See "Alternatives
-  considered" — accepting this drift for now.
 
 **Revisit when:**
 
-- The asset corpus grows past ~30 entries and the `agents/assets/`
-  path drift starts producing real reader confusion. At that point a
-  rename to `assets/` is justified by accumulated friction.
 - A pattern's `when_to_use:` collapses to "see the deletion test in
   deep-modules." That is a signal patterns and assets are merging
   conceptually for that case; consider a pattern → asset migration on
   a per-pattern basis.
 
+## Decision update — 2026-04-28
+
+The original decision (point 5) deferred renaming `agents/assets/` to
+top-level `assets/`. The deferral has been reversed.
+
+**What changed.** The directory was moved with `git mv`, every
+`required_reading:` reference in agent specs was updated, every story
+declaring an asset had its `assets:` field path rewritten, the schemas'
+regex patterns shifted from `^agents/assets/.*\.ya?ml$` to
+`^assets/.*\.ya?ml$`, and the `scripts/verify/asset_consumer_minimum.sh`
+script was updated to match.
+
+**Why now.** The original deferral cited cosmetic upside vs real
+rename cost. Two facts pushed the trade-off:
+
+1. The system is in a foundational phase (Phase 0 / Phase 2). Every new
+   story that declares assets and every new agent that references them
+   compounds the path drift; the rename only gets more expensive over
+   time, not less. The user's directive on 2026-04-28: "all our work
+   atm is foundational; we should be addressing things now and not
+   deferring as a general rule."
+2. The `agents/` prefix understates the reach. ADR-0007 itself widened
+   the consumer class to include stories — calling the directory
+   `agents/assets/` after that mismatched the schema's accepted
+   consumers.
+
+**Subdirectory addition.** A `principles/` subdirectory was sanctioned
+during the rename (it had been added implicitly when `deep-modules.yml`
+landed; `agents/assets/README.md` had not documented it). The moved
+`assets/README.md` now lists `principles/` alongside `definitions/`,
+`guidelines/`, `examples/`, `templates/`. A principle is a cross-cutting
+design heuristic ("how to judge") distinct from a definition ("what
+something is") or a guideline ("what to do"). `deep-modules.yml` is
+the canonical example.
+
 ## Related
 
-- `agents/assets/principles/deep-modules.yml` — the asset whose
+- `assets/principles/deep-modules.yml` — the asset whose
   cross-corpus need motivated this ADR.
 - `stories/27.yml` — the meta-story shipping this change, with
   acceptance tests that prove the schema + loader + reciprocity

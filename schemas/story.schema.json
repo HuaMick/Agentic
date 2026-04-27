@@ -42,7 +42,7 @@
       "default": [],
       "items": {
         "type": "string",
-        "pattern": "^agents/assets/.*\\.ya?ml$"
+        "pattern": "^assets/.*\\.ya?ml$"
       },
       "description": "Repo-root-relative paths to asset YAMLs this story declares as relevant cross-corpus concepts (principles, definitions, guidelines). Loader validates each path resolves to an existing file at directory-load time per ADR-0007 decision 3. Field is opt-in: absent and empty are both accepted and observably equivalent post-load (matching the patterns: field's posture). Reciprocity with each referenced asset's current_consumers: is a corpus-level invariant per ADR-0007 decision 4. See docs/decisions/0007-stories-consume-assets.md."
     },

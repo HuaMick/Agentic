@@ -49,7 +49,7 @@ reference_pattern:
     detail is agent-specific) and replace the other five step detail
     blocks with a reference. Example for the Scope step:
       - step: Scope.
-        detail: See agents/assets/definitions/audit-mode-protocol.yml.
+        detail: See assets/definitions/audit-mode-protocol.yml.
     Repeat for Produce a plan, Confirm with user, Execute, Summarize.
     Keep the Scan step's `step:` and `detail:` fields populated with the
     agent's own per-corpus checklist.

@@ -22,7 +22,7 @@ A rebuild of [AgenticEngineering](https://github.com/HuaMick/AgenticEngineering)
 ```
 crates/            Rust workspace (7 active crates + _deferred/ placeholders)
 agents/            Authored YAML agent definitions (the product)
-agents/assets/     Reusable agent assets (7 active; schema in schemas/asset.schema.json)
+assets/            Reusable cross-corpus assets (9 active; consumed by agents and stories; schema in schemas/asset.schema.json)
 .claude/agents/    Hand-written pointer .md files that delegate to agents/
 .claude/hooks/     Programmatic enforcement of agent contracts (PreToolUse hooks)
 patterns/          Reusable design guidance referenced by stories

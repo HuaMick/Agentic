@@ -39,7 +39,7 @@ reference_pattern:
   in_inputs_yml: |
     Under required_reading, write:
       - path: CLAUDE.md
-        reason: See agents/assets/guidelines/reference-claude-md.yml.
+        reason: See assets/guidelines/reference-claude-md.yml.
   in_process_yml: |
     Under workflow.session_start, the first bullet should be:
       - Read every file listed in inputs.yml `required_reading`.
