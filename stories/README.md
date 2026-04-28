@@ -40,7 +40,7 @@ Each test file referenced in `acceptance.tests[].file` is bound **1-to-1** to ex
 - `crates/<crate>/tests/*.rs` — Rust integration tests (preferred).
 - `scripts/verify/*.sh` — shell-based verifiers when Rust doesn't fit.
 
-Status-vs-implementation drift (status `proposed` but acceptance tests already passing, status `healthy` but a test currently red, etc.) will be flagged by `agentic stories audit` (story 25, proposed). Orphan-test detection is explicitly carved out of story 25's scope; a future story may amend that surface.
+Status-vs-implementation drift (status `proposed` but acceptance tests already passing, status `healthy` but a test currently red, etc.) is flagged by `agentic stories audit` (story 25, under_construction; all 6 acceptance tests green; ready for UAT pending ancestor health on stories 3 and 6). Orphan-test detection is explicitly carved out of story 25's scope; a future story may amend that surface.
 
 ## Schema
 
@@ -70,7 +70,7 @@ See `schemas/story.schema.json`. Authoring guide: `docs/guides/story-authoring.m
 | 21 | Retired status + `superseded_by` chain let the tree prune without deletion | under_construction |
 | 23 | `agentic test-build record` emits mixed red/preserved/re-authored verdicts | under_construction |
 | 24 | `agentic test-build record` rejects scaffold defects masquerading as compile-red | proposed |
-| 25 | `agentic stories audit` surfaces status-vs-implementation drift | proposed |
+| 25 | `agentic stories audit` surfaces status-vs-implementation drift | under_construction |
 | 26 | Extract agentic-test-support | under_construction |
 | 27 | Extend asset system to stories | under_construction |
 
