@@ -107,7 +107,7 @@ fn branch_state_start_sha_end_sha_commits_come_from_real_git_observation() {
         let subject_field = commits[i]["subject"].as_str().unwrap_or_default();
         assert_eq!(
             sha_field,
-            *expected_sha.as_str(),
+            expected_sha.as_str(),
             "commits[{i}].sha mismatch"
         );
         assert!(

@@ -27,6 +27,8 @@
 //! orchestrator-dependent crate here — even by accident — is the
 //! regression this test is here to pin.
 
+#![allow(dead_code)]
+
 use agentic_runtime::{IterationSummary, Outcome, RunRecorder, RunRecorderConfig, TraceTee};
 use agentic_store::{MemStore, Store};
 use serde::Deserialize;
