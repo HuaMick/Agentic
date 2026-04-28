@@ -24,6 +24,11 @@ use agentic_store::{MemStore, Store};
 fn second_record_replaces_first_for_same_story_id() {
     const STORY_ID: i64 = 42;
 
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call; tier 2 (`AGENTIC_SIGNER` env var) is the cheapest fixture
+    // setup the recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let recorder = Recorder::new(store.clone());
 
@@ -76,4 +81,8 @@ fn second_record_replaces_first_for_same_story_id() {
         Some("record_fail.rs"),
         "surviving Fail row must name the basename of the failing file; got {failing:?}"
     );
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }

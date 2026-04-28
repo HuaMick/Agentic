@@ -26,6 +26,11 @@ use agentic_store::{MemStore, Store};
 fn record_fail_populates_failing_tests_with_basenames_only() {
     const STORY_ID: i64 = 42;
 
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call; tier 2 (`AGENTIC_SIGNER` env var) is the cheapest fixture
+    // setup the recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let recorder = Recorder::new(store.clone());
 
@@ -88,4 +93,8 @@ fn record_fail_populates_failing_tests_with_basenames_only() {
             "failing_tests entry must be basename only, not a repo-rooted path; got {entry:?}"
         );
     }
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }

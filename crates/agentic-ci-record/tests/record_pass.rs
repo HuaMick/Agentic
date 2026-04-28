@@ -27,6 +27,11 @@ fn record_upserts_pass_row_with_expected_shape() {
     // inline fixture convention in this repo's other scaffolds.
     const STORY_ID: i64 = 42;
 
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call; tier 2 (`AGENTIC_SIGNER` env var) is the cheapest fixture
+    // setup the recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let recorder = Recorder::new(store.clone());
 
@@ -117,6 +122,10 @@ fn record_upserts_pass_row_with_expected_shape() {
 
     // Sanity: the typed Verdict enum round-trips the pass arm.
     assert_eq!(Verdict::Pass.as_str(), "pass");
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }
 
 fn unix_now() -> i64 {

@@ -27,6 +27,15 @@ use agentic_store::{MemStore, Store};
 fn malformed_input_errors_without_touching_existing_row() {
     const STORY_ID: i64 = 42;
 
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call; tier 2 (`AGENTIC_SIGNER` env var) is the cheapest fixture
+    // setup the recorder will accept for the seeding call below. The
+    // malformed-input call itself returns RecordError::MalformedInput
+    // before signer resolution, but the seed must succeed for the
+    // preservation invariant to be observable. Cleared at the end of
+    // the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
     let recorder = Recorder::new(store.clone());
 
@@ -68,4 +77,8 @@ fn malformed_input_errors_without_touching_existing_row() {
         before, after,
         "malformed input must not alter the existing row; before={before}, after={after}"
     );
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }

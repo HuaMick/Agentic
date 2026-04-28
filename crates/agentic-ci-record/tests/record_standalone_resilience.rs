@@ -32,6 +32,13 @@ use agentic_store::{MemStore, Store};
 fn recorder_drives_full_happy_path_with_no_orchestrator_dependency() {
     const STORY_ID: i64 = 42;
 
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call; tier 2 (`AGENTIC_SIGNER` env var) is the cheapest fixture
+    // setup the recorder will accept and does not introduce any new
+    // workspace dependency to this scaffold (the standalone-resilience
+    // claim is preserved). Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     // Primary entry point constructed with only the declared dependency
     // floor — a Store (satisfied here by MemStore).  No orchestrator.
     // No runtime.  No sandbox.  No CLI.
@@ -84,4 +91,8 @@ fn recorder_drives_full_happy_path_with_no_orchestrator_dependency() {
     // `std::error::Error` impl.
     let _ensure_error_is_local: fn(&agentic_ci_record::RecordError) -> &dyn std::error::Error =
         |e| e;
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }
