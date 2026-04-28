@@ -5,7 +5,7 @@ outcome: |
   value whose construction has already enforced the schema and the
   dependency-graph acyclicity, so downstream code never has to defend
   against malformed input.
-status: under_construction
+status: healthy
 patterns: []
 acceptance:
   tests:
