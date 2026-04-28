@@ -4,116 +4,107 @@ outcome: |
   A test author writing an acceptance scaffold for any workspace crate finds
   and reuses shared fixture primitives instead of reimplementing setup
   helpers per file.
-status: under_construction
-
+status: healthy
 patterns: []
-
 assets:
-  - assets/principles/deep-modules.yml
-  - assets/definitions/identifier-forms.yml
-
+- assets/principles/deep-modules.yml
+- assets/definitions/identifier-forms.yml
 acceptance:
   tests:
-    - file: crates/agentic-test-support/tests/fixture_corpus_creates_temp_stories_dir_with_dag.rs
-      justification: |
-        Pins the kit's primary tempdir-plus-stories primitive: a freshly
-        constructed `FixtureCorpus` returns a TempDir whose root contains
-        a `stories/` subdirectory, and a series of `write_story()` calls
-        produces a corpus that loads cleanly through whatever DAG-aware
-        loader a downstream caller would point at it (the agentic-story
-        loader for in-process tests, or a shell walker for verifier
-        scripts). Without this, every consumer would re-derive the
-        tempdir-and-stories-dir lifecycle the asset's deletion-test
-        worked example calls out by name (`write_fixture_story` repeated
-        across 8 callers in `crates/agentic-ci-record/tests/`) — exactly
-        the shallow-module replication the kit exists to retire.
-
-    - file: crates/agentic-test-support/tests/fixture_corpus_yaml_passes_story_loader_validation.rs
-      justification: |
-        Pins fixture-vs-production-dialect parity: YAML emitted by
-        `StoryFixture` (via `FixtureCorpus::write_story()`) round-trips
-        through the production `agentic_story::load_dir` loader without
-        schema violations. A second-best implementation would silently
-        emit a slightly-loose YAML shape (missing `status`, `patterns`
-        absent rather than `[]`, conjunctions in `outcome`) that
-        downstream tests accept but `agentic story lint` would reject;
-        consumers would then drift from the schema the production
-        loader enforces. Without this test, the kit becomes a parallel
-        YAML dialect, and the deep-modules `application_to_test_scaffolding`
-        rationale ("the shared kit ships setup/fixture material only")
-        loses its anchor — fixtures must produce schema-clean stories or
-        they are not fixtures, they are decoys.
-
-    - file: crates/agentic-test-support/tests/fixture_repo_init_seeds_committer_email_and_returns_head_sha.rs
-      justification: |
-        Pins the git-seeding primitive against the canonical SHA shape:
-        `FixtureRepo::init_with_email(...)` initialises a tempdir git
-        repo with `committer.email` set, lands one initial commit, and
-        `head_sha()` returns a 40-character lowercase hex string matching
-        the `commit` form in
-        `assets/definitions/identifier-forms.yml` (declared in
-        this story's `assets:`). The test asserts the regex
-        `^[0-9a-f]{40}$` literally so a future drift to a 7- or 8-char
-        abbreviated SHA — exactly the failure
-        `identifier-forms.yml`'s `drift_warning` calls out for
-        `commit` — fails red rather than passing silently. Without this
-        pin, every downstream test that compares its captured SHA
-        against an evidence row's `commit` field is at the mercy of
-        whatever shape the kit happens to return.
-
-    - file: crates/agentic-test-support/tests/recording_executor_captures_per_invocation_args.rs
-      justification: |
-        Pins the stub-executor primitive's per-call recording shape:
-        `RecordingExecutor` invoked N times records N `RecordedCall`
-        entries, each exposing the `(story_id, files)` tuple the
-        invocation observed. Order of calls is preserved; reading the
-        recorded calls back is a non-destructive observation. Without
-        this, every consumer that needs a `TestExecutor` /
-        `UatExecutor` stub would either re-roll a bespoke
-        `Arc<Mutex<Vec<...>>>` pattern (the shape currently visible
-        in `crates/agentic-ci-record/tests/stories_test_bare_id_runs_single_story.rs`'s
-        local `StubExecutor`) or settle for a coarser test that only
-        asserts total invocation count. The kit's contract is that
-        per-invocation arguments are inspectable; the test pins that.
-
-    - file: crates/agentic-test-support/tests/no_assertion_helpers_exported_in_public_surface.rs
-      justification: |
-        Reward-hacking guardrail at the type-level. The test reads
-        `crates/agentic-test-support/src/lib.rs` via `include_str!` and
-        asserts no `pub use`, `pub fn`, or `pub struct` declaration
-        whose name matches `^(assert|expect|verify|check)_` exists. The
-        rationale is the REWARD-HACKING GUARDRAIL paragraph in
-        `assets/principles/deep-modules.yml`'s
-        `application_to_test_scaffolding` section (declared in this
-        story's `assets:`): a shared assertion helper is a single point
-        a future agent can route around to make N tests pass with one
-        change, converting the per-test red-state contract into a
-        green-by-default convention. Banning the export shape at the
-        source-text level — not just at code-review time — is the
-        cheapest defence; a future PR that adds `pub fn assert_kit_*`
-        fails this test before any reviewer reads it.
-
-    - file: crates/agentic-test-support/tests/kit_imports_resolve_under_typical_consumer_dev_dep.rs
-      justification: |
-        Smoke test for the kit's public-surface contract from the
-        consumer side: a small integration test that `use`s each of
-        the five public names (`FixtureCorpus`, `StoryFixture`,
-        `FixtureRepo`, `RecordingExecutor`, `RecordedCall`) and
-        constructs the minimum non-trivial value of each (a
-        `FixtureCorpus::new()`, a `StoryFixture` via `write_story()`,
-        a `FixtureRepo::init_with_email("ci@example.com")`, a
-        `RecordingExecutor::default()`, and reads back at least one
-        `RecordedCall` shape) compiles and runs green when the kit
-        crate is consumed via a normal `[dev-dependencies]` declaration.
-        Without this, the four shape-pinning tests above could pass
-        in isolation while the kit's re-exports (the `pub use` lines
-        in `lib.rs`) drift to private or to wrong-cased names that
-        downstream consumers cannot import. The test is the kit-side
-        companion to the actual fan-out migrations — those migrations
-        live as amendments to their owning stories under
-        defects-amend-the-owning-story; this story owns only the
-        kit-side surface.
-
+  - file: crates/agentic-test-support/tests/fixture_corpus_creates_temp_stories_dir_with_dag.rs
+    justification: |
+      Pins the kit's primary tempdir-plus-stories primitive: a freshly
+      constructed `FixtureCorpus` returns a TempDir whose root contains
+      a `stories/` subdirectory, and a series of `write_story()` calls
+      produces a corpus that loads cleanly through whatever DAG-aware
+      loader a downstream caller would point at it (the agentic-story
+      loader for in-process tests, or a shell walker for verifier
+      scripts). Without this, every consumer would re-derive the
+      tempdir-and-stories-dir lifecycle the asset's deletion-test
+      worked example calls out by name (`write_fixture_story` repeated
+      across 8 callers in `crates/agentic-ci-record/tests/`) — exactly
+      the shallow-module replication the kit exists to retire.
+  - file: crates/agentic-test-support/tests/fixture_corpus_yaml_passes_story_loader_validation.rs
+    justification: |
+      Pins fixture-vs-production-dialect parity: YAML emitted by
+      `StoryFixture` (via `FixtureCorpus::write_story()`) round-trips
+      through the production `agentic_story::load_dir` loader without
+      schema violations. A second-best implementation would silently
+      emit a slightly-loose YAML shape (missing `status`, `patterns`
+      absent rather than `[]`, conjunctions in `outcome`) that
+      downstream tests accept but `agentic story lint` would reject;
+      consumers would then drift from the schema the production
+      loader enforces. Without this test, the kit becomes a parallel
+      YAML dialect, and the deep-modules `application_to_test_scaffolding`
+      rationale ("the shared kit ships setup/fixture material only")
+      loses its anchor — fixtures must produce schema-clean stories or
+      they are not fixtures, they are decoys.
+  - file: crates/agentic-test-support/tests/fixture_repo_init_seeds_committer_email_and_returns_head_sha.rs
+    justification: |
+      Pins the git-seeding primitive against the canonical SHA shape:
+      `FixtureRepo::init_with_email(...)` initialises a tempdir git
+      repo with `committer.email` set, lands one initial commit, and
+      `head_sha()` returns a 40-character lowercase hex string matching
+      the `commit` form in
+      `assets/definitions/identifier-forms.yml` (declared in
+      this story's `assets:`). The test asserts the regex
+      `^[0-9a-f]{40}$` literally so a future drift to a 7- or 8-char
+      abbreviated SHA — exactly the failure
+      `identifier-forms.yml`'s `drift_warning` calls out for
+      `commit` — fails red rather than passing silently. Without this
+      pin, every downstream test that compares its captured SHA
+      against an evidence row's `commit` field is at the mercy of
+      whatever shape the kit happens to return.
+  - file: crates/agentic-test-support/tests/recording_executor_captures_per_invocation_args.rs
+    justification: |
+      Pins the stub-executor primitive's per-call recording shape:
+      `RecordingExecutor` invoked N times records N `RecordedCall`
+      entries, each exposing the `(story_id, files)` tuple the
+      invocation observed. Order of calls is preserved; reading the
+      recorded calls back is a non-destructive observation. Without
+      this, every consumer that needs a `TestExecutor` /
+      `UatExecutor` stub would either re-roll a bespoke
+      `Arc<Mutex<Vec<...>>>` pattern (the shape currently visible
+      in `crates/agentic-ci-record/tests/stories_test_bare_id_runs_single_story.rs`'s
+      local `StubExecutor`) or settle for a coarser test that only
+      asserts total invocation count. The kit's contract is that
+      per-invocation arguments are inspectable; the test pins that.
+  - file: crates/agentic-test-support/tests/no_assertion_helpers_exported_in_public_surface.rs
+    justification: |
+      Reward-hacking guardrail at the type-level. The test reads
+      `crates/agentic-test-support/src/lib.rs` via `include_str!` and
+      asserts no `pub use`, `pub fn`, or `pub struct` declaration
+      whose name matches `^(assert|expect|verify|check)_` exists. The
+      rationale is the REWARD-HACKING GUARDRAIL paragraph in
+      `assets/principles/deep-modules.yml`'s
+      `application_to_test_scaffolding` section (declared in this
+      story's `assets:`): a shared assertion helper is a single point
+      a future agent can route around to make N tests pass with one
+      change, converting the per-test red-state contract into a
+      green-by-default convention. Banning the export shape at the
+      source-text level — not just at code-review time — is the
+      cheapest defence; a future PR that adds `pub fn assert_kit_*`
+      fails this test before any reviewer reads it.
+  - file: crates/agentic-test-support/tests/kit_imports_resolve_under_typical_consumer_dev_dep.rs
+    justification: |
+      Smoke test for the kit's public-surface contract from the
+      consumer side: a small integration test that `use`s each of
+      the five public names (`FixtureCorpus`, `StoryFixture`,
+      `FixtureRepo`, `RecordingExecutor`, `RecordedCall`) and
+      constructs the minimum non-trivial value of each (a
+      `FixtureCorpus::new()`, a `StoryFixture` via `write_story()`,
+      a `FixtureRepo::init_with_email("ci@example.com")`, a
+      `RecordingExecutor::default()`, and reads back at least one
+      `RecordedCall` shape) compiles and runs green when the kit
+      crate is consumed via a normal `[dev-dependencies]` declaration.
+      Without this, the four shape-pinning tests above could pass
+      in isolation while the kit's re-exports (the `pub use` lines
+      in `lib.rs`) drift to private or to wrong-cased names that
+      downstream consumers cannot import. The test is the kit-side
+      companion to the actual fan-out migrations — those migrations
+      live as amendments to their owning stories under
+      defects-amend-the-owning-story; this story owns only the
+      kit-side surface.
   uat: |
     Goal: convince yourself that a test author opening
     `crates/agentic-test-support/README.md` for the first time can
@@ -201,7 +192,6 @@ acceptance:
       8. `git status --porcelain` is empty (the experiment in
          step 6 was reverted).
       9. Drop any scratch directory created during step 5.
-
 guidance: |
   Cross-corpus context lives in
   `assets/principles/deep-modules.yml` (the principle this story
@@ -278,6 +268,5 @@ guidance: |
     reciprocity audit can pass cleanly. Authoring this declaration
     here is correct; the back-fill is the matched move on the
     asset side.
-
 depends_on:
-  - 27
+- 27
