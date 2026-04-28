@@ -108,9 +108,12 @@ acceptance:
          the local DB if needed; UAT signings are not affected).
 
     Pass walkthrough:
-      4. Run the CI hook for a story `<pass-id>` whose tests pass. This
-         is `agentic ci record <pass-id>` (or whatever the CI shim is
-         named). Observe:
+      4. Run the bare-id form of the test runner for a story
+         `<pass-id>` whose tests pass: `agentic stories test
+         <pass-id>`. (Story 12's selector grammar makes the bare
+         `<id>` form mean "this story only" — no ancestors, no
+         descendants — which is exactly the single-story recorder
+         path this story owns.) Observe:
          - Process exits 0.
          - Query `test_runs` for `story_id=<pass-id>` (use the
            dashboard `--json` mode from story 3, or a `surreal sql`
@@ -122,7 +125,7 @@ acceptance:
       5. For a different story `<fail-id>`, deliberately break two of
          its acceptance test files (e.g. `assert_eq!(1, 2);`). Commit
          those changes so the tree is clean. Run
-         `agentic ci record <fail-id>`. Observe:
+         `agentic stories test <fail-id>`. Observe:
          - Process exits non-zero (the recorder records the failure
            but propagates the underlying test runner's non-zero exit
            so CI itself goes red).
@@ -132,25 +135,29 @@ acceptance:
 
     Replace-not-append walkthrough:
       6. Revert the deliberate breakage from step 5 with
-         `git revert <hash>`. Re-run `agentic ci record <fail-id>`.
+         `git revert <hash>`. Re-run `agentic stories test <fail-id>`.
          Observe:
          - Query `test_runs` for `story_id=<fail-id>`: still exactly
            one row, but now `verdict=pass` and `failing_tests=[]`.
            The earlier Fail row is gone, not preserved alongside.
 
-    Malformed-input walkthrough:
-      7. Capture a Pass row state for `<pass-id>` (note its
-         `commit` and `ran_at`). Then run the recorder with input
-         that simulates a corrupted test-runner output — the exact
-         mechanism depends on the implementation, but a supported
-         path is `agentic ci record <pass-id> --raw-input /dev/null`
-         or piping empty JSON into the input flag. Observe:
-         - Process exits non-zero with a message naming the
-           malformed-input failure mode.
-         - Query `test_runs` for `story_id=<pass-id>`: the row is
-           UNCHANGED — same `commit`, same `ran_at`, same
-           `verdict=pass`. The bad input did not overwrite the
-           good row.
+    Malformed-input contract:
+      7. The malformed-input invariant — "given an existing Pass row,
+         a recorder invocation with corrupt or empty test-runner
+         output returns `RecordError::MalformedInput` and leaves the
+         existing row UNCHANGED" — is exercised at the library
+         boundary by acceptance test
+         `crates/agentic-ci-record/tests/record_malformed_input_preserves_row.rs`,
+         not via the CLI. There is no UAT walkthrough for it because
+         the `agentic stories test <selector>` surface (story 12)
+         takes a story-id selector, not a `--raw-input` stream — the
+         malformed-input failure mode is shaped by the recorder's
+         input type (`RunInput`), not by stdin piping. A future
+         contributor reading this prose: do NOT re-introduce a
+         `--raw-input` flag on `agentic stories test` to make this
+         step UAT-driveable; the library-level test is the
+         contract's owner, and acceptance test #4 of this story
+         pins it.
 
     Cleanup:
       8. `git restore` and/or `git revert` any commits you made to
