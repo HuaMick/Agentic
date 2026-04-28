@@ -109,6 +109,27 @@ fn init_repo_without_email(root: &Path) {
         .expect("set user.name");
     // user.email intentionally NOT set.
     let _ = cfg;
+    // The recorder reads HEAD to commit-stamp its rows; an unborn-branch
+    // repo errors with `UnbornBranch` before reaching the signer-resolution
+    // step. Plant an empty baseline commit so HEAD resolves. Construct
+    // the signature inline (libgit2's default signature lookup would fail
+    // because we deliberately left user.email unset on this repo).
+    let tree_oid = repo
+        .treebuilder(None)
+        .expect("treebuilder")
+        .write()
+        .expect("write empty tree");
+    let tree = repo.find_tree(tree_oid).expect("find tree");
+    let sig = git2::Signature::now("test-builder", "test-builder@agentic.local")
+        .expect("manual signature");
+    repo.commit(Some("HEAD"), &sig, &sig, "baseline", &tree, &[])
+        .expect("baseline commit");
+    // Re-open and clear any user.email that libgit2 may have written
+    // implicitly during the commit, so tier 3 (git config user.email)
+    // remains unresolvable for the test's signer-refusal observation.
+    let repo = git2::Repository::open(root).expect("git open");
+    let mut cfg = repo.config().expect("repo config post");
+    let _ = cfg.remove("user.email");
 }
 
 /// RAII guard: push the current working dir into the tempdir and
