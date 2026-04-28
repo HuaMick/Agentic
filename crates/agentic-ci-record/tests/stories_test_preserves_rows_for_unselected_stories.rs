@@ -33,6 +33,12 @@ const ID_OTHER: u32 = 81253;
 
 #[test]
 fn scoped_run_leaves_rows_for_unselected_stories_byte_identical() {
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call (which CiRunner delegates to per executed story); tier 2
+    // (`AGENTIC_SIGNER` env var) is the cheapest fixture setup the
+    // recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     // Build the three-story corpus via the shared kit primitive — the
     // local `write_fixture_story` / `setup_fixture_corpus` helpers this
     // file used to carry are now sourced from `agentic_test_support`
@@ -103,4 +109,8 @@ fn scoped_run_leaves_rows_for_unselected_stories_byte_identical() {
         !recorded.is_empty(),
         "executor must be invoked at least once during a +<id> run; got zero invocations"
     );
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }

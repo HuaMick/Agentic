@@ -47,6 +47,12 @@ const ID_UNRELATED: u32 = 81205;
 
 #[test]
 fn plus_id_selector_invokes_executor_only_for_target_and_transitive_ancestors() {
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call (which CiRunner delegates to per executed story); tier 2
+    // (`AGENTIC_SIGNER` env var) is the cheapest fixture setup the
+    // recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     // Build the five-story DAG via the shared kit primitive — the
     // local `write_fixture_story` / `setup_fixture_corpus` helpers this
     // file used to carry are now sourced from `agentic_test_support`
@@ -118,4 +124,8 @@ fn plus_id_selector_invokes_executor_only_for_target_and_transitive_ancestors() 
         recorded.len(),
         invoked_story_ids
     );
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }

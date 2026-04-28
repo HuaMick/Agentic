@@ -60,6 +60,12 @@ const ID_UNRELATED: u32 = 81227;
 
 #[test]
 fn plus_id_plus_selector_invokes_full_subtree_exactly_once_per_story_across_a_diamond() {
+    // Story 18 made signer resolution mandatory on every Recorder::record
+    // call (which CiRunner delegates to per executed story); tier 2
+    // (`AGENTIC_SIGNER` env var) is the cheapest fixture setup the
+    // recorder will accept. Cleared at the end of the test.
+    std::env::set_var("AGENTIC_SIGNER", "test-fixture@signer.local");
+
     // Build the seven-story diamond DAG via the shared kit primitive —
     // the local `write_fixture_story` / `setup_fixture_corpus` helpers
     // this file used to carry are now sourced from `agentic_test_support`
@@ -126,4 +132,8 @@ fn plus_id_plus_selector_invokes_full_subtree_exactly_once_per_story_across_a_di
         recorded.len(),
         invoked
     );
+
+    // Cleanup: clear the env var we set for this test so it does not
+    // leak across test invocations sharing the same process.
+    std::env::remove_var("AGENTIC_SIGNER");
 }
