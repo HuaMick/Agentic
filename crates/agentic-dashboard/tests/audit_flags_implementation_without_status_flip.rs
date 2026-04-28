@@ -136,7 +136,7 @@ fn audit_flags_proposed_story_with_all_tests_passing_under_implementation_withou
         )
         .expect("seed Pass test_runs row for drifted story");
 
-    let report: AuditReport = run_audit(&stories_dir, store.clone(), HEAD_SHA.to_string())
+    let report: AuditReport = run_audit(&stories_dir, root, store.clone(), HEAD_SHA.to_string())
         .expect("audit must succeed against a clean tempdir corpus");
 
     let drifted_ids: Vec<u32> = report

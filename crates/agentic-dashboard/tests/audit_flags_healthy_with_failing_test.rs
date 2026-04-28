@@ -174,7 +174,7 @@ fn audit_flags_healthy_story_with_failing_test_run_under_healthy_with_failing_te
         )
         .expect("seed Pass test_runs for clean control");
 
-    let report: AuditReport = run_audit(&stories_dir, store.clone(), HEAD_SHA.to_string())
+    let report: AuditReport = run_audit(&stories_dir, root, store.clone(), HEAD_SHA.to_string())
         .expect("audit must succeed against a clean tempdir corpus");
 
     let cat4_ids: Vec<u32> = report

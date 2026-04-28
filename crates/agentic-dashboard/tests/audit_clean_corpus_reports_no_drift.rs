@@ -167,7 +167,7 @@ fn audit_emits_empty_report_with_explicit_no_drift_signal_on_a_clean_corpus() {
         )
         .expect("seed Pass test_runs for clean healthy");
 
-    let report: AuditReport = run_audit(&stories_dir, store.clone(), HEAD_SHA.to_string())
+    let report: AuditReport = run_audit(&stories_dir, root, store.clone(), HEAD_SHA.to_string())
         .expect("audit must succeed against a clean tempdir corpus");
 
     // All four arrays must be empty — the corpus is by construction
