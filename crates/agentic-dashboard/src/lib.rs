@@ -1758,21 +1758,21 @@ pub mod audit {
     }
 
     /// Determine if all acceptance test file paths exist on disk.
-    fn all_tests_exist(story: &Story, stories_dir: &Path) -> bool {
+    fn all_tests_exist(story: &Story, repo_root: &Path) -> bool {
         story
             .acceptance
             .tests
             .iter()
-            .all(|test| stories_dir.join(&test.file).exists())
+            .all(|test| repo_root.join(&test.file).exists())
     }
 
     /// Determine if any acceptance test file paths exist on disk.
-    fn any_tests_exist(story: &Story, stories_dir: &Path) -> bool {
+    fn any_tests_exist(story: &Story, repo_root: &Path) -> bool {
         story
             .acceptance
             .tests
             .iter()
-            .any(|test| stories_dir.join(&test.file).exists())
+            .any(|test| repo_root.join(&test.file).exists())
     }
 
     /// Get the latest test_runs row for a story from the store.
@@ -1867,6 +1867,7 @@ pub mod audit {
     /// a report of the four drift categories.
     pub fn run_audit(
         stories_dir: &Path,
+        repo_root: &Path,
         store: Arc<dyn Store>,
         head_sha: String,
     ) -> Result<AuditReport, DashboardError> {
@@ -1915,7 +1916,7 @@ pub mod audit {
             // Check categories
             // Category 1: status=proposed AND all tests exist AND all tests pass
             if story.status == agentic_story::Status::Proposed {
-                if all_tests_exist(&story, stories_dir) && test_passes(&test_run) {
+                if all_tests_exist(&story, repo_root) && test_passes(&test_run) {
                     let passing_tests = get_test_paths(&story);
                     cat1.push(AuditEntry {
                         id: story_id,
@@ -1926,7 +1927,7 @@ pub mod audit {
             }
             // Category 2: status=under_construction AND all tests exist AND all tests pass
             else if story.status == agentic_story::Status::UnderConstruction {
-                if all_tests_exist(&story, stories_dir) && test_passes(&test_run) {
+                if all_tests_exist(&story, repo_root) && test_passes(&test_run) {
                     cat2.push(AuditEntry {
                         id: story_id,
                         passing_tests: vec![],
@@ -1934,7 +1935,7 @@ pub mod audit {
                     });
                 }
                 // Category 3: status=under_construction AND ZERO tests exist
-                else if !any_tests_exist(&story, stories_dir) {
+                else if !any_tests_exist(&story, repo_root) {
                     cat3.push(AuditEntry {
                         id: story_id,
                         passing_tests: vec![],

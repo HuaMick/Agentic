@@ -355,6 +355,17 @@ fn main() {
                     std::process::exit(2);
                 }
 
+                let repo_root = match git2::Repository::discover(".") {
+                    Ok(r) => r
+                        .workdir()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from(".")),
+                    Err(e) => {
+                        eprintln!("failed to discover git repo: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
                 let head_sha = match get_head_sha() {
                     Ok(sha) => sha,
                     Err(e) => {
@@ -364,7 +375,7 @@ fn main() {
                 };
 
                 let report =
-                    match agentic_dashboard::audit::run_audit(&stories_dir, store, head_sha) {
+                    match agentic_dashboard::audit::run_audit(&stories_dir, &repo_root, store, head_sha) {
                         Ok(r) => r,
                         Err(e) => {
                             eprintln!("audit failed: {e}");
