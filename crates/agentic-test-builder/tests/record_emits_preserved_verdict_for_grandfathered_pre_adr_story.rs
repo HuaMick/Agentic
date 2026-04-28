@@ -145,10 +145,16 @@ fn record_classifies_grandfathered_scaffolds_preserved_when_directory_absent_and
     fs::write(crate_root.join("Cargo.toml"), FIXTURE_CRATE_CARGO).expect("crate cargo");
     fs::write(crate_root.join("src/lib.rs"), FIXTURE_CRATE_LIB).expect("crate lib");
 
-    fs::write(crate_root.join("tests/grandfather_scaffold_a.rs"), SCAFFOLD_A_BODY)
-        .expect("scaffold a");
-    fs::write(crate_root.join("tests/grandfather_scaffold_b.rs"), SCAFFOLD_B_BODY)
-        .expect("scaffold b");
+    fs::write(
+        crate_root.join("tests/grandfather_scaffold_a.rs"),
+        SCAFFOLD_A_BODY,
+    )
+    .expect("scaffold a");
+    fs::write(
+        crate_root.join("tests/grandfather_scaffold_b.rs"),
+        SCAFFOLD_B_BODY,
+    )
+    .expect("scaffold b");
 
     // Story YAML with status: healthy.
     let stories_dir = repo_root.join("stories");

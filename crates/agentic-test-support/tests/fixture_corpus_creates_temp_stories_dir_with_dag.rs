@@ -67,7 +67,11 @@ fn fixture_corpus_creates_temp_stories_dir_with_dag() {
     entries.sort();
     assert_eq!(
         entries,
-        vec!["81231.yml".to_string(), "81232.yml".to_string(), "81233.yml".to_string()],
+        vec![
+            "81231.yml".to_string(),
+            "81232.yml".to_string(),
+            "81233.yml".to_string()
+        ],
         "stories_dir() must contain exactly the three files write_story() emitted"
     );
 }

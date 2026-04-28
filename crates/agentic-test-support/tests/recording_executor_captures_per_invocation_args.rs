@@ -29,8 +29,7 @@ fn recording_executor_captures_per_invocation_args() {
     // Drive two invocations through the TestExecutor trait surface —
     // the same surface CiRunner uses in production. Each invocation
     // hands a distinct (story_id, files) tuple.
-    let files_a: Vec<PathBuf> =
-        vec![PathBuf::from("crates/agentic-ci-record/tests/a.rs")];
+    let files_a: Vec<PathBuf> = vec![PathBuf::from("crates/agentic-ci-record/tests/a.rs")];
     let files_b: Vec<PathBuf> = vec![
         PathBuf::from("crates/agentic-uat/tests/b.rs"),
         PathBuf::from("crates/agentic-uat/tests/c.rs"),

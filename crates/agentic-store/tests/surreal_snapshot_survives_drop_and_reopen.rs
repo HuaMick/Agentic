@@ -61,13 +61,19 @@ fn restored_signings_survive_surrealstore_drop_and_reopen() {
             .append("stories", json!({"id": GRAND_ID, "depends_on": []}))
             .expect("seed grand stories row");
         source
-            .append("stories", json!({"id": PARENT_ID, "depends_on": [GRAND_ID]}))
+            .append(
+                "stories",
+                json!({"id": PARENT_ID, "depends_on": [GRAND_ID]}),
+            )
             .expect("seed parent stories row");
         source
             .append("stories", json!({"id": AUNT_ID, "depends_on": [GRAND_ID]}))
             .expect("seed aunt stories row");
         source
-            .append("stories", json!({"id": LEAF_ID, "depends_on": [PARENT_ID, AUNT_ID]}))
+            .append(
+                "stories",
+                json!({"id": LEAF_ID, "depends_on": [PARENT_ID, AUNT_ID]}),
+            )
             .expect("seed leaf stories row");
 
         source

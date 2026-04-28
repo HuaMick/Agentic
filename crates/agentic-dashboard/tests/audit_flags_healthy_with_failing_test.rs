@@ -64,8 +64,7 @@ depends_on: []
 }
 
 fn write_test_source(path: &PathBuf) {
-    fs::create_dir_all(path.parent().expect("test path has parent"))
-        .expect("create parent dir");
+    fs::create_dir_all(path.parent().expect("test path has parent")).expect("create parent dir");
     fs::write(
         path,
         r#"#[test]
@@ -252,10 +251,7 @@ fn audit_flags_healthy_story_with_failing_test_run_under_healthy_with_failing_te
             &report.implementation_without_flip,
         ),
         ("promotion_ready", &report.promotion_ready),
-        (
-            "test_builder_not_started",
-            &report.test_builder_not_started,
-        ),
+        ("test_builder_not_started", &report.test_builder_not_started),
     ] {
         let ids_in_cat: Vec<u32> = ids.iter().map(|e| e.id).collect();
         assert!(

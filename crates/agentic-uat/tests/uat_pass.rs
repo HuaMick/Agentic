@@ -95,9 +95,7 @@ fn uat_run_returns_pass_writes_signing_row_with_signer_and_promotes_story_to_hea
     let executor = StubExecutor::always_pass();
     let uat = Uat::new(store.clone(), executor, stories_dir.clone());
 
-    let verdict = uat
-        .run(STORY_ID)
-        .expect("Pass path must not error");
+    let verdict = uat.run(STORY_ID).expect("Pass path must not error");
     assert!(
         matches!(verdict, Verdict::Pass),
         "stub-always-pass must yield a Pass verdict; got {verdict:?}"

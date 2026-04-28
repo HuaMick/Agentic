@@ -152,13 +152,13 @@ pub enum StoryBuildError {
     AncestorSnapshotInsufficient { missing_ancestor: i64 },
 
     /// Start SHA drifted — main has moved since sandbox launch.
-    StartShaDrift { expected_start_sha: String, actual_main_sha: String },
+    StartShaDrift {
+        expected_start_sha: String,
+        actual_main_sha: String,
+    },
 
     /// Inner loop exhausted its budget without reaching green.
-    InnerLoopExhausted {
-        iterations: u32,
-        reason: String,
-    },
+    InnerLoopExhausted { iterations: u32, reason: String },
 
     /// Inner loop crashed (subprocess exited non-zero).
     Crashed { reason: String },
@@ -186,14 +186,10 @@ pub enum Outcome {
     },
 
     /// Inner loop exhausted budget without reaching green.
-    InnerLoopExhausted {
-        iterations: u32,
-    },
+    InnerLoopExhausted { iterations: u32 },
 
     /// Inner loop crashed.
-    Crashed {
-        reason: String,
-    },
+    Crashed { reason: String },
 }
 
 /// The result of auto-merging a green run onto main.

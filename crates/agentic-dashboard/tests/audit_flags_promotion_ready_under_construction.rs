@@ -61,8 +61,7 @@ depends_on: []
 }
 
 fn write_passing_test_source(path: &PathBuf) {
-    fs::create_dir_all(path.parent().expect("test path has parent"))
-        .expect("create parent dir");
+    fs::create_dir_all(path.parent().expect("test path has parent")).expect("create parent dir");
     fs::write(
         path,
         r#"#[test]
@@ -155,10 +154,7 @@ fn audit_flags_under_construction_story_with_all_tests_passing_under_promotion_r
             "implementation_without_flip",
             &report.implementation_without_flip,
         ),
-        (
-            "test_builder_not_started",
-            &report.test_builder_not_started,
-        ),
+        ("test_builder_not_started", &report.test_builder_not_started),
         (
             "healthy_with_failing_test",
             &report.healthy_with_failing_test,

@@ -45,9 +45,7 @@ use std::sync::Arc;
 
 use agentic_store::{MemStore, Store};
 use agentic_story::Story;
-use agentic_uat::{
-    ExecutionOutcome, StubExecutor, Uat, UatError, UatExecutor, Verdict,
-};
+use agentic_uat::{ExecutionOutcome, StubExecutor, Uat, UatError, UatExecutor, Verdict};
 use tempfile::TempDir;
 
 const STORY_ID: u32 = 4245;

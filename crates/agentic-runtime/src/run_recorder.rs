@@ -53,7 +53,10 @@ impl std::fmt::Debug for RunRecorderConfig {
             .field("runs_root", &self.runs_root)
             .field("run_id", &self.run_id)
             .field("story_id", &self.story_id)
-            .field("story_yaml_bytes", &format!("<{} bytes>", self.story_yaml_bytes.len()))
+            .field(
+                "story_yaml_bytes",
+                &format!("<{} bytes>", self.story_yaml_bytes.len()),
+            )
             .field("signer", &self.signer)
             .field("build_config", &self.build_config)
             .finish()
@@ -234,7 +237,11 @@ impl RunRecorder {
     }
 
     /// Capture branch state at the point a branch is cut.
-    pub fn start_branch(&self, repo_path: &std::path::Path, branch_name: &str) -> Result<(), RunRecorderError> {
+    pub fn start_branch(
+        &self,
+        repo_path: &std::path::Path,
+        branch_name: &str,
+    ) -> Result<(), RunRecorderError> {
         use git2::Repository;
 
         let repo = Repository::open(repo_path).map_err(|e| RunRecorderError::StoreError {
@@ -253,17 +260,18 @@ impl RunRecorder {
         let start_sha = start_sha_oid.to_string();
 
         // Get the HEAD commit to create the branch from.
-        let head_commit = repo.find_commit(start_sha_oid).map_err(|e| {
-            RunRecorderError::StoreError {
-                message: format!("Failed to find HEAD commit: {}", e),
-            }
-        })?;
+        let head_commit =
+            repo.find_commit(start_sha_oid)
+                .map_err(|e| RunRecorderError::StoreError {
+                    message: format!("Failed to find HEAD commit: {}", e),
+                })?;
 
         // Create the branch.
-        repo.branch(branch_name, &head_commit, false)
-            .map_err(|e| RunRecorderError::StoreError {
+        repo.branch(branch_name, &head_commit, false).map_err(|e| {
+            RunRecorderError::StoreError {
                 message: format!("Failed to create branch: {}", e),
-            })?;
+            }
+        })?;
 
         // Checkout the new branch.
         let obj = repo

@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agentic_ci_record::{ExecutorOutcome, TestExecutor};
-use agentic_uat::{ExecutionOutcome, UatExecutor, Verdict};
 use agentic_story::Story;
+use agentic_uat::{ExecutionOutcome, UatExecutor, Verdict};
 use tempfile::TempDir;
 
 // ============================================================================
@@ -48,8 +48,7 @@ impl FixtureCorpus {
     pub fn new() -> Self {
         let tempdir = TempDir::new().expect("create tempdir for FixtureCorpus");
         let stories_path = tempdir.path().join("stories");
-        std::fs::create_dir(&stories_path)
-            .expect("create stories/ subdirectory in FixtureCorpus");
+        std::fs::create_dir(&stories_path).expect("create stories/ subdirectory in FixtureCorpus");
 
         Self {
             _tempdir: tempdir,
@@ -71,13 +70,11 @@ impl FixtureCorpus {
     /// dependencies. Returns a `StoryFixture` handle pointing to the
     /// written file.
     pub fn write_story(&self, id: u32, depends_on: &[u32]) -> StoryFixture {
-        let fixture = StoryFixture::new(id)
-            .with_depends_on(depends_on.to_vec());
+        let fixture = StoryFixture::new(id).with_depends_on(depends_on.to_vec());
 
         let story_path = self.stories_path.join(format!("{}.yml", id));
         let yaml = fixture.to_yaml();
-        std::fs::write(&story_path, yaml)
-            .expect("write story fixture to disk");
+        std::fs::write(&story_path, yaml).expect("write story fixture to disk");
 
         StoryFixture {
             id,
@@ -231,9 +228,7 @@ impl FixtureRepo {
 
         // Set committer email in the repo config
         let mut config = repo.config().expect("get repo config");
-        config
-            .set_str("user.email", email)
-            .expect("set user.email");
+        config.set_str("user.email", email).expect("set user.email");
 
         // Create a minimal commit
         Self::create_seed_commit(&repo);
@@ -261,8 +256,8 @@ impl FixtureRepo {
         let tree_id = index.write_tree().expect("write tree");
         let tree = repo.find_tree(tree_id).expect("find tree");
 
-        let signature = git2::Signature::now("Test User", "test@example.com")
-            .expect("create signature");
+        let signature =
+            git2::Signature::now("Test User", "test@example.com").expect("create signature");
 
         repo.commit(
             Some("HEAD"),
@@ -317,8 +312,8 @@ impl FixtureRepo {
         let parent_oid = parent_commit.target().expect("get HEAD OID");
         let parent = self.repo.find_commit(parent_oid).expect("find parent");
 
-        let signature = git2::Signature::now("Test User", &self.committer_email)
-            .expect("create signature");
+        let signature =
+            git2::Signature::now("Test User", &self.committer_email).expect("create signature");
 
         let oid = self
             .repo
@@ -378,7 +373,10 @@ pub struct RecordingExecutor {
 impl std::fmt::Debug for RecordingExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RecordingExecutor")
-            .field("calls_recorded", &self.calls.lock().map(|c| c.len()).unwrap_or(0))
+            .field(
+                "calls_recorded",
+                &self.calls.lock().map(|c| c.len()).unwrap_or(0),
+            )
             .finish()
     }
 }

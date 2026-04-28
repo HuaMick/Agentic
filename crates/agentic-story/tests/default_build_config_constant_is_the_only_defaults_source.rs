@@ -128,10 +128,7 @@ fn default_build_config_constant_is_the_only_defaults_source() {
     // "this string appears in one place in the workspace" (a stricter
     // and accidentally false claim).
     let root = workspace_root();
-    let agentic_story_src = root
-        .join("crates")
-        .join("agentic-story")
-        .join("src");
+    let agentic_story_src = root.join("crates").join("agentic-story").join("src");
     assert!(
         agentic_story_src.is_dir(),
         "`crates/agentic-story/src/` must exist (looked under {})",

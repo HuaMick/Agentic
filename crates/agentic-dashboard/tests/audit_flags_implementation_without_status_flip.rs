@@ -108,9 +108,7 @@ fn audit_flags_proposed_story_with_all_tests_passing_under_implementation_withou
     // Control story: status=proposed AND its acceptance test does NOT
     // exist on disk yet. This is a legitimate proposed story (no
     // implementation shipped) and MUST NOT appear in any category.
-    let control_test_path = root
-        .join("fixture_tests")
-        .join("cat1_control_absent.rs");
+    let control_test_path = root.join("fixture_tests").join("cat1_control_absent.rs");
     let control_yaml = fixture_yaml(
         ID_CONTROL,
         "proposed",
@@ -182,10 +180,7 @@ fn audit_flags_proposed_story_with_all_tests_passing_under_implementation_withou
     // under the other three categories.
     for (label, ids) in [
         ("promotion_ready", &report.promotion_ready),
-        (
-            "test_builder_not_started",
-            &report.test_builder_not_started,
-        ),
+        ("test_builder_not_started", &report.test_builder_not_started),
         (
             "healthy_with_failing_test",
             &report.healthy_with_failing_test,

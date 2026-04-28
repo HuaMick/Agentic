@@ -69,8 +69,7 @@ depends_on: []
 }
 
 fn write_passing_test_source(path: &Path) {
-    fs::create_dir_all(path.parent().expect("test path has parent"))
-        .expect("create parent dir");
+    fs::create_dir_all(path.parent().expect("test path has parent")).expect("create parent dir");
     fs::write(
         path,
         r#"#[test]
@@ -245,12 +244,7 @@ fn ids_in_array(arr: &Value) -> Vec<u32> {
     arr.as_array()
         .unwrap_or_else(|| panic!("expected JSON array; got {arr}"))
         .iter()
-        .filter_map(|entry| {
-            entry
-                .get("id")
-                .and_then(|v| v.as_u64())
-                .map(|n| n as u32)
-        })
+        .filter_map(|entry| entry.get("id").and_then(|v| v.as_u64()).map(|n| n as u32))
         .collect()
 }
 
@@ -304,10 +298,7 @@ fn stories_audit_json_emits_four_top_level_arrays_with_drifted_story_ids() {
         let val = obj
             .get(key)
             .unwrap_or_else(|| panic!("JSON must have a `{key}` key; got: {parsed}"));
-        assert!(
-            val.is_array(),
-            "`{key}` must be an array; got: {val}"
-        );
+        assert!(val.is_array(), "`{key}` must be an array; got: {val}");
     }
 
     // Each category's array must contain its corresponding drifted

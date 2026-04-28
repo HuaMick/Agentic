@@ -63,8 +63,7 @@ depends_on: []
 }
 
 fn write_test_source(path: &PathBuf) {
-    fs::create_dir_all(path.parent().expect("test path has parent"))
-        .expect("create parent dir");
+    fs::create_dir_all(path.parent().expect("test path has parent")).expect("create parent dir");
     fs::write(
         path,
         r#"#[test]
