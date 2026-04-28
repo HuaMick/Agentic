@@ -4,7 +4,7 @@ outcome: |
   A developer writing any consumer crate can persist and retrieve
   structured documents through a single `Store` abstraction whose
   behaviour is identical regardless of which backend is wired in.
-status: under_construction
+status: healthy
 patterns: []
 acceptance:
   tests:
