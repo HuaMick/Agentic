@@ -363,50 +363,71 @@ fn main() {
                     }
                 };
 
-                let report = match agentic_dashboard::audit::run_audit(&stories_dir, store, head_sha) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("audit failed: {e}");
-                        std::process::exit(2);
-                    }
-                };
+                let report =
+                    match agentic_dashboard::audit::run_audit(&stories_dir, store, head_sha) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("audit failed: {e}");
+                            std::process::exit(2);
+                        }
+                    };
 
                 if json {
                     // Render as JSON: each category maps to an array of objects
                     let mut result = std::collections::HashMap::new();
 
-                    result.insert("implementation_without_flip",
-                        report.implementation_without_flip.iter().map(|e| {
-                            serde_json::json!({
-                                "id": e.id,
-                                "passing_tests": e.passing_tests,
+                    result.insert(
+                        "implementation_without_flip",
+                        report
+                            .implementation_without_flip
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                    "passing_tests": e.passing_tests,
+                                })
                             })
-                        }).collect::<Vec<_>>()
+                            .collect::<Vec<_>>(),
                     );
 
-                    result.insert("promotion_ready",
-                        report.promotion_ready.iter().map(|e| {
-                            serde_json::json!({
-                                "id": e.id,
+                    result.insert(
+                        "promotion_ready",
+                        report
+                            .promotion_ready
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                })
                             })
-                        }).collect::<Vec<_>>()
+                            .collect::<Vec<_>>(),
                     );
 
-                    result.insert("test_builder_not_started",
-                        report.test_builder_not_started.iter().map(|e| {
-                            serde_json::json!({
-                                "id": e.id,
+                    result.insert(
+                        "test_builder_not_started",
+                        report
+                            .test_builder_not_started
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                })
                             })
-                        }).collect::<Vec<_>>()
+                            .collect::<Vec<_>>(),
                     );
 
-                    result.insert("healthy_with_failing_test",
-                        report.healthy_with_failing_test.iter().map(|e| {
-                            serde_json::json!({
-                                "id": e.id,
-                                "failing_tests": e.failing_tests,
+                    result.insert(
+                        "healthy_with_failing_test",
+                        report
+                            .healthy_with_failing_test
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                    "failing_tests": e.failing_tests,
+                                })
                             })
-                        }).collect::<Vec<_>>()
+                            .collect::<Vec<_>>(),
                     );
 
                     let json_obj = serde_json::json!(result);

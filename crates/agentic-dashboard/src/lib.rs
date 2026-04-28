@@ -1777,10 +1777,7 @@ pub mod audit {
 
     /// Get the latest test_runs row for a story from the store.
     fn get_test_run(store: &Arc<dyn Store>, story_id: u32) -> Option<Value> {
-        store
-            .get("test_runs", &story_id.to_string())
-            .ok()
-            .flatten()
+        store.get("test_runs", &story_id.to_string()).ok().flatten()
     }
 
     /// Check if the latest test_runs row has a Pass verdict.
