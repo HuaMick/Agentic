@@ -84,6 +84,16 @@ enum StoriesSubcommand {
         #[arg(long)]
         store: Option<PathBuf>,
     },
+    /// Audit stories for status-vs-implementation drift
+    Audit {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Path to the store
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -326,6 +336,87 @@ fn main() {
                         std::process::exit(2);
                     }
                 }
+            }
+            StoriesSubcommand::Audit { json, store } => {
+                let store_path = resolve_store_path(store);
+                eprintln!("store: {}", store_path.display());
+
+                let store = match SurrealStore::open(&store_path) {
+                    Ok(s) => Arc::new(s),
+                    Err(e) => {
+                        eprintln!("failed to open store: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                let stories_dir = PathBuf::from("stories");
+                if !stories_dir.exists() {
+                    eprintln!("stories directory not found");
+                    std::process::exit(2);
+                }
+
+                let head_sha = match get_head_sha() {
+                    Ok(sha) => sha,
+                    Err(e) => {
+                        eprintln!("failed to get HEAD SHA: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                let report = match agentic_dashboard::audit::run_audit(&stories_dir, store, head_sha) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("audit failed: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                if json {
+                    // Render as JSON: each category maps to an array of objects
+                    let mut result = std::collections::HashMap::new();
+
+                    result.insert("implementation_without_flip",
+                        report.implementation_without_flip.iter().map(|e| {
+                            serde_json::json!({
+                                "id": e.id,
+                                "passing_tests": e.passing_tests,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
+
+                    result.insert("promotion_ready",
+                        report.promotion_ready.iter().map(|e| {
+                            serde_json::json!({
+                                "id": e.id,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
+
+                    result.insert("test_builder_not_started",
+                        report.test_builder_not_started.iter().map(|e| {
+                            serde_json::json!({
+                                "id": e.id,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
+
+                    result.insert("healthy_with_failing_test",
+                        report.healthy_with_failing_test.iter().map(|e| {
+                            serde_json::json!({
+                                "id": e.id,
+                                "failing_tests": e.failing_tests,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
+
+                    let json_obj = serde_json::json!(result);
+                    println!("{}", json_obj.to_string());
+                } else {
+                    // Render as human-readable text
+                    println!("{}", report);
+                }
+
+                std::process::exit(0);
             }
         },
         Commands::Uat {
