@@ -158,6 +158,7 @@ pub struct RunRecorder {
     started_at: String,
     iterations: Mutex<Vec<serde_json::Value>>,
     branch_state: Mutex<BranchState>,
+    repo_path: Mutex<Option<PathBuf>>,
     finished: Mutex<bool>,
 }
 
@@ -206,6 +207,7 @@ impl RunRecorder {
             started_at,
             iterations: Mutex::new(Vec::new()),
             branch_state: Mutex::new(branch_state),
+            repo_path: Mutex::new(None),
             finished: Mutex::new(false),
         })
     }
@@ -294,6 +296,10 @@ impl RunRecorder {
         let mut bs = self.branch_state.lock().unwrap();
         bs.start_sha = start_sha;
 
+        // Store the repo path for later use in finish_branch.
+        let mut rp = self.repo_path.lock().unwrap();
+        *rp = Some(repo_path.to_path_buf());
+
         Ok(())
     }
 
@@ -301,6 +307,33 @@ impl RunRecorder {
     pub fn finish_branch(&self, merged: bool) -> Result<(), RunRecorderError> {
         let mut bs = self.branch_state.lock().unwrap();
         bs.merged = merged;
+
+        let repo_path_clone = {
+            let rp = self.repo_path.lock().unwrap();
+            rp.clone()
+        };
+
+        if repo_path_clone.is_none() {
+            return Ok(());
+        }
+
+        let repo_path = repo_path_clone.unwrap();
+        let end_sha_opt = capture_head_sha(&repo_path);
+
+        if let Some(end_sha) = end_sha_opt {
+            bs.end_sha = Some(end_sha.clone());
+
+            if !bs.start_sha.is_empty() {
+                let start_sha = bs.start_sha.clone();
+                drop(bs);
+
+                let commits = collect_branch_commits(&repo_path, &start_sha, &end_sha);
+
+                let mut bs = self.branch_state.lock().unwrap();
+                bs.commits = commits;
+            }
+        }
+
         Ok(())
     }
 
@@ -316,10 +349,13 @@ impl RunRecorder {
         let ended_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
 
         // Validate and convert the outcome to a string.
-        let (outcome_str, signing_run_id) = match &outcome {
-            Outcome::Green { signing_run_id } => ("green", Some(signing_run_id.clone())),
-            Outcome::InnerLoopExhausted => ("inner_loop_exhausted", None),
-            Outcome::Crashed { .. } => ("crashed", None),
+        // Note: The signing_run_id is captured in the Outcome but NOT persisted
+        // in the runs row. Story 1 (uat_signings) is the authoritative owner
+        // of signing rows; this recorder only carries the pointer for callers to use.
+        let outcome_str = match &outcome {
+            Outcome::Green { .. } => "green",
+            Outcome::InnerLoopExhausted => "inner_loop_exhausted",
+            Outcome::Crashed { .. } => "crashed",
         };
 
         // Get iterations.
@@ -329,7 +365,7 @@ impl RunRecorder {
         let bs = self.branch_state.lock().unwrap();
 
         // Build the runs row.
-        let mut row = json!({
+        let row = json!({
             "run_id": self.config.run_id,
             "story_id": self.config.story_id,
             "story_yaml_snapshot": self.story_yaml_snapshot,
@@ -352,11 +388,6 @@ impl RunRecorder {
             }),
             "trace_ndjson_path": self.trace_path,
         });
-
-        // Add signing_run_id if present.
-        if let Some(signing_id) = signing_run_id {
-            row["signing_run_id"] = json!(signing_id);
-        }
 
         // Write to the Store.
         self.config
@@ -389,6 +420,75 @@ impl RunRecorder {
             }),
         }
     }
+}
+
+/// Capture the HEAD SHA from a git repository.
+fn capture_head_sha(repo_path: &std::path::Path) -> Option<String> {
+    use git2::Repository;
+
+    let repo = Repository::open(repo_path).ok()?;
+    let head = repo.head().ok()?;
+    let oid = head.target()?;
+    Some(oid.to_string())
+}
+
+/// Collect commits from start_sha (exclusive) to end_sha (inclusive).
+fn collect_branch_commits(
+    repo_path: &std::path::Path,
+    start_sha: &str,
+    end_sha: &str,
+) -> Vec<CommitInfo> {
+    use git2::Repository;
+
+    let repo = match Repository::open(repo_path) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+
+    let start_oid = match git2::Oid::from_str(start_sha) {
+        Ok(oid) => oid,
+        Err(_) => return Vec::new(),
+    };
+
+    let end_oid = match git2::Oid::from_str(end_sha) {
+        Ok(oid) => oid,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut revwalk = match repo.revwalk() {
+        Ok(mut rw) => {
+            let _ = rw.push(end_oid);
+            rw
+        }
+        Err(_) => return Vec::new(),
+    };
+
+    revwalk.simplify_first_parent().ok();
+    let mut commits = Vec::new();
+
+    loop {
+        match revwalk.next() {
+            None => break,
+            Some(Ok(oid)) => {
+                if oid == start_oid {
+                    break;
+                }
+                if let Ok(commit) = repo.find_commit(oid) {
+                    let author = commit.author().name().unwrap_or("unknown").to_string();
+                    let subject = commit.summary().unwrap_or("").to_string();
+                    commits.push(CommitInfo {
+                        sha: oid.to_string(),
+                        author,
+                        subject,
+                    });
+                }
+            }
+            Some(Err(_)) => break,
+        }
+    }
+
+    commits.reverse();
+    commits
 }
 
 /// Validate that a run_id is safe for use in a filesystem path.
