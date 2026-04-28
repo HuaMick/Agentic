@@ -142,3 +142,43 @@ Concretely: stories 4 and 5 remain amendable; their pre-existing tests stay PRES
 ### Forward work
 
 A new story (tracked alongside this sub-amendment) amends `agentic test-build record` to emit the three-verdict-shape directly instead of refusing on non-red scaffolds. Until that story ships, test-builder authors evidence rows directly per its process.yml evidence-shape spec; the routed artefact shape is identical.
+
+## Sub-amendment (evidence shape: GREEN verdict, 2026-04-28)
+
+The Phase-0 cascade that ran 2026-04-28 introduced a fourth verdict value — `"green"` — written to `evidence/runs/<id>/<timestamp>-green.jsonl` after `cargo test --workspace` shows a story's named test files passing at the stamped commit. Five existing rows (`evidence/runs/{2,12,16,18,25}/*-green.jsonl`) use the shape; this sub-amendment codifies it so the verdict enum and the artefacts on disk agree.
+
+### Evidence-row verdict shape is extended (second time)
+
+The full sanctioned verdict set is now:
+
+- `"verdict": "red"` — scaffold is red at the stamped commit. `red_path` (`compile` | `runtime`) and `diagnostic` required. Written by test-builder before implementation begins.
+- `"verdict": "preserved"` — file exists, classification is PRESERVE under the three-gate rule. No probe was run. `red_path` and `diagnostic` absent.
+- `"verdict": "re-authored"` — optional refinement of `"red"` for files re-authored under the three-gate carve-out. Shape identical to `"red"`; distinction is audit-trail-only.
+- **`"verdict": "green"`** — file is passing under `cargo test` at the stamped commit. Written after `build-rust` lands the implementation that drove the prior red row to green.
+
+### Minimum row shape for `green`
+
+```jsonl
+{"file": "<path>", "verdict": "green"}
+```
+
+Per-file row: `{file, verdict: "green"}` only. No `red_path`, no `diagnostic` — the test passing at the stamped commit is the proof, not a captured fragment of compiler output. The wrapping document carries `commit`, `run_id`, `story_id`, `timestamp`, and `verdicts: [...]` as in the red shape, mirroring the live row at `evidence/runs/25/2026-04-28T04-48-45Z-green.jsonl`.
+
+### Atomicity, identical to red
+
+Per `(test-file, commit)`, append-only. A `green` row proves the file passed at exactly that commit. Successive amendments to the file's contract trigger the three-gate RE-AUTHOR path → fresh `red` row → fresh `green` row when the impl catches up. The chain interleaves `red` and `green` rows for a single test file across the file's lifetime; each row is commit-signed.
+
+### Reader semantics
+
+`agentic-verify` and `agentic-uat` treat `"green"` as contract-satisfied for the file at the stamped commit. The "is this story tested first?" invariant from the original ADR is preserved: a story whose evidence chain begins with `green` (no prior `red` or `preserved` row exists in the chain) is treated as **unverified** — the same defect class the original ADR pinned.
+
+The bridge rule for pre-ADR-0005 stories (4, 5) is unchanged: a chain that opens with `preserved` is grandfathered. Chains that open with `green` (a hypothetical future bug, not present today) would surface in audit as a "no red proof on file" defect. The 5 grandfathered green rows on disk all sit on chains whose first row is either `red` (stories 2, 12, 16, 18) or `preserved` (story 25's bridge), so the codification is retroactively consistent.
+
+### Why no schema change yet
+
+`schemas/evidence.schema.json` does not exist (per `schemas/README.md`, it is planned forward work pending `agentic-verify`). When that schema lands, its `verdict` field's enum must read `["red", "preserved", "re-authored", "green"]` to match this ADR. Until then, the ADR is the authoritative source.
+
+### Out of scope for this sub-amendment
+
+- A `agentic test-build record --verdict green` CLI path. Currently agents emit green rows by writing the JSONL directly; routing through the CLI is the same forward work named in the previous sub-amendment.
+- A schema for the wrapping evidence document. Forward work, with a single landing point when `evidence.schema.json` is authored.
