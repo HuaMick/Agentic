@@ -163,47 +163,6 @@ acceptance:
       runner silently writes `test_runs` rows with empty
       signer fields and the symmetry-with-uat claim is
       only aspirational.
-  - file: crates/agentic-runtime/tests/runtime_injects_sandbox_signer_env_into_claude_subprocess.rs
-    justification: |
-      Proves the sandbox convention at the runtime
-      boundary: when `ClaudeCodeRuntime` (story 19) spawns
-      a claude subprocess for a run against a configured
-      model and a generated run_id, the child process's
-      environment contains `AGENTIC_SIGNER` composed per
-      the sandbox signer form in
-      `assets/definitions/identifier-forms.yml`
-      (model and run_id placeholders match the asset's
-      shape exactly — the asset's drift_warning notes the
-      historical short-id mistake this test fences). The
-      value is composed by the runtime from its own
-      inputs (model, run id); the caller does NOT pass
-      it in as a flag. Inside the sandbox, any `agentic
-      uat` or `agentic ci record` invocation resolves
-      the signer from this env var via tier 2 — no
-      special-case code path for agents. Without this,
-      the compositional story the outcome promises (one
-      resolver, one chain, one convention) degrades
-      into two parallel paths (human path + agent-
-      special path), and the sandbox convention is a
-      comment rather than a behaviour.
-  - file: crates/agentic-runtime/tests/runtime_writes_resolved_signer_onto_run_row.rs
-    justification: |
-      Proves the third evidence table gains the field: a
-      `RunRecorder::start` driven through the runtime
-      against a stub NDJSON stream writes a `runs` row
-      whose `signer` equals the sandbox convention
-      `sandbox:<model>@<run_id>` for that run. Story 16
-      already requires `signer` as a non-empty string on
-      the run row; this test proves the runtime populates
-      it from the same composition the env-var injection
-      test pins, rather than (say) reading the outer
-      environment's `AGENTIC_SIGNER` and passing through
-      whatever a dev happens to have exported. Without
-      this, a run launched by a dev who exported their
-      own `AGENTIC_SIGNER` would attribute the run to
-      them rather than to the model-and-run-id, and the
-      run row's signer would no longer identify which
-      agent produced it.
   - file: crates/agentic-cli/tests/uat_signer_flag_lands_on_signing_row.rs
     justification: |
       Proves the contract reaches the operator through the
@@ -523,9 +482,9 @@ guidance: |
     `AGENTIC_SIGNER=sandbox:<model>@<run_id>` on the
     child's environment before spawning. The outer
     shell's export does not leak into the sandbox's
-    signer. This is the `runtime_injects_sandbox_
-    signer_env_into_claude_subprocess.rs` test's job
-    to pin.
+    signer. The proof of this override behaviour lives
+    in story 19's UAT walkthrough (which exercises a
+    real spawn) — see the scoped-out subsection below.
 
   Three identities coexist (composition with git).
     Per research note 14 and ADR-0006 §8, three
@@ -663,6 +622,41 @@ guidance: |
       user.email` used by the host for auto-merged
       commits is story 20's concern.
 
+  Runtime env-injection and runs-row composition: scoped
+  out (2026-04-28).
+    Earlier drafts of this story included two acceptance
+    tests against `agentic-runtime`: one proving
+    `ClaudeCodeRuntime` injects `AGENTIC_SIGNER=
+    sandbox:<model>@<run_id>` into the spawned child's
+    environment, the other proving the runtime writes the
+    composed sandbox signer onto the `runs` row. Both
+    were scaffolded against a `RunConfig { model, run_id
+    }` shape with a `prepare_spawn` inspection API that
+    did not match story 19's evolved `RunConfig` (which
+    settled on `{ story_id, story_yaml_bytes, signer,
+    build_config, runs_root, ... }` with no
+    `prepare_spawn` and no `SpawnOutcome` type). Rather
+    than re-author the assertions against a moving
+    target, this story drops both: the resolver
+    mechanism is fully proven by the five
+    `agentic-signer` tier tests, the two `agentic-uat`
+    wiring tests, the two `agentic-ci-record` wiring
+    tests, and the two `agentic-cli` argv tests above —
+    the outcome's "every evidence-writing path emits a
+    row whose `signer` is non-empty" claim is satisfied
+    at the resolver and at the two library callers that
+    own their own row writers. The sandbox-spawn
+    assertions properly belong to story 19's UAT
+    walkthrough (which exercises a real spawn against a
+    real `ClaudeCodeRuntime`) and to story 16's
+    `runs_table_round_trips_structured_run_row.rs`
+    (which already pins `signer` as a required non-empty
+    string on the run row). If story 19's UAT later
+    finds a regression where the composed signer is
+    missing or wrong, defects-amend-the-owning-story
+    routes the new acceptance test into story 19, not
+    back here.
+
   Relationship to stories 1, 2, 16, 19, 20.
     - Story 1 (UAT signing): THIS story introduces the
       acceptance test `uat_pass_writes_resolved_
@@ -685,25 +679,33 @@ guidance: |
       already anticipates this story's formalisation
       ("Story 18 formalises resolution and the
       `sandbox:<model>@<run_id>` convention"). The
-      `runtime_writes_resolved_signer_onto_run_
-      row.rs` test pins that the runtime composes
-      the sandbox value rather than passing through
-      an outer env. `depends_on` here includes 16
-      because the run row's field exists by its
-      contract.
+      assertion that the runtime composes the
+      sandbox value (rather than passing through an
+      outer env) is exercised in story 19's UAT
+      walkthrough; story 16's existing test holds
+      the schema-level "signer is required and
+      non-empty" floor on the runs row. `depends_on`
+      here includes 16 because the run row's field
+      exists by its contract.
     - Story 19 (agentic-runtime): immediate
       downstream. Story 19's `ClaudeCodeRuntime`
       must consume `agentic-signer` and inject the
       composed `AGENTIC_SIGNER` into the child
-      process. This story does NOT block on 19
-      reaching green; the env-injection acceptance
-      test exercises the behaviour against the
-      runtime crate directly, which may require
-      story 19 to have landed its spawn path. If
-      story 19 is still red when this story is
-      test-built, the env-injection test sits red
-      alongside it — eventual consistency per note
-      13.
+      process. The acceptance for that injection
+      and for the runtime's run-row composition
+      lives in story 19 itself (its UAT walkthrough
+      exercises a real spawn against a real
+      `RunConfig`). This story used to carry two
+      runtime acceptance tests of its own but
+      dropped them on 2026-04-28 once story 19's
+      `RunConfig` shape diverged from the draft
+      they were scaffolded against — see the
+      scoped-out subsection above. `depends_on`
+      here does NOT include 19; eventual
+      consistency per note 13 still applies, but
+      the cross-story coupling now expresses itself
+      through story 19's own coverage rather than
+      through a runtime test rooted in this story.
     - Story 20 (agentic story build): downstream.
       The host command composes `AGENTIC_SIGNER`
       into the `docker run` env from the same
