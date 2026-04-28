@@ -4,7 +4,7 @@ outcome: |
   A story author needing to reference a cross-corpus concept finds and
   re-uses an existing asset instead of inlining the concept's prose into
   the story's guidance.
-status: under_construction
+status: healthy
 patterns: []
 acceptance:
   tests:
