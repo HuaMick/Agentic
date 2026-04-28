@@ -240,5 +240,6 @@ fn commit_message(repo: &git2::Repository, sha: &str) -> (String, String) {
 fn commit_author_email(repo: &git2::Repository, sha: &str) -> String {
     let oid = git2::Oid::from_str(sha).expect("oid");
     let c = repo.find_commit(oid).expect("find commit");
-    c.author().email().unwrap_or("").to_string()
+    let email = c.author().email().unwrap_or("").to_string();
+    email
 }

@@ -1,0 +1,1 @@
+{"commit":"fb478ae1f42ba95b85268a294324d72ad8e39a9f","run_id":"6e11c3af-43eb-44cf-95e8-be4fa841a1a9","story_id":20,"timestamp":"2026-04-28T12:09:44Z","verdicts":[{"diagnostic":"not yet implemented: merge orchestration","file":"crates/agentic-story-build/tests/host_auto_merges_green_run_diff_as_squash_commit.rs","red_path":"runtime","verdict":"re-authored"}]}
