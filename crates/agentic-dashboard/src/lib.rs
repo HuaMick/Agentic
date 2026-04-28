@@ -1670,3 +1670,43 @@ fn format_relative_age(timestamp: &str) -> Option<String> {
 
     Some(format!("{}d ago", duration.num_days()))
 }
+
+pub mod audit {
+    #[derive(Debug, Clone)]
+    pub struct AuditReport {
+        pub implementation_without_flip: Vec<AuditEntry>,
+        pub promotion_ready: Vec<AuditEntry>,
+        pub test_builder_not_started: Vec<AuditEntry>,
+        pub healthy_with_failing_test: Vec<AuditEntry>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct AuditEntry {
+        pub id: u32,
+        pub passing_tests: Vec<String>,
+        pub failing_tests: Vec<String>,
+    }
+
+    impl AuditReport {
+        pub fn is_empty(&self) -> bool {
+            self.implementation_without_flip.is_empty()
+                && self.promotion_ready.is_empty()
+                && self.test_builder_not_started.is_empty()
+                && self.healthy_with_failing_test.is_empty()
+        }
+    }
+
+    impl std::fmt::Display for AuditReport {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if self.is_empty() {
+                writeln!(f, "No drift detected")?;
+                return Ok(());
+            }
+            Ok(())
+        }
+    }
+
+    pub fn run_audit(_sd: &std::path::Path, _s: std::sync::Arc<dyn crate::Store>, _sha: String) -> Result<AuditReport, crate::DashboardError> {
+        Err(crate::DashboardError::StoreError("not implemented".into()))
+    }
+}
