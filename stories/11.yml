@@ -5,7 +5,7 @@ outcome: |
   whose ancestors are not all `healthy` receives a typed refusal with
   no signing row written, so a Pass verdict cannot attest a story
   whose foundation is unproven.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
