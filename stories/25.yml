@@ -1,11 +1,11 @@
 id: 25
-title: "`agentic stories audit` surfaces status-vs-implementation drift"
+title: '`agentic stories audit` surfaces status-vs-implementation drift'
 outcome: |
   An operator running `agentic stories audit` against the corpus receives a
   structured report naming every story whose declared status disagrees with
   its actual implementation state, so drift between authored intent and
   shipped state is visible without manual cross-referencing.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 acceptance:
