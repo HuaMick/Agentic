@@ -173,6 +173,13 @@ impl Runtime for ClaudeCodeRuntime {
             io_error: format!("{:?}", e),
         })?;
 
+        // Wire branch_state if repo_path and branch_name are provided.
+        if let (Some(repo_path), Some(branch_name)) = (&cfg.repo_path, &cfg.branch_name) {
+            recorder.start_branch(repo_path, branch_name).map_err(|e| RuntimeError::TraceWrite {
+                io_error: format!("{:?}", e),
+            })?;
+        }
+
         // TODO: implement actual subprocess spawning and event handling.
         // For now, return a placeholder outcome.
         let outcome = Outcome::Green {
@@ -180,6 +187,13 @@ impl Runtime for ClaudeCodeRuntime {
         };
 
         let runs_row_id = cfg.run_id.clone();
+
+        // Finish branch tracking if repo_path was provided.
+        if cfg.repo_path.is_some() && cfg.branch_name.is_some() {
+            recorder.finish_branch(false).map_err(|e| RuntimeError::TraceWrite {
+                io_error: format!("{:?}", e),
+            })?;
+        }
 
         // Finish recording.
         recorder
@@ -253,6 +267,13 @@ impl Runtime for MockRuntime {
             io_error: format!("{:?}", e),
         })?;
 
+        // Wire branch_state if repo_path and branch_name are provided.
+        if let (Some(repo_path), Some(branch_name)) = (&cfg.repo_path, &cfg.branch_name) {
+            recorder.start_branch(repo_path, branch_name).map_err(|e| RuntimeError::TraceWrite {
+                io_error: format!("{:?}", e),
+            })?;
+        }
+
         // Extract max_inner_loop_iterations from build_config.
         let max_iterations = cfg
             .build_config
@@ -291,6 +312,7 @@ impl Runtime for MockRuntime {
             signing_run_id: "<pending>".to_string(),
         };
         let mut last_was_tool_call = false;
+        let mut iteration_start_time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
 
         for (line_no, line) in fixture_content.lines().enumerate() {
             // Check if we should inject a pipe break.
@@ -318,7 +340,21 @@ impl Runtime for MockRuntime {
             // Count iterations: increment on tool_result that follows a tool_call.
             if line.contains("\"tool_call\"") {
                 last_was_tool_call = true;
+                iteration_start_time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
             } else if line.contains("\"tool_result\"") && last_was_tool_call {
+                let iteration_end_time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+
+                // Record the iteration.
+                let iteration_summary = crate::run_recorder::IterationSummary {
+                    i: iteration_count,
+                    started_at: iteration_start_time.clone(),
+                    ended_at: iteration_end_time,
+                    probes: vec![],
+                    verdict: None,
+                    error: None,
+                };
+                let _ = recorder.record_iteration(iteration_summary);
+
                 iteration_count += 1;
                 last_was_tool_call = false;
             } else if line.contains("\"assistant_final\"") {
@@ -330,12 +366,14 @@ impl Runtime for MockRuntime {
             }
         }
 
-        // Record iteration count in the runs row via the recorder.
-        // For now, we don't record individual iterations (that would require
-        // parsing NDJSON and calling record_iteration), but we track the count
-        // in the outcome so tests can verify budget enforcement.
-
         let run_id = cfg.run_id.clone();
+
+        // Finish branch tracking if repo_path was provided.
+        if cfg.repo_path.is_some() && cfg.branch_name.is_some() {
+            recorder.finish_branch(false).map_err(|e| RuntimeError::TraceWrite {
+                io_error: format!("{:?}", e),
+            })?;
+        }
 
         // Finish recording.
         recorder
