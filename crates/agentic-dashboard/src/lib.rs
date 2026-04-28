@@ -1672,6 +1672,14 @@ fn format_relative_age(timestamp: &str) -> Option<String> {
 }
 
 pub mod audit {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use agentic_story::Story;
+    use serde_json::Value;
+
+    use crate::{DashboardError, Store};
+
     #[derive(Debug, Clone)]
     pub struct AuditReport {
         pub implementation_without_flip: Vec<AuditEntry>,
@@ -1702,11 +1710,266 @@ pub mod audit {
                 writeln!(f, "No drift detected")?;
                 return Ok(());
             }
+
+            // Category 1: implementation-without-flip
+            if !self.implementation_without_flip.is_empty() {
+                writeln!(f, "Implementation-without-flip:")?;
+                for entry in &self.implementation_without_flip {
+                    writeln!(f, "  {} - passing tests:", entry.id)?;
+                    for test in &entry.passing_tests {
+                        writeln!(f, "    {}", test)?;
+                    }
+                }
+                writeln!(f)?;
+            }
+
+            // Category 2: promotion-ready
+            if !self.promotion_ready.is_empty() {
+                writeln!(f, "Promotion-ready:")?;
+                for entry in &self.promotion_ready {
+                    writeln!(f, "  {}", entry.id)?;
+                }
+                writeln!(f)?;
+            }
+
+            // Category 3: test-builder-not-started
+            if !self.test_builder_not_started.is_empty() {
+                writeln!(f, "Test-builder-not-started:")?;
+                for entry in &self.test_builder_not_started {
+                    writeln!(f, "  {}", entry.id)?;
+                }
+                writeln!(f)?;
+            }
+
+            // Category 4: healthy-with-failing-test
+            if !self.healthy_with_failing_test.is_empty() {
+                writeln!(f, "Healthy-with-failing-test:")?;
+                for entry in &self.healthy_with_failing_test {
+                    writeln!(f, "  {} - failing tests:", entry.id)?;
+                    for test in &entry.failing_tests {
+                        writeln!(f, "    {}", test)?;
+                    }
+                }
+                writeln!(f)?;
+            }
+
             Ok(())
         }
     }
 
-    pub fn run_audit(_sd: &std::path::Path, _s: std::sync::Arc<dyn crate::Store>, _sha: String) -> Result<AuditReport, crate::DashboardError> {
-        Err(crate::DashboardError::StoreError("not implemented".into()))
+    /// Determine if all acceptance test file paths exist on disk.
+    fn all_tests_exist(story: &Story, stories_dir: &Path) -> bool {
+        story
+            .acceptance
+            .tests
+            .iter()
+            .all(|test| stories_dir.join(&test.file).exists())
+    }
+
+    /// Determine if any acceptance test file paths exist on disk.
+    fn any_tests_exist(story: &Story, stories_dir: &Path) -> bool {
+        story
+            .acceptance
+            .tests
+            .iter()
+            .any(|test| stories_dir.join(&test.file).exists())
+    }
+
+    /// Get the latest test_runs row for a story from the store.
+    fn get_test_run(store: &Arc<dyn Store>, story_id: u32) -> Option<Value> {
+        store
+            .get("test_runs", &story_id.to_string())
+            .ok()
+            .flatten()
+    }
+
+    /// Check if the latest test_runs row has a Pass verdict.
+    fn test_passes(test_run: &Option<Value>) -> bool {
+        test_run
+            .as_ref()
+            .and_then(|row| row.get("verdict"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase() == "pass")
+            .unwrap_or(false)
+    }
+
+    /// Get the list of failing tests from the test_runs row.
+    fn get_failing_tests(test_run: &Option<Value>) -> Vec<String> {
+        test_run
+            .as_ref()
+            .and_then(|row| row.get("failing_tests"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get the list of acceptance test file paths.
+    fn get_test_paths(story: &Story) -> Vec<String> {
+        story
+            .acceptance
+            .tests
+            .iter()
+            .map(|test| test.file.to_string_lossy().to_string())
+            .collect()
+    }
+
+    /// Check if story is "healthy-with-failing-test" by invoking the
+    /// dashboard's existing unhealthy classifier for stories with
+    /// status=healthy.
+    fn is_healthy_with_failing_test(
+        story: &Story,
+        store: &Arc<dyn Store>,
+        _head_sha: &str,
+    ) -> bool {
+        // Only applies to stories declared healthy in YAML
+        if story.status != agentic_story::Status::Healthy {
+            return false;
+        }
+
+        // Get latest UAT pass (precondition for unhealthy classification)
+        let uat_signings = store
+            .query("uat_signings", &|row| {
+                row.get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story.id as u64)
+                    .unwrap_or(false)
+            })
+            .unwrap_or_default();
+
+        let latest_uat_pass = uat_signings.iter().rev().find(|row| {
+            row.get("verdict")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_lowercase() == "pass")
+                .unwrap_or(false)
+        });
+
+        // Must have a historical UAT pass to be considered for this check
+        if latest_uat_pass.is_none() {
+            return false;
+        }
+
+        // Get latest test_runs row
+        let test_run = get_test_run(store, story.id);
+
+        // Check if latest test_runs.verdict is fail
+        let test_run_fail = test_run
+            .as_ref()
+            .and_then(|row| row.get("verdict"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase() == "fail")
+            .unwrap_or(false);
+
+        test_run_fail
+    }
+
+    /// Run the audit against a stories directory and store, returning
+    /// a report of the four drift categories.
+    pub fn run_audit(
+        stories_dir: &Path,
+        store: Arc<dyn Store>,
+        head_sha: String,
+    ) -> Result<AuditReport, DashboardError> {
+        if !stories_dir.exists() {
+            return Err(DashboardError::StoriesNotFound {
+                path: stories_dir.to_path_buf(),
+            });
+        }
+
+        let mut cat1 = Vec::new();
+        let mut cat2 = Vec::new();
+        let mut cat3 = Vec::new();
+        let mut cat4 = Vec::new();
+
+        // Load all story YAML files
+        let entries = std::fs::read_dir(stories_dir)
+            .map_err(|e| DashboardError::StoreError(e.to_string()))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| DashboardError::StoreError(e.to_string()))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("yml") {
+                continue;
+            }
+
+            // Extract story ID from filename
+            let story_id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse::<u32>().ok());
+
+            let story_id = match story_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Try to load the story
+            let story = match Story::load(&path) {
+                Ok(s) => s,
+                Err(_) => continue, // Skip malformed stories
+            };
+
+            // Get test_runs row for this story
+            let test_run = get_test_run(&store, story_id);
+
+            // Check categories
+            // Category 1: status=proposed AND all tests exist AND all tests pass
+            if story.status == agentic_story::Status::Proposed {
+                if all_tests_exist(&story, stories_dir) && test_passes(&test_run) {
+                    let passing_tests = get_test_paths(&story);
+                    cat1.push(AuditEntry {
+                        id: story_id,
+                        passing_tests,
+                        failing_tests: vec![],
+                    });
+                }
+            }
+            // Category 2: status=under_construction AND all tests exist AND all tests pass
+            else if story.status == agentic_story::Status::UnderConstruction {
+                if all_tests_exist(&story, stories_dir) && test_passes(&test_run) {
+                    cat2.push(AuditEntry {
+                        id: story_id,
+                        passing_tests: vec![],
+                        failing_tests: vec![],
+                    });
+                }
+                // Category 3: status=under_construction AND ZERO tests exist
+                else if !any_tests_exist(&story, stories_dir) {
+                    cat3.push(AuditEntry {
+                        id: story_id,
+                        passing_tests: vec![],
+                        failing_tests: vec![],
+                    });
+                }
+                // Mixed presence: neither category 2 nor 3, so it stays absent
+            }
+
+            // Category 4: status=healthy AND at least one test currently fails
+            // (use dashboard's existing unhealthy classifier)
+            if is_healthy_with_failing_test(&story, &store, &head_sha) {
+                let failing_tests = get_failing_tests(&test_run);
+                cat4.push(AuditEntry {
+                    id: story_id,
+                    passing_tests: vec![],
+                    failing_tests,
+                });
+            }
+        }
+
+        // Sort each category by id for stable output
+        cat1.sort_by_key(|e| e.id);
+        cat2.sort_by_key(|e| e.id);
+        cat3.sort_by_key(|e| e.id);
+        cat4.sort_by_key(|e| e.id);
+
+        Ok(AuditReport {
+            implementation_without_flip: cat1,
+            promotion_ready: cat2,
+            test_builder_not_started: cat3,
+            healthy_with_failing_test: cat4,
+        })
     }
 }
