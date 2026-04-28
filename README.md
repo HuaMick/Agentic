@@ -2,7 +2,7 @@
 
 A Rust-based agent orchestration system built around story-driven development.
 
-**Status:** Phase 2 / Phase 0 keystone passed. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Seventeen stories `healthy` (1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 15, 16, 18, 19, 25, 26, 27) after the 2026-04-28 autonomous cascade plus a follow-up session that landed story 19 (agentic-runtime un-deferred — `Runtime` trait + `ClaudeCodeRuntime` + `MockRuntime` + `green` verdict codified in ADR-0005). Five remaining `under_construction` (11, 17, 20, 21, 23 — Phase 0 work plus story 11 mid-amendment); one `proposed` (24); three retired (7, 8, 14). The `dag-primary-lens` epic (stories 10-13) remains complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes four top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test|audit`, and `agentic test-build [plan|record]`.
+**Status:** Phase 2 / Phase 0 keystone passed. Cargo workspace active (rustc 1.95.0 via rustup in WSL); seven crates compile green. Nineteen stories `healthy` (1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 25, 26, 27) after the 2026-04-28 autonomous cascade plus follow-up sessions that landed story 19 (agentic-runtime un-deferred — `Runtime` trait + `ClaudeCodeRuntime` + `MockRuntime` + `green` verdict codified in ADR-0005), then promoted stories 17 (build_config schema) and 11 (UAT ancestor-health gate). Three remaining `under_construction` (20, 21, 23 — Phase 0 work; story 20's scaffolds are re-redded under ADR-0005 sub-amendment 1 and the workspace E0597 is fixed, but the host-CLI implementation work itself remains forward); one `proposed` (24); three retired (7, 8, 14). The `dag-primary-lens` epic (stories 10-13) remains complete. The `agentic` binary is installable via `./install.sh` (or `cargo install --path crates/agentic-cli` directly; `./install.sh --docker` builds a container image instead) and exposes four top-level subcommands: `agentic uat <id> --verdict <pass|fail>`, `agentic stories health|test|audit`, and `agentic test-build [plan|record]`.
 
 ## What this is
 
@@ -56,24 +56,27 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 
 ## Current state
 
-**Healthy (16):** stories 1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 15, 16, 18,
-25, 26, 27. The Phase-0 keystone cascade (4 → 5 → 6 → 1 → 16 → 18)
-ran in a single autonomous session on 2026-04-28, promoting twelve
-stories (4, 5, 6, 1, 16, 18, 2, 3, 12, 27, 26, 25) and resolving the
-defects-amend-the-owning-story ripple from story 18's signer-mandatory
-contract change. Two test fixture amendments (stories 2 + 12 set
-`AGENTIC_SIGNER` for the now-mandatory signer resolution), one prose
-amendment (story 2's UAT prose now uses `agentic stories test
-<bare-id>` instead of the never-implemented `agentic ci record`), one
-acceptance-set reduction (story 18 dropped two runtime tests
-scaffolded against an evolved RunConfig shape), and one audit fix
-(`agentic stories audit` correctly resolves test paths against
-repo_root, not stories_dir) landed during the cascade.
+**Healthy (19):** stories 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16,
+17, 18, 19, 25, 26, 27. The Phase-0 keystone cascade (4 → 5 → 6 → 1
+→ 16 → 18) ran in a single autonomous session on 2026-04-28,
+promoting twelve stories (4, 5, 6, 1, 16, 18, 2, 3, 12, 27, 26, 25)
+and resolving the defects-amend-the-owning-story ripple from story
+18's signer-mandatory contract change. Follow-up sessions same day
+landed story 19 (agentic-runtime un-deferred), then promoted story
+17 (build_config schema parsed by the loader) and story 11 (UAT
+ancestor-health gate refuses Pass on unproven ancestry, including
+retired-chain semantics).
 
-**Under construction (6):** stories 11, 17, 19, 20, 21, 23. Stories
-17, 19, 20, 21, 23 are the remaining net-new Phase 0 work (runtime
-spawn, host story-build auto-merge, sandbox sketches). Story 11 was
-amended during the cascade and stayed under_construction.
+**Under construction (3):** stories 20, 21, 23. Story 20's scaffolds
+are re-redded under ADR-0005 sub-amendment 1's three-gate carve-out
+(YAML had drifted past the most recent red evidence), the
+workspace-blocking E0597 in its `commit_author_email` test helper is
+fixed, and three of its 12 acceptance tests pass on already-shipped
+infrastructure (`compose_docker_argv`, `ImageTagResolver`, the
+docker-binary precheck). The remaining nine — sandbox green/exhausted/
+crashed wiring, host auto-merge, drift refusal, amend-same-story,
+CLI subcommand wiring — are the substantive implementation work
+deferred to the next session.
 
 **Proposed (1):** story 24 (`agentic test-build record` diagnostic
 classifier; tightens probe to E0432/E0599 only).
