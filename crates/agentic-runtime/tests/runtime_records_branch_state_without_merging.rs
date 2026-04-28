@@ -24,9 +24,10 @@
 //!   preserve: "runtime records the branch_state in the
 //!   run row; merge is story 20's host command."
 //!
-//! Red today: compile-red. The runtime's surface
-//! (`MockRuntime::from_fixture`, `RunConfig`, `Runtime`,
-//! `spawn_claude_session`, the `mock_store` accessor) does not exist.
+//! Red today: runtime — `MockRuntime::spawn_claude_session` does not yet
+//! wire `recorder.start_branch`/`finish_branch`, so `branch_state` on the
+//! runs row is empty and the assertions on `start_sha`, `merged`,
+//! `merge_shas`, `end_sha`, and `commits` fail.
 
 use agentic_runtime::{EventSink, MockRuntime, RunConfig, Runtime};
 use agentic_store::Store;
@@ -48,10 +49,11 @@ fn init_repo_with_baseline(dir: &std::path::Path) -> (Repository, String) {
         let mut idx = repo.index().expect("index");
         idx.write_tree().expect("write_tree")
     };
-    let tree = repo.find_tree(tree_id).expect("find_tree");
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "baseline", &tree, &[])
-        .expect("baseline commit");
+    let oid = {
+        let tree = repo.find_tree(tree_id).expect("find_tree");
+        repo.commit(Some("HEAD"), &sig, &sig, "baseline", &tree, &[])
+            .expect("baseline commit")
+    };
     (repo, oid.to_string())
 }
 
