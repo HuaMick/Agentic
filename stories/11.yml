@@ -5,7 +5,7 @@ outcome: |
   whose ancestors are not all `healthy` receives a typed refusal with
   no signing row written, so a Pass verdict cannot attest a story
   whose foundation is unproven.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree
@@ -179,6 +179,64 @@ acceptance:
       inside the chain-walk or panic — both strictly worse
       than the loud refusal story 11 already contracts for
       `depends_on` cycles.
+  - file: crates/agentic-uat/tests/uat_permits_ancestor_with_manual_signing_row.rs
+    justification: |
+      Proves the ancestor-gate's `uat_signings UNION
+      manual_signings` composition: given a descendant
+      `<leaf>` whose `depends_on` names `<A>`, where
+      `<A>`'s YAML has `status: healthy`, `<A>` carries
+      ZERO `uat_signings.verdict=pass` rows, AND `<A>`
+      carries exactly one `manual_signings.verdict=pass`
+      row at HEAD (the row shape story 28's
+      `agentic store backfill <A>` writes), `Uat::run`
+      with a Pass verdict on `<leaf>` proceeds through its
+      usual path, writes exactly one
+      `uat_signings.verdict=pass` row for `<leaf>`, and
+      rewrites `<leaf>`'s YAML to `status: healthy`. The
+      gate evaluates `is_ancestor_satisfied(A)` by
+      querying BOTH tables and treating presence in either
+      as "satisfied" — a `manual_signings` row backfilled
+      after a complete manual ritual is equivalent to a
+      `uat_signings` row from a real `agentic uat`
+      invocation, semantically. The audit-trail
+      distinction (real vs backfilled) is preserved at
+      the table level so an auditor can still tell which
+      stories live under which attestation source; the
+      ancestor-gate's pass-fail decision is union-shaped
+      because the prove-it gate is satisfied either way.
+      Without this test, story 28's backfill would be
+      structurally pointless — backfilled stories would
+      still block every descendant UAT until they were
+      driven through `agentic uat` synthetically (a
+      forge-shaped action the system cannot ask for),
+      and the union-table semantics would be a paper
+      claim the gate refused at runtime.
+  - file: crates/agentic-uat/tests/uat_refuses_ancestor_with_manual_fail_row.rs
+    justification: |
+      Proves the union does NOT relax the verdict
+      requirement: given a descendant `<leaf>` whose
+      `depends_on` names `<A>`, where `<A>`'s YAML has
+      `status: healthy`, `<A>` carries one
+      `manual_signings` row whose `verdict=fail` (a
+      shape that cannot legitimately occur — story 28's
+      backfill only writes `verdict=pass` rows — but
+      defended in depth in case a future store edit or
+      operator surgery introduces it), AND `<A>` carries
+      ZERO `uat_signings.verdict=pass` rows, `Uat::run`
+      with a Pass verdict on `<leaf>` returns
+      `UatError::AncestorNotHealthy { ancestor_id: A,
+      reason: NoSigningRow }`. The query is "does either
+      table carry a Pass row for this story?", not "does
+      either table carry ANY row." A Fail in either
+      table is treated as absence-of-Pass for the gate's
+      purpose. Without this test, a corrupted or hand-
+      written `manual_signings` Fail row could be
+      mistaken for satisfaction by a naive
+      `manual_signings.exists(story_id=A)` query — the
+      same forging shape the original ancestor-gate
+      contract refused at the YAML claim level, which
+      would land at the table level as soon as
+      `manual_signings` joined the union.
   - file: crates/agentic-cli/tests/uat_ancestor_refusal_exits_2.rs
     justification: |
       Proves the typed refusal reaches the operator through the
@@ -362,6 +420,44 @@ guidance: |
     a shared `health_of` helper into `agentic-story` (the domain
     center); that is a refactor, not a shared crate.
 
+  Two-table signing-row composition (added 2026-04-29 via
+  story 28's amendment).
+    `has_valid_signing(cursor)` queries the UNION of two
+    tables: `uat_signings` and `manual_signings`. A Pass row
+    in EITHER table satisfies the gate. The semantics are
+    identical (commit-pinned attestation that the prove-it
+    gate has been satisfied for this story) but the
+    provenance is preserved at the table level: a
+    `uat_signings.verdict=pass` row was written by the real
+    `agentic uat` Pass path (story 1); a
+    `manual_signings.verdict=pass` row was written by
+    `agentic store backfill <id>` (story 28) after a
+    complete manual ritual was confirmed in git history. An
+    auditor reading the corpus can tell the two apart by
+    table; the gate cannot, by design — the prove-it
+    invariant holds in either case, and the gate's only
+    question is "is the prove-it invariant satisfied for
+    this ancestor?"
+
+    Why two tables, not one boolean column. Schemaless does
+    not mean undisciplined: keeping the tables separate
+    makes the audit trail of "how did this story become
+    healthy?" trivially queryable, and prevents a future
+    operator from forging a fake `uat_signings` row by
+    treating the column as a switch. Story 28's guards
+    (refuse unless the ritual is complete in git history,
+    one id per invocation, no `--all`) only protect the
+    `manual_signings` path; conflating the tables would
+    open the cleaner path to abuse.
+
+    Verdict requirement is unchanged. The query is "does
+    EITHER table carry a Pass row at HEAD for this story?",
+    not "does EITHER table carry any row." A Fail row in
+    either table is absence-of-Pass from the gate's
+    perspective. The
+    `uat_refuses_ancestor_with_manual_fail_row.rs` test
+    pins this corner.
+
   Why Fail is unaffected.
     Recording a Fail verdict is strictly useful even when the
     ancestry is broken — it is how the "fell from grace" signal
@@ -471,6 +567,21 @@ guidance: |
             }
         }
     }
+
+    // 2026-04-29: has_valid_signing now composes both tables.
+    fn has_valid_signing(story) -> bool {
+        let uat_pass_at_head = store
+            .query("uat_signings", story_id = story.id, verdict = "pass")
+            .latest()
+            .map(|row| row.commit == HEAD)
+            .unwrap_or(false);
+        let manual_pass_at_head = store
+            .query("manual_signings", story_id = story.id, verdict = "pass")
+            .latest()
+            .map(|row| row.commit == HEAD)
+            .unwrap_or(false);
+        uat_pass_at_head || manual_pass_at_head
+    }
     ```
 
     Error variant composition. The refusal uses the EXISTING
@@ -569,9 +680,10 @@ guidance: |
     pattern's contract fits both axes without modification.
 
   Test file locations.
-    Library-level tests (eleven tests — six from story 11's
-    original contract plus five added via story 21's amendment
-    for chain-walking semantics:
+    Library-level tests (thirteen tests — six from story 11's
+    original contract, five added via story 21's amendment for
+    chain-walking semantics, plus two added via story 28's
+    amendment for `manual_signings` union semantics:
     `uat_refuses_unhealthy_ancestor.rs`,
     `uat_permits_all_healthy_ancestors.rs`,
     `uat_refuses_ancestor_with_stale_yaml_status.rs`,
@@ -582,15 +694,19 @@ guidance: |
     `uat_refuses_when_retired_chain_terminates_in_unhealthy.rs`,
     `uat_walks_multi_hop_supersession_chain.rs`,
     `uat_permits_on_terminal_retired_with_no_successor.rs`,
-    `uat_refuses_retirement_chain_cycle.rs`) live under
+    `uat_refuses_retirement_chain_cycle.rs`,
+    `uat_permits_ancestor_with_manual_signing_row.rs`,
+    `uat_refuses_ancestor_with_manual_fail_row.rs`) live under
     `crates/agentic-uat/tests/` as Rust integration tests. They
     construct a temporary git repo via `tempfile` + `git2`, seed
     it with a minimal multi-story fixture (a three-story chain is
     sufficient for the transitive test; a two-story pair for the
     direct test; a four-story chain for the multi-hop supersession
-    test), and either pre-seed `uat_signings` rows via `MemStore`
-    or drive `Uat::run` against the ancestors first to build real
-    rows.
+    test; a two-story pair for the `manual_signings` tests), and
+    either pre-seed `uat_signings` / `manual_signings` rows via
+    `MemStore` or drive `Uat::run` (or
+    `Store::insert_manual_signing` per story 28) against the
+    ancestors first to build real rows.
 
     Relationship to story 21's own acceptance tests. Story 21
     owns analogous tests at the retirement-lifecycle boundary
@@ -668,6 +784,31 @@ guidance: |
     amendment baseline re-UAT" is required — the eventual-
     consistency posture lets the corpus converge over wall-
     clock time with multiple stories simultaneously red.
+
+  Relationship to story 28 (`agentic store backfill`).
+    Story 28 introduces the `manual_signings` table and the
+    `agentic store backfill <story-id>` CLI verb. Story 11's
+    ancestor gate consumes that table by composing it with
+    `uat_signings` in `has_valid_signing` (see "Two-table
+    signing-row composition" above). The two added tests
+    (`uat_permits_ancestor_with_manual_signing_row.rs` and
+    `uat_refuses_ancestor_with_manual_fail_row.rs`) pin the
+    union semantics from story 11's side; story 28's own
+    acceptance tests pin the writer side (the three guards,
+    the table targeting, the single-id constraint). Per
+    the eventual-consistency posture, story 11's
+    `depends_on` does NOT add a back-edge onto story 28;
+    both sides sit red until the pipeline converges. The
+    union-table semantics is what makes the audit's
+    category-5 query (story 25's
+    `audit_flags_yaml_healthy_without_signing_row.rs`) and
+    the dashboard's `error` row (story 3's
+    `health_malformed_yaml_renders_error_row.rs` plus the
+    new exit-code mapping) accept backfilled stories
+    without re-flagging them as forged — the prove-it gate
+    becomes structurally enforceable across the
+    forged-promotion shape that motivated the entire
+    2026-04-29 amendment cluster.
 depends_on:
 - 1
 - 3
