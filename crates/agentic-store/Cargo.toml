@@ -39,3 +39,11 @@ tempfile.workspace = true
 # dev-dep is a dev-graph cycle that Cargo permits because neither
 # edge is a normal (runtime) dependency. Dev-scope only.
 agentic-runtime = { path = "../agentic-runtime" }
+
+# Story 28 scaffolds: the `backfill_*` integration tests construct a
+# temporary git repo via `git2` to seed the YAML-flip commit and the
+# green-jsonl evidence file the backfill library guard reads. Same
+# `git2` pin as the `agentic-uat` and `agentic-ci-record` test suites.
+# Dev-scope only — the runtime backfill code path will pull `git2`
+# in as a normal dep when build-rust lands the implementation.
+git2 = { version = "0.19", default-features = false }
