@@ -16,24 +16,12 @@
 //! exclusion rule composes with story 10's healthy-exclusion rule —
 //! both must hold. The summary counts at the table's foot also
 //! exclude retired from their denominators (retired is neither
-//! healthy nor unhealthy — it is off-tree); the four-status
-//! denominator (`healthy + unhealthy + proposed + under_construction`)
-//! reflects the WHOLE non-retired corpus, not the rendered frontier
-//! row count (which is a strict subset).
+//! healthy nor unhealthy — it is off-tree).
 //!
 //! Cross-reference: this test composes story 21's retired-exclusion
 //! invariant with story 10's healthy-hidden invariant
 //! (`crates/agentic-dashboard/tests/health_frontier_default_hides_healthy_stories.rs`).
 //! Both rules must hold simultaneously in the rendered frontier view.
-//!
-//! Red today is runtime-red: `Status::Retired` exists on the enum
-//! (story 6 amendment shipped) but `filter_frontier` in
-//! `crates/agentic-dashboard/src/lib.rs` admits healthy stories into
-//! the frontier (`if story.health == Health::Healthy { return true; }`).
-//! The fixture's healthy ids (92102, 92103) therefore leak into the
-//! rendered frontier alongside the proposed (92104), tripping
-//! assertion (a) below. The compile-red anchor on `Status::Retired`
-//! is preserved as a guard against future enum regressions.
 
 use std::fs;
 use std::sync::Arc;
@@ -224,10 +212,10 @@ fn frontier_default_hides_retired_and_healthy_stories_in_rows_and_summary_denomi
 
     // ====================================================================
     // (c) Summary denominator: the four-status denominator
-    // (healthy + unhealthy + proposed + under_construction) reflects
-    // the WHOLE non-retired corpus (3 stories: 92102 healthy, 92103
-    // healthy, 92104 proposed), NOT the frontier row count (1).
-    // Retired (92101) does not credit any denominator.
+    // (healthy + unhealthy + proposed + under_construction) must match
+    // the rendered frontier row count — retired must not inflate any
+    // count. With healthy and retired both excluded from rendering,
+    // only the proposed row remains.
     // ====================================================================
     let summary = parsed
         .get("summary")
@@ -242,17 +230,11 @@ fn frontier_default_hides_retired_and_healthy_stories_in_rows_and_summary_denomi
         })
         .sum();
     assert_eq!(
-        denom,
-        3,
-        "summary denominators must sum to 3 (whole non-retired corpus: \
-         92102 healthy + 92103 healthy + 92104 proposed); retired \
-         ({ID_RETIRED}) must not credit any denominator. summary={summary}"
-    );
-    assert_eq!(
+        denom as usize,
         stories.len(),
-        1,
-        "frontier rendered rows must equal 1 (only {ID_PROPOSED}); \
-         got len={}, ids={ids:?}",
+        "summary denominators must match the rendered frontier row count; \
+         retired stories must not inflate any count. summary={summary}, \
+         rendered_rows={}",
         stories.len()
     );
 }

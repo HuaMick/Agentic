@@ -21,13 +21,15 @@
 //! — a duplication that would drift the moment the chain-walk
 //! algorithm evolves.
 //!
-//! Red today is compile-red: `render_canopy_json` does not yet
-//! exist on the `Dashboard` public surface (the canopy lens is
-//! story 3's amendment addition), and `Status::Retired` is not yet
-//! on `agentic_story::Status`. Once story 6's amendment ships the
-//! enum value and story 3's implementation ships the canopy API,
-//! the test flips runtime-red until `era_head_id` is populated on
-//! every row.
+//! Story 10 cross-reference (2026-04-30 amendment). The original
+//! fixture relied on healthy stories appearing in the frontier
+//! `stories[]` array so the era_head_id assertion had rows to land
+//! on. After story 10's healthy-exclusion invariant, healthy stories
+//! no longer render in the frontier. The re-authored fixture seeds a
+//! non-healthy (proposed) story so the frontier `stories[]` carries
+//! the era_head_id field on at least one row; the canopy lens (which
+//! renders healthy + retired together) carries it on every row. The
+//! era_head_id contract this test pins is unchanged.
 
 use std::fs;
 use std::sync::Arc;
@@ -40,7 +42,7 @@ use tempfile::TempDir;
 
 const HEAD_SHA: &str = "3333333333333333333333333333333333333333";
 
-// Chain A → B → C; all four fixtures live in the corpus.
+// Chain A → B → C; all three fixtures live in the corpus.
 const ID_A_RETIRED: u32 = 93301;
 const ID_B_RETIRED: u32 = 93302;
 const ID_C_HEALTHY: u32 = 93303;
@@ -49,6 +51,10 @@ const ID_TERMINAL: u32 = 93304;
 // A currently-healthy story that is NOT retired and NOT superseded
 // — its era head is itself by definition.
 const ID_SELF_HEAD: u32 = 93305;
+// A proposed story added so the frontier `stories[]` array has at
+// least one row to land the era_head_id assertion on after story 10's
+// healthy-exclusion rule removes C and SELF_HEAD from frontier output.
+const ID_PROPOSED_FOR_FRONTIER: u32 = 93306;
 
 fn fixture(id: u32, status: &str, extra: &str) -> String {
     format!(
@@ -132,11 +138,21 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
         fixture(ID_SELF_HEAD, "healthy", ""),
     )
     .expect("write self-head");
+    // Proposed story added so the frontier has rows after story 10's
+    // healthy-exclusion rule removes C and SELF_HEAD from rendering.
+    // It is not retired and not superseded, so its era_head_id ==
+    // its own id.
+    fs::write(
+        stories_dir.join(format!("{ID_PROPOSED_FOR_FRONTIER}.yml")),
+        fixture(ID_PROPOSED_FOR_FRONTIER, "proposed", ""),
+    )
+    .expect("write proposed-for-frontier");
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
 
     // Seed healthy signings for the two currently-healthy stories so
-    // the classifier accepts them.
+    // the classifier accepts them. The proposed story
+    // (ID_PROPOSED_FOR_FRONTIER) is NOT seeded.
     for id in [ID_C_HEALTHY, ID_SELF_HEAD] {
         store
             .append(
@@ -234,11 +250,12 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
         era_head_of.get(&(ID_SELF_HEAD as u64))
     );
 
-    // --- Frontier JSON: retired rows are filtered out, but every
-    //     remaining row STILL carries era_head_id. The field is
-    //     present in BOTH lenses so tooling has one stable way to
-    //     reconstruct groups regardless of which view produced the
-    //     output. --------------------------------------------------
+    // --- Frontier JSON: retired AND healthy rows are filtered out
+    //     (story 10's healthy-exclusion + story 21's retired-exclusion),
+    //     so only the proposed row remains; it STILL carries era_head_id.
+    //     The field is present in BOTH lenses so tooling has one stable
+    //     way to reconstruct groups regardless of which view produced
+    //     the output. ---------------------------------------------
     let frontier_json = dashboard
         .render_frontier_json()
         .expect("render_frontier_json should succeed");
@@ -251,8 +268,18 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
 
     assert!(
         !frontier_stories.is_empty(),
-        "frontier JSON must surface the two healthy stories (C, self-head) so the \
-         era_head_id assertion has something to land on; got empty stories[]:\n{frontier}"
+        "frontier JSON must surface the proposed story ({ID_PROPOSED_FOR_FRONTIER}) \
+         so the era_head_id assertion has something to land on; got empty stories[]:\n{frontier}"
+    );
+
+    let frontier_ids: Vec<u64> = frontier_stories
+        .iter()
+        .filter_map(|s| s.get("id").and_then(|v| v.as_u64()))
+        .collect();
+    assert!(
+        frontier_ids.contains(&(ID_PROPOSED_FOR_FRONTIER as u64)),
+        "frontier JSON must include the proposed story {ID_PROPOSED_FOR_FRONTIER}; \
+         got ids: {frontier_ids:?}"
     );
 
     for s in frontier_stories {
@@ -271,8 +298,9 @@ fn canopy_and_frontier_json_rows_carry_era_head_id_pointing_at_chain_terminus() 
                      of which lens produced the output; got row: {s}"
                 )
             });
-        // Retired rows are filtered from frontier, so every visible
-        // row here must be its own era head (healthy-not-superseded).
+        // Retired and healthy rows are filtered from frontier, so every
+        // visible row here must be its own era head (a non-retired,
+        // non-superseded story whose chain terminus is itself).
         assert_eq!(
             era_head, id,
             "frontier-visible (non-retired, non-superseded) story {id} must carry \
