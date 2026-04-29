@@ -5,7 +5,7 @@ outcome: |
   structured report naming every story whose declared status disagrees with
   its actual implementation state, so drift between authored intent and
   shipped state is visible without manual cross-referencing.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -71,6 +71,34 @@ acceptance:
       audit`) could disagree about whether a healthy story is currently
       red, and the corpus gains a second source of truth for a question
       that has exactly one answer.
+  - file: crates/agentic-dashboard/tests/audit_flags_yaml_healthy_without_signing_row.rs
+    justification: |
+      Proves category 5 (yaml-healthy-without-signing-row): given a
+      fixture corpus containing one story whose YAML has `status:
+      healthy` AND `agentic-store` carries ZERO
+      `uat_signings.verdict=pass` rows AND ZERO
+      `manual_signings.verdict=pass` rows for that story id, the audit
+      report names that story id under a category-5 heading and exits
+      with the same non-zero gate-mode exit code the audit returns for
+      any non-empty report (see "Exit-code contract" in guidance).
+      The query MUST compose both tables: a row in either
+      `uat_signings` (a real `agentic uat` Pass) OR `manual_signings`
+      (a backfilled manual ritual via story 28) satisfies the gate
+      and removes the story from this category. A story whose YAML
+      says `proposed` or `under_construction` does NOT route to
+      category 5 (those are categories 1, 2, 3 territory); a story
+      whose YAML says `retired` is excluded outright (retired stories
+      were never required to carry signing rows). Without this test,
+      the forged-promotion shape — the manual-ritual stories 11, 17,
+      and 23 lived in until backfill, and any future hand-edit that
+      flips `status: healthy` without driving `agentic uat` — is
+      detectable by the dashboard (story 3's `error` row) but
+      invisible to the audit's structured report, breaking the symmetry
+      between the two surfaces and forcing the pre-commit hook (story
+      29) to wrap both tools just to cover the same shape twice. The
+      composition with `manual_signings` is what lets the backfill
+      (story 28) bring stories 11, 17, and 23 into compliance without
+      forcing them through a synthetic UAT pass.
   - file: crates/agentic-dashboard/tests/audit_clean_corpus_reports_no_drift.rs
     justification: |
       Proves the empty-report happy path: given a fixture corpus where
@@ -87,23 +115,49 @@ acceptance:
   - file: crates/agentic-cli/tests/stories_audit_json_mode.rs
     justification: |
       Proves the `--json` contract reaches the operator through the
-      binary: `agentic stories audit --json` against a fixture corpus
-      containing at least one drifted story per category emits stdout
-      that `serde_json::from_str` parses into a value carrying a
-      top-level object with one key per category
-      (`implementation_without_flip`, `promotion_ready`,
+      binary for the original four categories: `agentic stories audit
+      --json` against a fixture corpus containing at least one drifted
+      story across categories 1–4 emits stdout that
+      `serde_json::from_str` parses into a value carrying top-level
+      keys (`implementation_without_flip`, `promotion_ready`,
       `test_builder_not_started`, `healthy_with_failing_test`), each
       mapping to an array of objects naming the offending story id
       and any per-category context (e.g. the passing test files for
       category 1, the failing test files for category 4). The same
-      data appears in human-readable form when `--json` is absent,
-      and exit code is 0 in both modes regardless of how many drifts
-      the report contains (the audit reports drift; it does not
-      itself fail on drift). Without this, machine consumers (CI
-      jobs, future dashboards) have to scrape TTY output to learn
-      what drifted, and the symmetry with `agentic stories health
-      --json` (story 3) breaks at the boundary they are most likely
-      to lean on.
+      data appears in human-readable form when `--json` is absent.
+      Without this, machine consumers (CI jobs, future dashboards)
+      have to scrape TTY output to learn what drifted, and the
+      symmetry with `agentic stories health --json` (story 3) breaks
+      at the boundary they are most likely to lean on. The fifth
+      category (yaml-healthy-without-signing-row) is pinned at the
+      binary boundary by its own dedicated test
+      (`audit_yaml_healthy_without_signing_row_via_binary.rs`) so
+      this test's contract — and the JSON shape it pins for the
+      four pre-existing categories — does not have to grow on every
+      future category addition.
+  - file: crates/agentic-cli/tests/audit_yaml_healthy_without_signing_row_via_binary.rs
+    justification: |
+      Proves category 5 reaches the operator through the binary:
+      `agentic stories audit --json` against a fixture corpus
+      containing one story with `status: healthy` on disk AND zero
+      `uat_signings`/`manual_signings` rows for that story id emits
+      stdout whose `yaml_healthy_without_signing_row` JSON key is an
+      array containing exactly that story's id, the same data
+      appears under a `yaml-healthy-without-signing-row` heading in
+      the default human-readable report, and the exit code is the
+      gate-mode non-zero exit (exit 2) the audit now returns when
+      ANY drift is detected — see "Exit-code contract" in guidance
+      for the binary-level shift from "exit 0 regardless of drift"
+      to "exit 2 on any non-empty report." A fixture clean of all
+      five categories returns exit 0 with empty arrays under all
+      five keys. Without this binary-level pin, the fifth category
+      could be wired in the dashboard library without the JSON
+      output adopting it (the same library/binary-wire gap story 1
+      and story 3's CLI tests exist to close), and the pre-commit
+      hook (story 29) wrapping `agentic stories audit` would not
+      see a non-zero exit on the forged-promotion shape — turning
+      the fifth category into yet another silently-detected-but-
+      not-enforced observation.
   uat: |
     Goal: convince yourself that `agentic stories audit` reports every
     drift category against a fixture corpus, exits 0 on a clean corpus,
@@ -207,19 +261,38 @@ guidance: |
   manually flip a status, run UAT, or amend the story per the
   defects-amend-the-owning-story rule).
 
-  Why this CLI verb instead of a hook. The original idea was a
-  `PreToolUse` hook or a git pre-commit hook that would catch
-  build-rust forgetting to flip `proposed → under_construction` on
-  pickup. Both options were brittle: a `PreToolUse` hook cannot see
-  the story id being implemented (the hook fires per tool call, not
-  per story), and a git pre-commit hook fires on every commit
-  including non-build-rust ones (the cleanup-pass commit, the
-  guidance-pass commit, the corpus-edit commit) and would either
-  spam-warn or false-fail. The right home is a CLI command that
-  detects drift on demand — operators run it when they want a
-  consistency check; CI may run it as a non-blocking warning step.
+  Why this CLI verb instead of a hook (original 2026-04-19 framing,
+  now superseded — read the 2026-04-29 amendment immediately
+  below). The original idea was a `PreToolUse` hook or a git
+  pre-commit hook that would catch build-rust forgetting to flip
+  `proposed → under_construction` on pickup. Both options were
+  ruled out at the time: a `PreToolUse` hook cannot see the story
+  id being implemented (the hook fires per tool call, not per
+  story), and a git pre-commit hook would (it was thought) fire
+  spam-warns on cleanup commits and guidance commits. The CLI
+  surface was chosen so operators could run drift detection on
+  demand and CI could pipe `--json` output into bespoke gate logic.
 
-  The four drift categories.
+  2026-04-29 amendment — the audit now exits non-zero on any
+  drift, AND the pre-commit hook concern is correctly resolved.
+  The original carve-out's premise was wrong on the second point:
+  a pre-commit hook that runs `agentic stories audit` and fails
+  the commit on non-empty drift is not "spam-warn or false-fail"
+  — it is the structural complement to the prove-it gate. A
+  cleanup commit and a guidance commit either leave the corpus
+  free of drift (in which case the audit passes silently) or
+  introduce drift (in which case blocking the commit is exactly
+  the right behaviour). The CLI surface remains the same; what
+  changed is the exit code (drift now means exit 2, see below)
+  AND the addition of the fifth category (yaml-healthy-without-
+  signing-row), which is the forged-promotion shape that was
+  invisible to the original four categories. Story 29 ships the
+  pre-commit hook that wraps this command together with `agentic
+  stories health --all`. The on-demand human use case (operator
+  asks "what drifted?") is unchanged: the report payload is the
+  same, the human just sees a non-zero exit alongside it now.
+
+  The five drift categories.
 
     1. Implementation-without-flip. `status: proposed` AND every path
        in `acceptance.tests[].file` exists on disk AND each test
@@ -269,6 +342,34 @@ guidance: |
        function on `agentic-dashboard` if reuse demands it; the
        contract is "audit and health agree about test redness,"
        not "audit re-walks cargo."
+
+    5. Yaml-healthy-without-signing-row. `status: healthy` AND
+       ZERO `uat_signings.verdict=pass` rows for the story_id
+       AND ZERO `manual_signings.verdict=pass` rows for the
+       story_id (where `manual_signings` is the backfill table
+       story 28 introduces; the union of the two tables is the
+       "is the prove-it gate satisfied?" query). This is the
+       forged-promotion shape: the YAML claims `healthy` but
+       no attestation backs it, in either the real `agentic uat`
+       table or the backfilled-manual-ritual table. Stories 11,
+       17, and 23 lived in this shape during their pre-backfill
+       period (the manual ritual flipped `status: healthy`
+       without driving `agentic uat`); future hand-edits or
+       reverts that retain `healthy` without a corresponding
+       signing row produce the same shape. The audit names the
+       story id under a category-5 heading. The dashboard
+       (story 3) classifies the same shape as `error` with
+       reason "status-evidence mismatch"; the audit's
+       category-5 is the structured-report twin of that
+       dashboard `error` row, ensuring the symmetry the four-
+       category set originally claimed but only the dashboard
+       enforced. The composition with `manual_signings` is what
+       makes the backfill (story 28) load-bearing: a story that
+       was promoted via the manual ritual and then backfilled
+       has a `manual_signings` row, so the audit accepts it as
+       NOT category-5; without the union, every backfilled
+       story would still appear as category-5 forever and the
+       gate would block the same commits it claims to permit.
 
   Why the boundary with `agentic stories health` is explicit. Story
   3's dashboard classifies stories into `proposed`, `under_construction`,
@@ -345,19 +446,46 @@ guidance: |
     omitted, so consumers don't have to distinguish "missing key"
     from "no entries."
 
-  Exit-code contract.
-    0 = audit ran successfully, regardless of how many drifts
-        the report contains. Drift is the audit's payload, not its
-        failure mode. CI jobs that want to fail on drift may pipe
-        `--json` into `jq` and assert specific arrays are empty;
-        the audit itself does not make that policy call.
-    Non-zero = audit could not run. Triggers: store unreachable,
-        `stories/` directory missing, malformed YAML in a story
-        file that prevents loading. The audit treats malformed
-        YAML the way `agentic stories health` does — surface the
-        problem, do not crash — but if the malformation prevents
-        even loading the story id, the audit is allowed to fail
-        loudly because it cannot reason about what it cannot read.
+  Exit-code contract (revised 2026-04-29).
+    0 = audit ran successfully AND every category's array is
+        empty (no drift detected). The corpus is in the state
+        the prove-it gate attests to and a wrapping pre-commit
+        hook (story 29) permits the commit.
+    2 = audit ran successfully AND at least one category's
+        array is non-empty (drift detected). The full report is
+        emitted on stdout (human-readable or `--json` per flag);
+        the non-zero exit is the gate-half that lets the
+        pre-commit hook (story 29) refuse the commit. The exit
+        code is exit 2 (could-not-attest, mirroring story 1's
+        dirty-tree mapping and story 11's ancestor refusal),
+        NOT exit 1 — drift is a "retry after addressing the
+        prerequisite" signal, not a real Fail of the operation
+        itself. Story 3's `agentic stories health --all`
+        exit-code contract uses the same mapping for the same
+        reason (see story 3's revised exit-code section).
+    Non-zero non-2 = audit could not run at all. Triggers:
+        store unreachable, `stories/` directory missing,
+        malformed YAML in a story file that prevents loading.
+        The audit treats malformed YAML the way `agentic
+        stories health` does — surface the problem, do not
+        crash — but if the malformation prevents even loading
+        the story id, the audit is allowed to fail loudly
+        because it cannot reason about what it cannot read.
+
+    Why the original 2026-04-19 contract said exit 0
+    regardless. The original framing argued "drift is the
+    audit's payload, not its failure mode" and treated the
+    audit as a pure inspector that CI could pipe through `jq`.
+    That posture made the audit unable to participate in
+    structural enforcement: a CI pipeline (or a pre-commit
+    hook) had to embed jq logic per category to consume the
+    JSON, and the inspector-only stance left forged
+    promotions structurally unblocked. The 2026-04-29
+    amendment makes the gate explicit: the audit IS an
+    enforcement gate now, and the exit code is the structural
+    signal the pre-commit hook (story 29) consumes. The
+    inspector use case is unchanged — operators see the same
+    payload — they just see a non-zero exit alongside it.
 
   CLI shape — argv (authoritative).
     `agentic stories audit [--json] [--store <path>]`
@@ -400,11 +528,22 @@ guidance: |
   structure — Rust integration tests live where the surface they
   exercise lives.
 
-  What this story is NOT.
-    - NOT an enforcement gate. The audit reports; it does not
-      block. CI may consume the JSON output and fail its own
-      build, but `agentic stories audit` itself returns exit 0
-      whenever it ran successfully.
+  What this story is NOT (revised 2026-04-29).
+    - NOT a mutator of corpus state. The audit reports drift
+      via stdout payload AND exit code; it does NOT flip any
+      story's status, write evidence rows, or modify any YAML.
+      Resolution is operator judgment (the operator may then
+      manually flip a status, run UAT, run `agentic store
+      backfill <id>` per story 28, or amend the story per the
+      defects-amend-the-owning-story rule). The original
+      "NOT an enforcement gate" line was reframed by the
+      2026-04-29 amendment: the exit-code is now load-bearing
+      and the audit IS structurally a gate (the pre-commit
+      hook in story 29 consumes the exit code), but the
+      gate's only action is "refuse the commit" — it never
+      writes anything itself. The distinction between
+      "structural gate" and "mutator" still holds; the audit
+      is the former and not the latter.
     - NOT an auto-fixer. The audit does not flip statuses,
       record verdicts, run UAT, or scaffold tests. Resolution
       is operator judgment.
@@ -423,14 +562,20 @@ guidance: |
       The four categories pinned here are the status-vs-
       implementation drift slice; corpus-integrity audit is
       a separate concern with its own justification.
-    - NOT a hook. Hooks were considered and rejected (see
-      "Why this CLI verb instead of a hook" above). The audit
-      is on-demand, operator-driven, never automatic.
+    - NOT itself a hook (the audit is a CLI command, not a
+      git hook). The pre-commit hook that wraps this command
+      is story 29's contract; story 25 owns the CLI surface
+      and its exit-code semantics, story 29 owns the hook
+      script that invokes it. Both layers are now load-
+      bearing — the original 2026-04-19 framing's claim that
+      hooks were rejected outright was reframed by the
+      2026-04-29 amendment (see "Why this CLI verb instead
+      of a hook" above).
     - NOT a mutator of `test_runs`. The audit reads the
       latest `test_runs` row per story; it does not run any
       tests itself and writes nothing.
 
-  Relationship to stories 2, 3, 6, 12.
+  Relationship to stories 2, 3, 6, 12, 28, 29.
     - Story 6 (`agentic-story` loader) — hard prerequisite. The
       audit walks the loaded `Story` values; the loader's
       DAG-acyclicity check, its typed-error shapes, and its
@@ -441,7 +586,11 @@ guidance: |
       existing fell-from-grace logic. Without the dashboard,
       the audit has nothing to ask "is this test red?" without
       reimplementing the dashboard. With it, the audit becomes
-      a thin layer over already-proven primitives.
+      a thin layer over already-proven primitives. Story 3
+      and story 25 also share the 2026-04-29 exit-code shift
+      (exit 2 on detected drift / `error` / `unhealthy`); the
+      mapping is identical so the pre-commit hook in story 29
+      can wrap both with one rule.
     - Story 2 (`agentic-ci-record`) — provides the `test_runs`
       row shape the audit consumes via the dashboard's reads.
       The audit does NOT directly read `test_runs`; it reads
@@ -454,29 +603,63 @@ guidance: |
       corpus DAG. They do not depend on each other; an
       operator can run audit without ever invoking
       `stories test`, and vice versa.
+    - Story 28 (`agentic store backfill`) — provides the
+      `manual_signings` table whose presence removes a story
+      from category 5. The audit's category-5 query is
+      `uat_signings UNION manual_signings`; without story 28,
+      stories promoted via the manual ritual (11, 17, 23 in
+      their pre-backfill state) appear as category-5 forever
+      because the audit cannot tell "manually attested" from
+      "not attested." Story 28 is the bridge that lets the
+      audit's gate become enforceable without rejecting the
+      backfilled-manual-ritual shape. Per the eventual-
+      consistency posture, story 25's `depends_on` does NOT
+      add a back-edge onto story 28; both sit red until the
+      pipeline converges.
+    - Story 29 (pre-commit hook) — the consumer of the
+      revised exit code. Story 29 owns the hook script and
+      the `core.hooksPath` setup; story 25 owns the CLI
+      surface and exit-code semantics. The contract between
+      them is "exit 0 means clean, exit 2 means drift" — the
+      hook treats exit 2 as commit-block. Per the eventual-
+      consistency posture, story 25's `depends_on` does NOT
+      add a back-edge onto story 29.
 
   Test file locations.
-    Library-level tests (five tests:
+    Library-level tests (six tests — five from the original
+    2026-04-19 contract plus one added by the 2026-04-29
+    fifth-category amendment:
     `audit_flags_implementation_without_status_flip.rs`,
     `audit_flags_promotion_ready_under_construction.rs`,
     `audit_flags_test_builder_not_started.rs`,
     `audit_flags_healthy_with_failing_test.rs`,
+    `audit_flags_yaml_healthy_without_signing_row.rs`,
     `audit_clean_corpus_reports_no_drift.rs`) live under
     `crates/agentic-dashboard/tests/` as Rust integration
     tests. They use a `MemStore` from `agentic-store`, seed
-    it with synthetic `test_runs` rows where category 4
-    requires it, point the audit at a temporary `stories/`
-    directory with fixture YAMLs whose statuses and test
-    files are arranged to exercise each category, and assert
-    on the structured report value.
+    it with synthetic `test_runs` / `uat_signings` /
+    `manual_signings` rows where the category requires it,
+    point the audit at a temporary `stories/` directory with
+    fixture YAMLs whose statuses and test files are arranged
+    to exercise each category, and assert on the structured
+    report value.
 
-    Binary-level test (one test:
-    `stories_audit_json_mode.rs`) lives under
-    `crates/agentic-cli/tests/` as a Rust integration test
-    driven via `assert_cmd`. It exercises the argv-to-library
-    wire for both human-readable and `--json` output modes
-    against a fixture corpus where multiple categories are
-    populated.
+    Binary-level tests (two tests — one from the original
+    2026-04-19 contract plus one added by the 2026-04-29
+    fifth-category amendment:
+    `stories_audit_json_mode.rs`,
+    `audit_yaml_healthy_without_signing_row_via_binary.rs`)
+    live under `crates/agentic-cli/tests/` as Rust
+    integration tests driven via `assert_cmd`. Together they
+    exercise the argv-to-library wire for both human-readable
+    and `--json` output modes across all five categories AND
+    the gate-mode exit-code contract revised under the
+    2026-04-29 amendment (exit 2 on any drift, exit 0 on a
+    clean corpus). Splitting the new category into a
+    dedicated binary test keeps the original test's
+    per-scaffold justification stable (preserved verdict,
+    not re-authored) while still pinning the new shape at
+    the binary boundary.
 
   Phase 0 trigger context. The Phase 0 amendment pipeline (stories
   16, 18, 19 in particular) shipped implementation while still
