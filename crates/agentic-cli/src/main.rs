@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use agentic_ci_record::{ExecutorOutcome, TestExecutor};
 use agentic_dashboard::Dashboard;
-use agentic_store::SurrealStore;
+use agentic_store::{Store, SurrealStore};
 use agentic_story::Story;
 use agentic_test_builder::{TestBuilder, TestBuilderError};
 use agentic_uat::{SignerSource, StubExecutor, Uat, UatError, Verdict};
@@ -40,6 +40,11 @@ enum Commands {
         /// Path to the store
         #[arg(long)]
         store: Option<PathBuf>,
+    },
+    /// Interact with the store
+    Store {
+        #[command(subcommand)]
+        subcommand: StoreSubcommand,
     },
     /// Scaffold failing tests for a story and record red-state evidence
     #[command(name = "test-build")]
@@ -89,6 +94,23 @@ enum StoriesSubcommand {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Path to the store
+        #[arg(long)]
+        store: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum StoreSubcommand {
+    /// Backfill a manual_signings row for a manually-promoted story
+    Backfill {
+        /// Story ID to backfill
+        story_id: u32,
+
+        /// Signer identity (overrides env var and git config)
+        #[arg(long)]
+        signer: Option<String>,
 
         /// Path to the store
         #[arg(long)]
@@ -449,6 +471,101 @@ fn main() {
                 }
 
                 std::process::exit(0);
+            }
+        },
+        Commands::Store { subcommand } => match subcommand {
+            StoreSubcommand::Backfill {
+                story_id,
+                signer: _signer,
+                store,
+            } => {
+                let store_path = resolve_store_path(store);
+                eprintln!("store: {}", store_path.display());
+
+                let store = match SurrealStore::open(&store_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("could not open store: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                let repo_root = match git2::Repository::discover(".") {
+                    Ok(r) => r
+                        .workdir()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from(".")),
+                    Err(e) => {
+                        eprintln!("failed to discover git repo: {e}");
+                        std::process::exit(2);
+                    }
+                };
+
+                // Call the backfill operation
+                match store.backfill_manual_signing(story_id, &repo_root) {
+                    Ok(()) => {
+                        // Get HEAD SHA for output
+                        match get_head_sha() {
+                            Ok(sha) => {
+                                let short_sha = &sha[..7.min(sha.len())];
+                                println!("backfilled story {story_id} at {short_sha}");
+                                std::process::exit(0);
+                            }
+                            Err(e) => {
+                                eprintln!("failed to get HEAD SHA: {e}");
+                                std::process::exit(2);
+                            }
+                        }
+                    }
+                    Err(agentic_store::BackfillError::DirtyTree) => {
+                        eprintln!("dirty tree");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::UnknownStory { story_id }) => {
+                        eprintln!("unknown story id: {story_id}");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::StatusNotHealthy {
+                        story_id,
+                        observed_status,
+                    }) => {
+                        eprintln!("story {story_id} status is {observed_status}, not healthy");
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::NoGreenEvidence {
+                        story_id,
+                        evidence_dir,
+                    }) => {
+                        eprintln!(
+                            "no green-jsonl evidence found for story {story_id} in {}",
+                            evidence_dir.display()
+                        );
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::NoFlipInHistory { story_id }) => {
+                        eprintln!(
+                            "no commit in history flipped story {story_id} to healthy"
+                        );
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::AlreadyAttested {
+                        story_id,
+                        table,
+                    }) => {
+                        eprintln!(
+                            "story {story_id} already has a {table} row at HEAD"
+                        );
+                        std::process::exit(2);
+                    }
+                    Err(agentic_store::BackfillError::SignerMissing { story_id }) => {
+                        eprintln!("could not resolve signer identity for story {story_id}");
+                        std::process::exit(2);
+                    }
+                    Err(e) => {
+                        eprintln!("backfill failed: {e}");
+                        std::process::exit(2);
+                    }
+                }
             }
         },
         Commands::Uat {
