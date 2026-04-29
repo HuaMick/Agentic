@@ -30,6 +30,20 @@ acceptance:
       grows healthy noise and the attention-focused shape the
       frontier was built for is diluted to "a list with most of the
       stories the operator does not need to look at today."
+
+      Regression pinned (2026-04-30). At HEAD e7aa633, this test was the
+      canary that caught a frontier-filter inversion introduced by story
+      21's retired-handling amendment (commit 42e5d5a). The buggy code
+      routed `Health::Healthy → return true` in `filter_frontier`,
+      admitting healthy stories into frontier output despite the
+      healthy-hidden rule above. The test sat red — observed ids
+      [91101, 91102], expected [91102] — but the failure was hidden
+      behind a workspace-blocking E0597 in story 20's `commit_author_email`
+      test helper that aborted `cargo test --workspace` early. Once
+      test-builder fixed the E0597 in commit 29d2134, the latent red
+      surfaced. The justification stands: any future regression that
+      puts a `healthy` story back into frontier rendering must fail this
+      assertion.
   - file: crates/agentic-dashboard/tests/health_frontier_default_shows_proposed.rs
     justification: |
       Proves the status-range rule: a story whose status is
@@ -38,6 +52,20 @@ acceptance:
       not yet been started is invisible until it enters
       `under_construction` — the classic "my roadmap is not in my
       dashboard" gap the frontier view is supposed to close.
+
+      Regression pinned (2026-04-30). The same frontier-filter inversion
+      described in the previous test's justification (story 21's commit
+      42e5d5a) caused this test to red as well — the inverted rule
+      admitted the `healthy` ancestor 91201 into frontier output
+      alongside the legitimately-frontier proposed stories 91202 and
+      91203. Observed ids [91201, 91202, 91203], expected [91202, 91203].
+      The test's status-range justification (proposed-with-healthy-or-
+      empty-ancestry appears in the frontier) and the healthy-ancestor
+      exclusion are joint invariants — both must hold for the frontier
+      view to be useful, and this test pins the second invariant for
+      the proposed case. Surface both pins so a future filter
+      modification cannot silently re-invert one without tripping the
+      test.
   - file: crates/agentic-dashboard/tests/health_lvl_uses_longest_path_to_dag_leaf.rs
     justification: |
       Proves the `lvl` computation: given a fixture where story `X`

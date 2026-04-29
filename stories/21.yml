@@ -12,19 +12,26 @@ acceptance:
   tests:
   - file: crates/agentic-dashboard/tests/health_frontier_hides_retired.rs
     justification: |
-      Proves the frontier lens excludes retired stories: given
-      a corpus containing one story with `status: retired` and
-      one with `status: healthy`, the default `agentic stories
-      health` rendering (no mode flag) emits a table containing
-      exactly the healthy story's row and no row for the
-      retired story. The summary counts at the table's foot
-      also exclude retired from their denominators (retired
-      is neither healthy nor unhealthy — it is off-tree).
-      Without this, the dashboard's frontier discipline
-      (established by story 10) degrades as the corpus
-      accumulates retired eras: the frontier view becomes
-      cluttered with stories that have been explicitly
-      pruned, defeating the lens's purpose.
+      Proves the frontier lens excludes retired stories alongside the
+      healthy-exclusion rule story 10 owns: given a corpus containing
+      one `proposed` story (the only frontier candidate), one `healthy`
+      story, and one `retired (superseded_by: <successor>)` story (with
+      its successor present and healthy), the default `agentic stories
+      health` rendering (no mode flag) emits a table containing exactly
+      the proposed story's row, with NO row for the retired story AND
+      NO row for the healthy stories. The retired-exclusion rule
+      composes with story 10's healthy-exclusion rule — both must hold.
+      The summary counts at the table's foot also exclude retired from
+      their denominators (retired is neither healthy nor unhealthy —
+      it is off-tree); the four-status denominator
+      (`healthy + unhealthy + proposed + under_construction`) reflects
+      the WHOLE non-retired corpus, not the rendered frontier row count
+      (which is a strict subset). Without this, the dashboard's frontier
+      discipline (established by story 10) degrades as the corpus
+      accumulates retired eras: either retired stories leak into the
+      frontier (breaking story 21's pruning promise), or healthy stories
+      leak into the frontier (breaking story 10's done-is-hidden
+      promise). This test pins both pruning invariants in one fixture.
   - file: crates/agentic-dashboard/tests/health_canopy_shows_retired_grouped_by_chain.rs
     justification: |
       Proves the canopy lens surfaces retired stories grouped
