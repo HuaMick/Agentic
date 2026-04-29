@@ -128,9 +128,10 @@ fn stories_health_all_via_binary_emits_one_row_per_story_including_frontier_desc
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    assert!(
-        output.status.success(),
-        "`agentic stories health --all` must exit 0; got status={:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "story 3 amendment cascade: `agentic stories health --all` must exit 2 when corpus has error/unhealthy rows (this fixture has a `healthy`-claimed-but-unsigned story that classifies as error-class); rendering assertions unchanged. got status={:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
         output.status
     );
 
