@@ -1,0 +1,478 @@
+id: 29
+title: Pre-commit hook refuses commits whose corpus state would render as drift
+outcome: |
+  A developer who commits to a clone with `core.hooksPath` configured
+  cannot land a commit whose post-commit corpus state would render
+  `error` or `unhealthy` rows in `agentic stories health` or non-empty
+  arrays in `agentic stories audit`, because the pre-commit hook
+  refuses the commit with a message naming the offending story.
+status: proposed
+patterns:
+- standalone-resilient-library
+acceptance:
+  tests:
+  - file: scripts/verify/githooks_pre_commit_exists_and_executable.sh
+    justification: |
+      Proves the hook script exists in the tracked tree and is
+      executable: the test checks that `.githooks/pre-commit` is
+      present at the repository root, has mode bits granting user
+      execute (`-x` test), is tracked by git (`git ls-files`
+      includes it), and is encoded in LF line endings (per the
+      repository's `.gitattributes` — a CRLF hook script silently
+      fails on git for Windows). Without this verifier, a clone
+      could ship the hook in a non-executable state or with
+      Windows line endings, and `git config core.hooksPath
+      .githooks` would silently no-op (the hook either does not
+      run because it lacks the executable bit, or fails to
+      interpret because of CR characters in the shebang line) —
+      the gate would be a paper claim and the forged-promotion
+      shape this story exists to prevent would still land.
+  - file: scripts/verify/githooks_pre_commit_passes_on_clean_corpus.sh
+    justification: |
+      Proves the hook permits commits when the corpus is clean:
+      the script sets up a temporary clone of the repo (or a
+      synthetic repo seeded with a minimal corpus), configures
+      `core.hooksPath` to `.githooks`, makes a trivial
+      content-only commit (e.g. appending a line to a tracked
+      non-corpus file like `README.md`), and asserts the commit
+      lands without prompt or refusal. The hook's `agentic
+      stories health --all` and `agentic stories audit` calls
+      both exit 0 against the clean corpus per stories 3 and 25.
+      Without this test, a hook that false-fails on clean
+      commits would block every developer's normal workflow —
+      a silent catastrophic tightening worse than the forged
+      promotion the gate exists to prevent.
+  - file: scripts/verify/githooks_pre_commit_blocks_forged_promotion.sh
+    justification: |
+      Proves the hook refuses commits that would forge a
+      promotion: the script sets up a temporary clone with
+      `core.hooksPath=.githooks`, picks a story whose YAML
+      currently says `under_construction`, hand-edits its
+      `status:` line to `healthy` (without writing any
+      `uat_signings` or `manual_signings` row, and without
+      driving `agentic uat`), `git add`s the change, and runs
+      `git commit -m "forge"`. The script asserts the commit
+      is REFUSED (non-zero exit from `git commit`), no new
+      commit is created (HEAD's SHA is unchanged), AND
+      stderr contains a message that names the offending
+      story id and references the audit's
+      `yaml-healthy-without-signing-row` category (or the
+      dashboard's `error` row) — so the developer knows which
+      story tripped the gate without re-running the audit
+      manually. Without this test, the entire purpose of the
+      story is unproven; the hook could exist in the tree and
+      do nothing under the very condition it was created to
+      catch.
+  - file: scripts/verify/githooks_pre_commit_blocks_unhealthy_inducement.sh
+    justification: |
+      Proves the hook refuses commits that would induce a
+      fell-from-grace classification: the script sets up a
+      temporary clone with `core.hooksPath=.githooks`, picks a
+      currently-healthy story with at least one acceptance
+      test, deliberately breaks one of those test files (or
+      seeds a `test_runs.verdict=fail` row in the configured
+      store), `git add`s the change, and runs `git commit`. The
+      script asserts the commit is REFUSED, no new commit is
+      created, and stderr names the offending story id. The
+      `error` and `unhealthy` shapes both trip the gate — they
+      both map to the non-zero exit codes from `agentic stories
+      health --all` (story 3 revised) and `agentic stories
+      audit` (story 25 revised). Without this test, a developer
+      could accidentally commit code that breaks a healthy
+      story's tests AND the corpus's signed proof would silently
+      regress at the moment of the commit — the inverse failure
+      mode of the forged-promotion case, equally damaging
+      because it lets the dashboard's "fell from grace" row
+      ship in the same commit that produced it.
+  - file: scripts/verify/githooks_setup_documented_in_readme.sh
+    justification: |
+      Proves the one-time setup is discoverable: the script
+      greps the repository's top-level `README.md` for a code
+      block that contains the literal string `git config
+      core.hooksPath .githooks` AND a sentence explaining that
+      this is a one-time per-clone configuration step. Without
+      this verifier, the hook ships in the tree but no
+      developer is told to enable it — `core.hooksPath` is
+      not on by default, so an undocumented hook is effectively
+      not deployed. The verifier targets `README.md` (not
+      `CLAUDE.md`, not an ADR) because the README is the
+      first file a new contributor reads after clone, and
+      the setup must surface there. The verifier also asserts
+      the documentation block does NOT instruct the developer
+      to bypass the hook (no `--no-verify`, no `core.hooksPath
+      ""`, no environment variable) — escape hatches in
+      documentation are escape hatches in policy.
+  uat: |
+    Goal: convince yourself that a clone with
+    `core.hooksPath` configured permits clean commits, refuses
+    forged promotions, refuses commits that induce
+    fell-from-grace, that the setup is documented in the
+    README, and that the hook itself ships executable and
+    LF-encoded.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git
+         status --porcelain` and confirm the working tree is
+         empty.
+      2. Confirm the hook ships: `ls -l .githooks/pre-commit`
+         shows the file with execute bits set; `git ls-files
+         .githooks/pre-commit` returns the path; `file
+         .githooks/pre-commit` reports a script type (shell
+         or Python — the implementer's choice; either is
+         legitimate).
+      3. Configure the local clone: `git config core.hooksPath
+         .githooks`. Confirm: `git config --get
+         core.hooksPath` returns `.githooks`.
+      4. Install the binary so the hook can call it: `wsl
+         bash -c "source ~/.cargo/env && cd /home/code/Agentic
+         && cargo install --path crates/agentic-cli
+         --locked"`. Confirm `command -v agentic` resolves.
+
+    Clean-commit walkthrough:
+      5. Make a trivial corpus-irrelevant edit (e.g. `echo "
+         " >> docs/decisions/.gitkeep`). Stage and commit:
+         `git add docs/decisions/.gitkeep && git commit -m
+         "test: clean-commit walkthrough"`. Observe:
+           - Commit lands without prompt (`git log -1` shows
+             the new commit).
+           - The hook ran (its stderr — if it emits anything —
+             includes a line indicating `agentic stories
+             health --all` and `agentic stories audit` were
+             invoked and both returned exit 0).
+      6. Revert: `git reset --hard HEAD~1`. Confirm tree
+         clean.
+
+    Forged-promotion-refusal walkthrough:
+      7. Pick a currently-`under_construction` story id
+         `<uc-id>` from `stories/`. Hand-edit the YAML to
+         change its `status:` line from `under_construction`
+         to `healthy`. Do NOT run `agentic uat`. Do NOT run
+         `agentic store backfill`. Stage the change: `git
+         add stories/<uc-id>.yml`. Run `git commit -m
+         "forge: <uc-id>"`. Observe:
+           - Commit is REFUSED (non-zero exit from `git
+             commit`).
+           - stderr names `<uc-id>` and references the
+             yaml-healthy-without-signing-row category (or
+             the dashboard's `error` row, depending on
+             which CLI tripped the gate first).
+           - `git log -1` shows HEAD unchanged from before
+             the commit attempt.
+      8. Revert: `git restore stories/<uc-id>.yml`. Confirm
+         tree clean.
+
+    Unhealthy-induction-refusal walkthrough:
+      9. Pick a currently-`healthy` story id `<h-id>` whose
+         acceptance.tests includes at least one Rust
+         integration test. Pick one such test file path
+         from the YAML. Edit that test file to introduce a
+         compile error or a guaranteed-fail assertion (e.g.
+         `assert!(false, "induce fell-from-grace");`).
+         Stage and commit: `git add <test-file> && git
+         commit -m "induce: <h-id>"`. Observe:
+           - Commit is REFUSED.
+           - stderr names `<h-id>` (or the relevant
+             test_runs row's story_id).
+     10. Revert: `git restore <test-file>`. Confirm tree
+         clean.
+
+    Documentation walkthrough:
+     11. Read the top-level `README.md`. Confirm a fenced
+         code block contains the literal `git config
+         core.hooksPath .githooks` line AND a sentence
+         identifying it as a per-clone one-time step.
+         Confirm no instruction to bypass the hook
+         (`--no-verify`, etc.) appears in the same section.
+
+    Cleanup:
+     12. Reset `core.hooksPath` to the default if you want
+         the hook gone from your local clone: `git config
+         --unset core.hooksPath`. (Or leave it; the hook
+         is the steady-state expectation.)
+     13. If you want the installed binary gone: `cargo
+         uninstall agentic-cli`.
+guidance: |
+  This story adds infrastructure: a tracked `.githooks/pre-commit`
+  script that runs `agentic stories health --all` and `agentic
+  stories audit` and exits non-zero on a non-zero result from
+  either, plus README documentation telling developers to
+  configure `core.hooksPath` once per clone. The hook is the
+  structural complement to the prove-it gate: stories 3 and 25's
+  revised exit-code contracts (exit 2 on `error` / `unhealthy` /
+  drift) become enforcement only when something refuses commits
+  whose post-commit state would produce that exit code. The hook
+  is that something.
+
+  Why pre-commit, not pre-push.
+    Pre-commit blocks the smaller unit (one commit) at the
+    earliest moment (before the commit lands locally). A forged
+    promotion, a fell-from-grace inducement, or a drifted YAML
+    is caught the moment the developer tries to commit it,
+    rather than after they have built up a chain of work on top
+    of the bad commit and then push the chain. The cost (a
+    second-or-two delay on every commit) is bounded; the
+    benefit (the broken state never enters local history) is
+    structural. Pre-push would let bad commits accumulate
+    locally and only catch them at the moment of sharing, by
+    which point rebasing them out is more painful and the
+    developer's mental model has already diverged from the
+    repo's truth. The audit and health CLIs are fast enough
+    (sub-second on the current corpus) that the pre-commit
+    cost is acceptable; if either CLI grows expensive, that is
+    a defect in the CLI to be fixed in story 3 or 25, not a
+    reason to move the hook later in the lifecycle.
+
+  Why `core.hooksPath` instead of `.git/hooks/`.
+    `.git/hooks/` is per-clone and untracked: a hook placed
+    there never ships to other clones, so every developer
+    would have to manually copy-paste the script from
+    documentation or run a setup script. `core.hooksPath
+    .githooks` is a single one-time config that points git
+    at a tracked directory: every clone that opts in gets
+    every current and future hook for free, and every
+    update to the hook ships through normal commits to
+    `main`. The opt-in step is intentional — git refuses to
+    auto-execute scripts from a freshly-cloned repository
+    for security reasons, and the one-line setup is the
+    seam where the developer consents.
+
+  Why tracked under `.githooks/`, not under `scripts/`.
+    `.githooks/` is the conventional name for tracked git
+    hooks (it matches what `core.hooksPath` is documented
+    against in `git help config`); it signals to a reader
+    that the directory exists for git, not for the user.
+    `scripts/` is the user-facing convenience namespace
+    (search, install, verify); putting the hook there
+    would conflate the "I run this manually" semantic
+    with the "git runs this for me" semantic. Verifier
+    scripts that test the hook (e.g.
+    `scripts/verify/githooks_*.sh`) live under
+    `scripts/verify/` per the corpus convention; the hook
+    itself lives in `.githooks/`.
+
+  Hook script implementation — shell vs Python.
+    Either is acceptable. The script's job is small: run two
+    commands, capture their exit codes, emit a clear stderr
+    message on non-zero, exit non-zero. Bash is the path of
+    least friction (already required for `scripts/verify/*.sh`,
+    no extra dependency). Python is acceptable if the
+    implementer wants richer error formatting or more
+    intricate test-runner integration. The acceptance tests
+    pin observable behaviour (the file exists, is executable,
+    blocks the right cases, permits the right cases); they
+    do NOT pin the language.
+
+  Hook script behaviour.
+    On every invocation:
+      1. Locate the `agentic` binary. The hook's `PATH`
+         expectation is the developer's standard `PATH`
+         (the binary should be installed via
+         `cargo install --path crates/agentic-cli` per
+         the repo's existing convention). If the binary
+         is not on `PATH`, the hook emits a stderr message
+         saying so and exits 0 (DO NOT block commits when
+         the binary is missing — that would be a chicken-
+         and-egg failure mode for fresh clones that have
+         not yet built; the build itself is also gated by
+         the hook would create a stuck-loop). The "binary
+         missing" case is expected to be vanishingly rare
+         in steady state and surfaces a clear stderr
+         message that tells the developer how to fix it
+         (`cargo install --path crates/agentic-cli
+         --locked`).
+      2. Run `agentic stories audit`. If exit non-zero,
+         emit a stderr message naming the audit's drift
+         output (or the JSON `--json` representation,
+         if the implementer chooses), and exit non-zero.
+      3. Run `agentic stories health --all`. If exit
+         non-zero, emit a stderr message naming the
+         offending story id(s), and exit non-zero.
+      4. If both exited 0, exit 0 silently (no stdout).
+    The two commands are run sequentially; the hook does
+    NOT short-circuit after the first failure (so a
+    developer with multiple drift sources sees all of
+    them in one failed-commit message rather than playing
+    whack-a-mole). The hook's own exit code is the OR of
+    the two underlying exit codes: zero only if both
+    underlying commands returned zero.
+
+    Working-directory invariant. The hook is invoked by git
+    with cwd set to the repository root. The hook does NOT
+    change directory. The two CLIs are expected to operate
+    on the cwd's `stories/` and configured store; that
+    matches the developer's intuition (the hook checks
+    "this repo's state," not some unrelated other state).
+
+  Why no `--no-verify` workaround. `git commit --no-verify`
+  bypasses every pre-commit hook by design (it is git's
+  built-in escape hatch). This story does NOT and cannot
+  prevent its use; preventing it would require a server-
+  side hook (pre-receive on the remote), which is out of
+  scope for a pre-commit story. The convention is that
+  `--no-verify` is for emergency releases where the
+  developer has explicit user authorisation; it is not a
+  routine workflow tool. CLAUDE.md may surface this as a
+  prose rule (the orchestrator owns CLAUDE.md per the
+  brief); this story does not encode a prose-policy
+  enforcement, only the structural enforcement against
+  the routine commit path.
+
+  README.md documentation.
+    The setup instruction lands in the top-level
+    `README.md` under a clearly-titled subsection (e.g.
+    "Pre-commit hook setup" or similar — the orchestrator
+    chooses the heading style, which is README's curator
+    territory). The instruction includes:
+      - The literal command: `git config core.hooksPath
+        .githooks`.
+      - A sentence explaining it is a one-time per-clone
+        step.
+      - A sentence explaining what the hook does and why
+        a developer wants it (refuses commits that would
+        forge promotions or fell-from-grace stories,
+        keeping the corpus and the prove-it gate in
+        sync).
+      - NO instruction to bypass the hook (no
+        `--no-verify` reference, no
+        `core.hooksPath ""`).
+    The acceptance test
+    `githooks_setup_documented_in_readme.sh` enforces
+    the literal command's presence and the absence of
+    bypass instructions. Editing `README.md` is the
+    orchestrator's territory (CLAUDE.md surface-ownership
+    block); story 29 declares the test, the orchestrator
+    lands the README edit alongside this story's
+    test-builder + build-rust cycle.
+
+  Hook does NOT call `cargo test`. The hook's job is to
+  read evidence, not to produce it. Running cargo on
+  every commit would (a) take a non-bounded amount of
+  time, (b) produce false-positive blocks when a
+  developer is mid-edit between two committable states,
+  and (c) duplicate work the developer already does in
+  their normal `cargo test` flow. The audit and the
+  health CLI both read from `agentic-store` and walk the
+  on-disk story corpus; they do not run tests. This is
+  the correct boundary.
+
+  Hook does NOT mutate any store table or any corpus
+  file. It is read-only by construction. If a hook were
+  to write (e.g. record an "audit-passed" row to a
+  table), it would silently expand the surface a
+  malicious developer could exploit and tie the gate's
+  reliability to the store's availability. The hook
+  fails open ONLY when the binary is missing (see "Hook
+  script behaviour" point 1); every other failure mode
+  fails closed.
+
+  Why the standalone-resilient-library pattern applies.
+    The hook itself is a shell or Python script — not a
+    Rust library — so the pattern does not apply to its
+    code directly. But the hook's behaviour depends on
+    the libraries it invokes (`agentic stories audit`'s
+    library entry point and `agentic stories health
+    --all`'s library entry point) being able to produce a
+    correct verdict when the rest of the system is in
+    flames. Both surfaces already declare the pattern
+    (story 25 lists it; story 3's dashboard guidance
+    derives it from story 1's CLI allowed-deps); this
+    story inherits the posture transitively. The
+    verifier scripts under `scripts/verify/githooks_*.sh`
+    drive the hook end-to-end with synthetic repos and
+    do not depend on the orchestrator or runtime; the
+    verifier surface is itself standalone-resilient by
+    construction.
+
+  Test file locations.
+    All five acceptance tests are shell verifiers under
+    `scripts/verify/`:
+      - `githooks_pre_commit_exists_and_executable.sh`
+      - `githooks_pre_commit_passes_on_clean_corpus.sh`
+      - `githooks_pre_commit_blocks_forged_promotion.sh`
+      - `githooks_pre_commit_blocks_unhealthy_inducement.sh`
+      - `githooks_setup_documented_in_readme.sh`
+    Shell verifiers are the right shape because: (a) the
+    contract is whole-process behavioural (git commit
+    refused / permitted) which a Rust integration test
+    cannot easily express without inventing a repo-level
+    fixture harness, (b) the file-system invariants
+    (executable bit, LF encoding, README content) are
+    natural shell territory, and (c) the verifiers
+    exercise the hook through real `git commit`
+    invocations in tempdirs, which mirrors the
+    developer's actual experience.
+
+  Relationship to story 3 (`agentic stories health`).
+    Story 3 owns the dashboard CLI and its 2026-04-29
+    revised exit-code contract (exit 2 on `error` /
+    `unhealthy`). This story (29) consumes that exit
+    code in its hook script. Without story 3's exit-
+    code revision, the hook would have to scrape
+    rendered output to learn whether the corpus is
+    clean — exactly the bespoke gate logic the exit
+    code is designed to replace.
+
+  Relationship to story 25 (`agentic stories audit`).
+    Story 25 owns the audit CLI and its 2026-04-29
+    revised exit-code contract (exit 2 on any non-empty
+    drift report) AND the new fifth category
+    (yaml-healthy-without-signing-row). This story (29)
+    consumes that exit code. The fifth category is what
+    catches the forged-promotion shape; without it, the
+    hook would let forged promotions land (the original
+    four categories never covered the forge shape).
+
+  Relationship to story 28 (`agentic store backfill`).
+    Story 28 is the operator's escape valve from a
+    blocked commit: when the hook refuses because of a
+    legitimately-manual-promoted story, the operator
+    runs backfill to record the `manual_signings` row,
+    re-stages, and retries the commit. Without
+    backfill, a clone of the repo today (with stories
+    11/17/23 in their forged state historically) would
+    refuse every single commit until those stories
+    were either retired, hand-edited back to
+    `under_construction`, or driven through a
+    synthetic UAT pass — all worse than the backfill
+    path. Story 28 is the bridge that makes the gate
+    deployable on existing forged history.
+
+  Relationship to story 1 (`agentic uat`).
+    Story 1's prove-it gate is the WRITE-side of the
+    invariant "every healthy story has a signing
+    row." Story 29's hook is the READ-side: it
+    refuses to let a commit land that would violate
+    the invariant. Together they form a bidirectional
+    enforcement: writes go through `agentic uat`,
+    reads (in the form of commits inspecting corpus
+    state) go through the audit / health CLIs, and
+    the pre-commit hook ties the two surfaces
+    together at the git boundary.
+
+  Why this is a separate story from 25.
+    Story 25 owns the CLI command and its exit-code
+    semantics. Story 29 owns the git infrastructure
+    that consumes the exit code. The journey
+    principle: an operator running `agentic stories
+    audit` on demand (story 25's UAT) is a different
+    journey from a developer making a commit and
+    being refused by a hook (story 29's UAT). The
+    splitting-rule: distinct starting contexts (CLI
+    invocation vs git commit), distinct observables
+    (drift report vs commit-refused message), distinct
+    artefact (CLI binary vs hook script + README
+    documentation). The deletion test confirms: imagine
+    retiring story 29; story 25's CLI surface still
+    works, but the structural enforcement disappears
+    — distinct capability, not a pass-through.
+depends_on:
+- 3
+- 25
+related_files:
+- .githooks/pre-commit
+- README.md
+- scripts/verify/githooks_pre_commit_exists_and_executable.sh
+- scripts/verify/githooks_pre_commit_passes_on_clean_corpus.sh
+- scripts/verify/githooks_pre_commit_blocks_forged_promotion.sh
+- scripts/verify/githooks_pre_commit_blocks_unhealthy_inducement.sh
+- scripts/verify/githooks_setup_documented_in_readme.sh
