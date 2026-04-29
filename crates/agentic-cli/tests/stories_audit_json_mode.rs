@@ -1,30 +1,54 @@
 //! Story 25 acceptance test: the `--json` flag is plumbed end-to-end
-//! through the `agentic stories audit` subcommand.
+//! through the `agentic stories audit` subcommand for the original
+//! four drift categories, AND the JSON shape now also exposes the
+//! fifth category's top-level key (as an array, possibly empty) per
+//! the 2026-04-29 amendment.
+//!
+//! Re-authored 2026-04-29 under the ADR-0005 amendment carve-out:
+//! story 25's 2026-04-29 amendment shifted the binary's exit-code
+//! contract from "exit 0 regardless of drift" to "exit 2 on any
+//! drift, exit 0 on a clean corpus" AND added a fifth category
+//! (`yaml_healthy_without_signing_row`) to the `--json` shape. The
+//! prior assertions (exit 0 always, four-key JSON) were authored
+//! under the original 2026-04-19 contract and no longer hold against
+//! the implementation at HEAD. The fixture (one drift per original
+//! category 1-4) is unchanged; only the assertions on exit code and
+//! JSON-shape coverage were updated. The dedicated category-5 binary
+//! test (`audit_yaml_healthy_without_signing_row_via_binary.rs`)
+//! continues to pin the cat-5 array contents and the cat-5 drift /
+//! clean partition; this test only confirms the cat-5 KEY is
+//! present (so the JSON shape stays complete even when the fixture
+//! exercises cats 1-4).
 //!
 //! Justification (from stories/25.yml): proves the `--json` contract
-//! reaches the operator through the binary — `agentic stories audit
-//! --json` against a fixture corpus containing at least one drifted
-//! story per category emits stdout that `serde_json::from_str` parses
-//! into a value carrying a top-level object with one key per category
-//! (`implementation_without_flip`, `promotion_ready`,
-//! `test_builder_not_started`, `healthy_with_failing_test`), each
-//! mapping to an array of objects naming the offending story id and
-//! any per-category context (e.g. the passing test files for category
-//! 1, the failing test files for category 4). The same data appears
-//! in human-readable form when `--json` is absent, and exit code is
-//! 0 in both modes regardless of how many drifts the report contains
-//! (the audit reports drift; it does not itself fail on drift).
-//! Without this, machine consumers (CI jobs, future dashboards) have
-//! to scrape TTY output to learn what drifted, and the symmetry with
-//! `agentic stories health --json` (story 3) breaks at the boundary
-//! they are most likely to lean on.
+//! reaches the operator through the binary for the original four
+//! categories — `agentic stories audit --json` against a fixture
+//! corpus containing at least one drifted story across categories
+//! 1-4 emits stdout that `serde_json::from_str` parses into a value
+//! carrying top-level keys (`implementation_without_flip`,
+//! `promotion_ready`, `test_builder_not_started`,
+//! `healthy_with_failing_test`), each mapping to an array of objects
+//! naming the offending story id and any per-category context (e.g.
+//! the passing test files for category 1, the failing test files
+//! for category 4). The same data appears in human-readable form
+//! when `--json` is absent. Without this, machine consumers (CI
+//! jobs, future dashboards) have to scrape TTY output to learn what
+//! drifted, and the symmetry with `agentic stories health --json`
+//! (story 3) breaks at the boundary they are most likely to lean on.
+//! The fifth category (yaml-healthy-without-signing-row) is pinned
+//! at the binary boundary by its own dedicated test
+//! (`audit_yaml_healthy_without_signing_row_via_binary.rs`) so this
+//! test's contract — and the JSON shape it pins for the four
+//! pre-existing categories — does not have to grow on every future
+//! category addition.
 //!
-//! Red today is compile-red AND/or runtime-red: the `agentic stories
-//! audit` subcommand does not yet exist in the CLI's clap tree. The
-//! binary either rejects the argv ("unrecognized subcommand") or, if
-//! the subcommand exists but the library backing isn't wired,
-//! produces output that doesn't parse as the four-key JSON object.
-//! Either failure mode is valid red evidence per ADR-0005.
+//! Per story 25's 2026-04-29 "Exit-code contract" amendment: drift
+//! now means exit 2 (could-not-attest, mirroring story 1's
+//! dirty-tree mapping and story 11's ancestor refusal), exit 0
+//! when the corpus is clean. The fixture below seeds drift across
+//! all four original categories, so the binary MUST exit 2; the
+//! JSON payload is still emitted on stdout (exit code is the
+//! gate-half, not a substitute for the report).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -267,33 +291,51 @@ fn stories_audit_json_emits_four_top_level_arrays_with_drifted_story_ids() {
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let status = output.status;
 
-    // Audit reports drift but does not fail on drift — exit 0 in
-    // both modes regardless of how many drifts the report contains.
-    assert!(
-        status.success(),
-        "`agentic stories audit --json` must exit 0 even when drift is \
-         present (audit reports drift; does not fail on drift); got \
+    // Per the 2026-04-29 exit-code amendment: drift now means exit 2
+    // (could-not-attest, mirroring story 1's dirty-tree mapping and
+    // story 11's ancestor refusal). The fixture seeds one drifted
+    // story per original category 1-4, so the binary MUST exit 2.
+    // The original "exit 0 regardless of drift" contract is dead;
+    // the binary participates in structural enforcement now and the
+    // pre-commit hook (story 29) treats exit 2 as commit-block.
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "`agentic stories audit --json` against a fixture with drift \
+         across categories 1-4 MUST exit 2 (gate-mode could-not-attest) \
+         per story 25's 2026-04-29 exit-code amendment; got \
          status={status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
 
-    // stdout must parse as a single JSON object.
+    // The JSON payload is still emitted on stdout — exit code is the
+    // gate-half, not a substitute for the report. stdout must parse
+    // as a single JSON object even when exit is non-zero.
     let parsed: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
         panic!(
-            "stdout from `--json` must be parseable via `serde_json::from_str`; \
-             parse error: {e}\nraw stdout:\n{stdout}\nstderr:\n{stderr}"
+            "stdout from `--json` (even on exit 2) must be parseable via \
+             `serde_json::from_str`; parse error: {e}\nraw stdout:\n{stdout}\n\
+             stderr:\n{stderr}"
         )
     });
     let obj = parsed
         .as_object()
         .unwrap_or_else(|| panic!("top-level JSON must be an object; got: {parsed}"));
 
-    // All four snake_case keys (per story 25's "Output shape —
-    // `--json`" guidance) must be present, each mapping to an array.
+    // All FIVE snake_case keys (the original four per story 25's
+    // "Output shape — `--json`" guidance, plus the fifth added by
+    // the 2026-04-29 amendment) must be present, each mapping to an
+    // array. The fifth key may legitimately be empty for this
+    // fixture (no category-5 drift seeded); its presence is what
+    // this test pins so consumers can rely on the shape regardless
+    // of which categories happen to be populated. The cat-5
+    // contents are pinned by the dedicated binary test
+    // `audit_yaml_healthy_without_signing_row_via_binary.rs`.
     for key in [
         "implementation_without_flip",
         "promotion_ready",
         "test_builder_not_started",
         "healthy_with_failing_test",
+        "yaml_healthy_without_signing_row",
     ] {
         let val = obj
             .get(key)
