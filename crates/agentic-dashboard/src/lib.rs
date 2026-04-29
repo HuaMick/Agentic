@@ -929,6 +929,7 @@ impl Dashboard {
                 // Load evidence from the store.
                 let test_run = self.get_test_run(id);
                 let uat_signings = self.get_uat_signings(id);
+                let manual_signings = self.get_manual_signings(id);
 
                 // Compute health classification.
                 let (
@@ -940,7 +941,13 @@ impl Dashboard {
                     test_run_at,
                     stale_related_files,
                     not_healthy_reason,
-                ) = self.classify_health(status, &test_run, &uat_signings, &related_files);
+                ) = self.classify_health(
+                    status,
+                    &test_run,
+                    &uat_signings,
+                    &manual_signings,
+                    &related_files,
+                );
 
                 StoryHealth {
                     id,
@@ -1012,6 +1019,18 @@ impl Dashboard {
     fn get_uat_signings(&self, story_id: u32) -> Vec<Value> {
         self.store
             .query("uat_signings", &|row| {
+                row.get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story_id as u64)
+                    .unwrap_or(false)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Retrieve all manual_signings rows for a story from the store.
+    fn get_manual_signings(&self, story_id: u32) -> Vec<Value> {
+        self.store
+            .query("manual_signings", &|row| {
                 row.get("story_id")
                     .and_then(|v| v.as_u64())
                     .map(|id| id == story_id as u64)
@@ -1119,16 +1138,33 @@ impl Dashboard {
     }
 
     /// Classify a story's health based on YAML status and evidence.
+    /// Consults both uat_signings and manual_signings tables (UNION semantics).
     fn classify_health(
         &self,
         yaml_status: Status,
         test_run: &Option<Value>,
         uat_signings: &[Value],
+        manual_signings: &[Value],
         related_files: &[String],
     ) -> HealthClassification {
-        // Extract the latest UAT signing if any.
-        let latest_uat = uat_signings.last();
-        let latest_uat_pass = uat_signings.iter().rev().find(|row| {
+        // Merge both signing tables: uat_signings and manual_signings.
+        // Collect all signings and sort by signed_at (latest last).
+        let mut all_signings = Vec::new();
+        all_signings.extend(uat_signings.iter().cloned());
+        all_signings.extend(manual_signings.iter().cloned());
+
+        // Sort by signed_at to ensure latest is last
+        all_signings.sort_by(|a, b| {
+            let a_signed_at = a.get("signed_at").and_then(|v| v.as_str()).unwrap_or("");
+            let b_signed_at = b.get("signed_at").and_then(|v| v.as_str()).unwrap_or("");
+            a_signed_at.cmp(b_signed_at)
+        });
+
+        // Extract the latest signing (pass or fail) from the union.
+        let latest_signing = all_signings.last();
+
+        // Extract the latest PASS signing from the union.
+        let latest_pass = all_signings.iter().rev().find(|row| {
             row.get("verdict")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_lowercase() == "pass")
@@ -1150,8 +1186,8 @@ impl Dashboard {
         }
 
         // Rule 2: under_construction ⇔ YAML says under_construction AND no
-        // historical UAT pass.
-        if yaml_status == Status::UnderConstruction && latest_uat_pass.is_none() {
+        // historical Pass signing (from either table).
+        if yaml_status == Status::UnderConstruction && latest_pass.is_none() {
             let failing_tests = test_run
                 .as_ref()
                 .and_then(|row| row.get("verdict"))
@@ -1179,16 +1215,16 @@ impl Dashboard {
             );
         }
 
-        // Rule 3: healthy ⇔ latest UAT pass exists AND latest test_run pass
-        // AND healthy check passes (based on repo_root availability).
+        // Rule 3: healthy ⇔ latest Pass signing exists (from either table) AND
+        // latest test_run pass AND healthy check passes (based on repo_root availability).
         // - If repo_root: check for related_files file intersection (story 9).
         // - If no repo_root: check for strict HEAD equality (legacy story 3).
-        if let Some(uat_row) = latest_uat_pass {
-            let uat_commit = uat_row
+        if let Some(pass_row) = latest_pass {
+            let pass_commit = pass_row
                 .get("commit")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let uat_signed_at = uat_row
+            let pass_signed_at = pass_row
                 .get("signed_at")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
@@ -1218,8 +1254,8 @@ impl Dashboard {
                     // intersection. If empty, be permissive (don't apply strict
                     // equality rule).
                     if !related_files.is_empty() {
-                        if let Some(uat_sha) = uat_commit.as_deref() {
-                            match self.compute_git_diff(uat_sha, &self.head_sha) {
+                        if let Some(pass_sha) = pass_commit.as_deref() {
+                            match self.compute_git_diff(pass_sha, &self.head_sha) {
                                 Ok(changed_files) => {
                                     let stale_files = self.check_related_files_intersection(
                                         related_files,
@@ -1241,15 +1277,15 @@ impl Dashboard {
                     }
                 } else {
                     // Legacy (story 3): no repo_root → strict HEAD equality
-                    uat_commit.as_deref() == Some(self.head_sha.as_str())
+                    pass_commit.as_deref() == Some(self.head_sha.as_str())
                 };
 
                 if is_healthy {
                     return (
                         Health::Healthy,
                         vec![],
-                        uat_commit,
-                        uat_signed_at,
+                        pass_commit,
+                        pass_signed_at,
                         test_run_commit,
                         test_run_at,
                         vec![],
@@ -1259,10 +1295,10 @@ impl Dashboard {
             }
         }
 
-        // Rule 4: unhealthy ⇔ any historical UAT pass AND
+        // Rule 4: unhealthy ⇔ any historical Pass signing (from either table) AND
         // (latest test_run fail OR (repo-aware: related_files intersect C0..HEAD)
-        // OR (legacy: latest UAT commit != HEAD AND no repo_root)).
-        if latest_uat_pass.is_some() {
+        // OR (legacy: latest signing commit != HEAD AND no repo_root)).
+        if latest_pass.is_some() {
             let test_run_fail = test_run
                 .as_ref()
                 .and_then(|row| row.get("verdict"))
@@ -1270,7 +1306,7 @@ impl Dashboard {
                 .map(|s| s.to_lowercase() == "fail")
                 .unwrap_or(false);
 
-            let uat_commit = latest_uat
+            let pass_commit = latest_signing
                 .and_then(|row| row.get("commit"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
@@ -1280,8 +1316,8 @@ impl Dashboard {
 
             // Always check for file staleness (needed for not_healthy_reason even if tests fail)
             if !related_files.is_empty() && self.repo_root.is_some() {
-                if let Some(uat_sha) = uat_commit.as_deref() {
-                    match self.compute_git_diff(uat_sha, &self.head_sha) {
+                if let Some(pass_sha) = pass_commit.as_deref() {
+                    match self.compute_git_diff(pass_sha, &self.head_sha) {
                         Ok(changed_files) => {
                             stale_files = self
                                 .check_related_files_intersection(related_files, &changed_files);
@@ -1300,9 +1336,9 @@ impl Dashboard {
                 }
             } else if !is_unhealthy {
                 // Legacy: no repo_root or empty related_files means strict
-                // equality check (UAT commit must equal HEAD).
-                let uat_commit_not_head = uat_commit.as_deref() != Some(self.head_sha.as_str());
-                is_unhealthy = uat_commit_not_head;
+                // equality check (signing commit must equal HEAD).
+                let pass_commit_not_head = pass_commit.as_deref() != Some(self.head_sha.as_str());
+                is_unhealthy = pass_commit_not_head;
             }
 
             if is_unhealthy {
@@ -1317,7 +1353,7 @@ impl Dashboard {
                     })
                     .unwrap_or_default();
 
-                let uat_signed_at = latest_uat
+                let signing_signed_at = latest_signing
                     .and_then(|row| row.get("signed_at"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
@@ -1337,8 +1373,8 @@ impl Dashboard {
                 return (
                     Health::Unhealthy,
                     failing_tests,
-                    uat_commit,
-                    uat_signed_at,
+                    pass_commit,
+                    signing_signed_at,
                     test_run_commit,
                     test_run_at,
                     stale_files,
