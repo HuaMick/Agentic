@@ -5,7 +5,7 @@ outcome: |
   whose manual promotion ritual is already complete in git history records
   a single attestation row into `manual_signings` so the prove-it gate
   accepts the story without forcing a synthetic UAT pass.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 - fail-closed-on-dirty-tree

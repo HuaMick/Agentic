@@ -524,11 +524,11 @@ impl Dashboard {
             .any(|s| s.health == Health::Error || s.health == Health::Unhealthy))
     }
 
-    /// Filter to frontier view: all stories on the active frontier, excluding retired.
-    /// The frontier includes:
-    /// - All healthy stories
-    /// - Non-healthy stories with no non-healthy ancestors (no frontier blocking)
-    /// But excludes all retired stories (which are off-tree).
+    /// Filter to frontier view: stories an operator can start work on now.
+    /// Frontier membership requires:
+    /// - Health is NOT `healthy` (healthy stories are excluded — they are done).
+    /// - All transitive ancestors are healthy (no upstream blocker).
+    /// Retired stories are excluded (off-tree).
     fn filter_frontier(&self, stories: &[StoryHealth]) -> Vec<StoryHealth> {
         stories
             .iter()
@@ -538,9 +538,9 @@ impl Dashboard {
                     return false;
                 }
 
-                // Healthy stories are always on the frontier
+                // Healthy stories are excluded from frontier
                 if story.health == Health::Healthy {
-                    return true;
+                    return false;
                 }
 
                 // Non-healthy stories are on frontier only if all ancestors are healthy
