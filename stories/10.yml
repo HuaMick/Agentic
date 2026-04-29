@@ -6,7 +6,7 @@ outcome: |
   showing its DAG depth and how many downstream stories it blocks, so
   the dashboard points at what can be started right now instead of
   listing the whole corpus.
-status: under_construction
+status: healthy
 patterns:
 - standalone-resilient-library
 acceptance:
