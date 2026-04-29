@@ -35,10 +35,15 @@ Authority flows through, in order:
 When Claude Code is the session orchestrator, the **session-orchestrator**
 spec at `agents/orchestration/session-orchestrator/process.yml` is its
 authoritative behavioral guide — including the orient-before-acting pattern
-(verify brief claims against current corpus state before delegating writes).
-The **system-investigator** (`agents/orchestration/system-investigator/`) is
-the sanctioned tool for parallel, read-only state-investigation when the
-orient trigger fires; spawn one per independent question, in parallel.
+(verify brief claims against current corpus state before delegating writes),
+the post-return verification trigger (re-verify a spawned agent's
+deflection-shaped framing via system-investigator before incorporating it
+into session truth), and the preserve-before-destroy rule (snapshot
+artefacts that support or refute load-bearing claims before any operation
+that would destroy them). The **system-investigator**
+(`agents/orchestration/system-investigator/`) is the sanctioned tool for
+parallel, read-only state-investigation when the orient or post-return
+trigger fires; spawn one per independent question, in parallel.
 
 ### Spawning a subagent
 
