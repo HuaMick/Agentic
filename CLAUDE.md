@@ -118,6 +118,23 @@ the appropriate subagent — context discipline matters.
 - **Reference, don't restate.** If content already exists in `assets/`
   or in CLAUDE.md or in an ADR, reference it. Copy-paste duplication is
   drift waiting to happen.
+- **Sync is enforced at commit time.** Per stories 28 + 29, the YAML
+  `status: healthy` field and the `agentic-store`'s
+  `uat_signings UNION manual_signings` tables must agree at every
+  commit. The tracked `.githooks/pre-commit` script runs
+  `agentic stories audit` and `agentic stories health --all` and
+  refuses any commit that fails either gate. Promotions go through
+  `agentic uat <id> --verdict pass`; the manual ritual
+  (hand-edit YAML + green.jsonl) is no longer the sanctioned path
+  and the hook will reject it. One-time per clone:
+  `git config core.hooksPath .githooks`. Cross-machine provenance
+  loss (a fresh clone whose store doesn't carry rows for stories
+  promoted on other machines) is recovered via
+  `agentic store backfill <id> --bootstrap`, gated to one-shot per
+  story and tagged in `manual_signings` as
+  `source: bootstrap-cross-machine` for audit-trail clarity. The
+  hook fails open if the `agentic` binary is not on PATH so a
+  fresh clone can install it before the gate fires.
 
 ## Terminology
 
