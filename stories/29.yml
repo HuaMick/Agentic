@@ -6,7 +6,7 @@ outcome: |
   `error` or `unhealthy` rows in `agentic stories health` or non-empty
   arrays in `agentic stories audit`, because the pre-commit hook
   refuses the commit with a message naming the offending story.
-status: proposed
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:

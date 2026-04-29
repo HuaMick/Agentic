@@ -24,6 +24,22 @@ surrealkv.workspace = true
 # Cargo.toml for the minimum-feature rationale.
 tokio.workspace = true
 
+# Story 28: backfill walks git history to find YAML-flip commits and reads
+# git config for author-time and committer email. Required in normal deps
+# since the backfill operation is a production path (not test-only).
+git2 = { version = "0.19", default-features = false }
+
+# Story 28: backfill resolves signer identity via the four-tier chain.
+agentic-signer = { path = "../agentic-signer" }
+
+# Story 28: backfill loads the story YAML to check status and validate the
+# story exists in the corpus.
+agentic-story = { path = "../agentic-story" }
+
+# Story 28: backfill generates row IDs and signed_at timestamps.
+ulid = { version = "1.0", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 # Story 5: tests root the SurrealStore at a temp dir for isolation and
@@ -40,10 +56,3 @@ tempfile.workspace = true
 # edge is a normal (runtime) dependency. Dev-scope only.
 agentic-runtime = { path = "../agentic-runtime" }
 
-# Story 28 scaffolds: the `backfill_*` integration tests construct a
-# temporary git repo via `git2` to seed the YAML-flip commit and the
-# green-jsonl evidence file the backfill library guard reads. Same
-# `git2` pin as the `agentic-uat` and `agentic-ci-record` test suites.
-# Dev-scope only — the runtime backfill code path will pull `git2`
-# in as a normal dep when build-rust lands the implementation.
-git2 = { version = "0.19", default-features = false }

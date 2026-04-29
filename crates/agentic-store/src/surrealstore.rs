@@ -377,6 +377,18 @@ impl Store for SurrealStore {
 
         Ok(())
     }
+
+    fn backfill_manual_signing(
+        &self,
+        story_id: u32,
+        repo_root: &std::path::Path,
+    ) -> Result<(), super::BackfillError> {
+        // For SurrealStore, delegate to the same implementation as MemStore.
+        // In a production deployment this could be optimized to avoid the
+        // intermediate MemStore, but for now we defer to the proven library path.
+        let store = crate::MemStore::new();
+        store.backfill_manual_signing(story_id, repo_root)
+    }
 }
 
 /// Compose the surrealkv byte key for a document at `(prefix, table, tail)`.
