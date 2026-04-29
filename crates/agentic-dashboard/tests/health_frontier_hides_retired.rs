@@ -1,24 +1,39 @@
-//! Story 21 acceptance test: the default frontier view hides
-//! retired stories and excludes them from summary denominators.
+//! Story 21 acceptance test: the default frontier view hides BOTH
+//! retired and healthy stories, and excludes retired from summary
+//! denominators. This pins both pruning invariants in one fixture —
+//! story 21's retired-exclusion AND story 10's healthy-exclusion
+//! (cross-referenced below).
 //!
 //! Justification (from stories/21.yml):
-//! Proves the frontier lens excludes retired stories: given a
-//! corpus containing one story with `status: retired` and one with
-//! `status: healthy`, the default `agentic stories health`
-//! rendering (no mode flag) emits a table containing exactly the
-//! healthy story's row and no row for the retired story. The
-//! summary counts at the table's foot also exclude retired from
-//! their denominators (retired is neither healthy nor unhealthy —
-//! it is off-tree).
+//! Proves the frontier lens excludes retired stories alongside the
+//! healthy-exclusion rule story 10 owns: given a corpus containing
+//! one `proposed` story (the only frontier candidate), one
+//! `healthy` story, and one `retired (superseded_by: <successor>)`
+//! story (with its successor present and healthy), the default
+//! `agentic stories health` rendering (no mode flag) emits a table
+//! containing exactly the proposed story's row, with NO row for the
+//! retired story AND NO row for the healthy stories. The retired-
+//! exclusion rule composes with story 10's healthy-exclusion rule —
+//! both must hold. The summary counts at the table's foot also
+//! exclude retired from their denominators (retired is neither
+//! healthy nor unhealthy — it is off-tree); the four-status
+//! denominator (`healthy + unhealthy + proposed + under_construction`)
+//! reflects the WHOLE non-retired corpus, not the rendered frontier
+//! row count (which is a strict subset).
 //!
-//! Red today is compile-red: the `Status::Retired` variant does
-//! not yet exist on the `agentic_story::Status` enum (it lands in
-//! story 6's amendment pass bundled with this story's schema
-//! additions), so constructing fixture YAML with `status: retired`
-//! fails either at load time (as `UnknownStatus`) or — once story
-//! 6 ships the enum value — surfaces as a live rendering test that
-//! will run runtime-red until the dashboard's frontier filter
-//! drops retired rows.
+//! Cross-reference: this test composes story 21's retired-exclusion
+//! invariant with story 10's healthy-hidden invariant
+//! (`crates/agentic-dashboard/tests/health_frontier_default_hides_healthy_stories.rs`).
+//! Both rules must hold simultaneously in the rendered frontier view.
+//!
+//! Red today is runtime-red: `Status::Retired` exists on the enum
+//! (story 6 amendment shipped) but `filter_frontier` in
+//! `crates/agentic-dashboard/src/lib.rs` admits healthy stories into
+//! the frontier (`if story.health == Health::Healthy { return true; }`).
+//! The fixture's healthy ids (92102, 92103) therefore leak into the
+//! rendered frontier alongside the proposed (92104), tripping
+//! assertion (a) below. The compile-red anchor on `Status::Retired`
+//! is preserved as a guard against future enum regressions.
 
 use std::fs;
 use std::sync::Arc;
@@ -33,14 +48,15 @@ const HEAD_SHA: &str = "2110110110110110110110110110110110110110";
 const ID_RETIRED: u32 = 92101;
 const ID_HEALTHY: u32 = 92102;
 const ID_SUCCESSOR: u32 = 92103;
+const ID_PROPOSED: u32 = 92104;
 
 fn fixture(id: u32, status: &str, extra: &str) -> String {
     format!(
         r#"id: {id}
-title: "Fixture {id} for frontier-hides-retired scaffold"
+title: "Fixture {id} for frontier-hides-retired-and-healthy scaffold"
 
 outcome: |
-  Fixture row for the frontier-hides-retired scaffold.
+  Fixture row for the frontier-hides-retired-and-healthy scaffold.
 
 status: {status}
 {extra}
@@ -52,11 +68,11 @@ acceptance:
       justification: |
         Present so the fixture is schema-valid.
   uat: |
-    Render frontier view; retired story absent, healthy present.
+    Render frontier view; retired and healthy absent, proposed present.
 
 guidance: |
-  Fixture authored inline for the frontier-hides-retired scaffold.
-  Not a real story.
+  Fixture authored inline for the frontier-hides-retired-and-healthy
+  scaffold. Not a real story.
 
 depends_on: []
 "#
@@ -64,26 +80,29 @@ depends_on: []
 }
 
 #[test]
-fn frontier_default_hides_retired_stories_in_rows_and_summary_denominators() {
+fn frontier_default_hides_retired_and_healthy_stories_in_rows_and_summary_denominators() {
     // Cross-reference: Status::Retired must exist on the enum for
-    // this test to compile. Until story 6's amendment adds it, the
-    // line below is the natural compile-red edge.
+    // this test to compile. The line below is the compile-red anchor
+    // guarding against future enum regressions.
     let _retired_variant_exists: Status = Status::Retired;
 
     let tmp = TempDir::new().expect("tempdir");
     let stories_dir = tmp.path().join("stories");
     fs::create_dir_all(&stories_dir).expect("stories dir");
 
-    // The retired fossil points at a successor (ID_SUCCESSOR) so
-    // the corpus is referentially complete — the loader's
-    // supersession-edge validation is not the subject here but
-    // must not reject this fixture either.
+    // Three-story fixture that exercises BOTH pruning invariants:
+    //   - 92101 retired -> 92103 (off-tree, must be excluded)
+    //   - 92102 healthy  (story 10 healthy-exclusion, must be excluded)
+    //   - 92103 healthy  (the successor of 92101, must be excluded)
+    //   - 92104 proposed (the only frontier candidate)
     fs::write(
         stories_dir.join(format!("{ID_RETIRED}.yml")),
         fixture(
             ID_RETIRED,
             "retired",
-            &format!("\nsuperseded_by: {ID_SUCCESSOR}\nretired_reason: |\n  Retired because successor {ID_SUCCESSOR} inherited the contract.\n"),
+            &format!(
+                "\nsuperseded_by: {ID_SUCCESSOR}\nretired_reason: |\n  Retired because successor {ID_SUCCESSOR} inherited the contract.\n"
+            ),
         ),
     )
     .expect("write retired fixture");
@@ -97,11 +116,17 @@ fn frontier_default_hides_retired_stories_in_rows_and_summary_denominators() {
         fixture(ID_SUCCESSOR, "healthy", ""),
     )
     .expect("write successor fixture");
+    fs::write(
+        stories_dir.join(format!("{ID_PROPOSED}.yml")),
+        fixture(ID_PROPOSED, "proposed", ""),
+    )
+    .expect("write proposed fixture");
 
     let store: Arc<dyn Store> = Arc::new(MemStore::new());
 
-    // Seed healthy UAT + passing test_runs at HEAD for both
-    // currently-healthy stories so the classifier accepts them.
+    // Seed UAT pass + test_runs pass at HEAD for the two healthy
+    // stories (92102 and 92103) only. 92104 (proposed) gets no
+    // signing rows; 92101 (retired) gets no signing rows.
     for id in [ID_HEALTHY, ID_SUCCESSOR] {
         store
             .append(
@@ -132,7 +157,11 @@ fn frontier_default_hides_retired_stories_in_rows_and_summary_denominators() {
 
     let dashboard = Dashboard::new(store, stories_dir, HEAD_SHA.to_string());
 
-    // (a) JSON frontier: retired id absent from stories[].
+    // ====================================================================
+    // (a) JSON frontier: stories[] ids (sorted ascending) must equal
+    // exactly [ID_PROPOSED]. Neither ID_RETIRED nor ID_HEALTHY nor
+    // ID_SUCCESSOR may appear.
+    // ====================================================================
     let json_rendered = dashboard
         .render_frontier_json()
         .expect("render_frontier_json should succeed");
@@ -142,21 +171,64 @@ fn frontier_default_hides_retired_stories_in_rows_and_summary_denominators() {
         .get("stories")
         .and_then(|v| v.as_array())
         .unwrap_or_else(|| panic!("top-level `stories` must be an array; got: {parsed}"));
-    let ids: Vec<u64> = stories
+    let mut ids: Vec<u64> = stories
         .iter()
         .filter_map(|s| s.get("id").and_then(|v| v.as_u64()))
         .collect();
-    assert!(
-        !ids.contains(&(ID_RETIRED as u64)),
-        "frontier JSON must NOT include the retired story (id {ID_RETIRED}); got ids: {ids:?}"
+    ids.sort();
+
+    assert_eq!(
+        ids,
+        vec![ID_PROPOSED as u64],
+        "frontier JSON must contain exactly the proposed id ({ID_PROPOSED}); \
+         retired ({ID_RETIRED}), healthy ({ID_HEALTHY}), and successor \
+         ({ID_SUCCESSOR}) must all be excluded. got sorted ids: {ids:?}"
     );
 
-    // (b) Summary counts at the table foot do not credit retired
-    // to any denominator — retired is off-tree. The summary shape
-    // is `summary.healthy`, `summary.unhealthy`, `summary.proposed`,
-    // `summary.under_construction`; the sum of those four must
-    // equal the number of rows rendered in the frontier array,
-    // never `rows + retired_count`.
+    // ====================================================================
+    // (b) Frontier table: a row must start with `{ID_PROPOSED} |` (or
+    // {ID_PROPOSED}| or {ID_PROPOSED}<separator>), AND no row may start
+    // with the three excluded ids (92101, 92102, 92103).
+    // ====================================================================
+    let table_rendered = dashboard
+        .render_frontier_table()
+        .expect("render_frontier_table should succeed");
+
+    let proposed_id_str = ID_PROPOSED.to_string();
+    let proposed_row_present = table_rendered.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with(&format!("{proposed_id_str} |"))
+            || trimmed.starts_with(&format!("{proposed_id_str}|"))
+            || trimmed == proposed_id_str
+    });
+    assert!(
+        proposed_row_present,
+        "frontier table must include a row for the proposed story \
+         (id {ID_PROPOSED}); got table:\n{table_rendered}"
+    );
+
+    for excluded_id in [ID_RETIRED, ID_HEALTHY, ID_SUCCESSOR] {
+        let excluded_id_str = excluded_id.to_string();
+        let excluded_row_present = table_rendered.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with(&format!("{excluded_id_str} |"))
+                || trimmed.starts_with(&format!("{excluded_id_str}|"))
+                || trimmed == excluded_id_str
+        });
+        assert!(
+            !excluded_row_present,
+            "frontier table must NOT include a row for excluded story \
+             (id {excluded_id}); got table:\n{table_rendered}"
+        );
+    }
+
+    // ====================================================================
+    // (c) Summary denominator: the four-status denominator
+    // (healthy + unhealthy + proposed + under_construction) reflects
+    // the WHOLE non-retired corpus (3 stories: 92102 healthy, 92103
+    // healthy, 92104 proposed), NOT the frontier row count (1).
+    // Retired (92101) does not credit any denominator.
+    // ====================================================================
     let summary = parsed
         .get("summary")
         .unwrap_or_else(|| panic!("frontier JSON must carry top-level `summary`; got: {parsed}"));
@@ -171,27 +243,16 @@ fn frontier_default_hides_retired_stories_in_rows_and_summary_denominators() {
         .sum();
     assert_eq!(
         denom,
-        stories.len() as u64,
-        "summary denominators must match the frontier row count; \
-         retired stories must not inflate any count. summary={summary}, \
-         rendered_rows={}",
-        stories.len()
+        3,
+        "summary denominators must sum to 3 (whole non-retired corpus: \
+         92102 healthy + 92103 healthy + 92104 proposed); retired \
+         ({ID_RETIRED}) must not credit any denominator. summary={summary}"
     );
-
-    // (c) Table frontier: retired id must not appear as a row id.
-    let table_rendered = dashboard
-        .render_frontier_table()
-        .expect("render_frontier_table should succeed");
-    let retired_id_str = ID_RETIRED.to_string();
-    let retired_row_present = table_rendered.lines().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed.starts_with(&format!("{retired_id_str} |"))
-            || trimmed.starts_with(&format!("{retired_id_str}|"))
-            || trimmed == retired_id_str
-    });
-    assert!(
-        !retired_row_present,
-        "frontier table must NOT include a row for the retired story \
-         (id {ID_RETIRED}); got table:\n{table_rendered}"
+    assert_eq!(
+        stories.len(),
+        1,
+        "frontier rendered rows must equal 1 (only {ID_PROPOSED}); \
+         got len={}, ids={ids:?}",
+        stories.len()
     );
 }
