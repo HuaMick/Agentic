@@ -46,6 +46,24 @@ scripts/           Human-facing convenience scripts (agentic-search.sh)
 - `agentic-cli` — `agentic` binary entrypoint exposing `uat`, `stories health|test`, and `test-build plan|record` (stories 1, 3, 10, 11, 12, 15 shipped).
 - `agentic-test-builder` — plan-and-record CLI library backing `agentic test-build`: emits a structured `PlanEntry` per acceptance test, probes user-authored scaffolds via `cargo check` + `cargo test`, and writes atomic red-state JSONL evidence. Strictly AI-free; no claude subprocess, no LLM dependency. User (human or claude-as-agent) authors the scaffolds with their own tools (story 15 shipped, superseding the retired story 7 panic-stub authoring and retired story 14 claude-in-library approach).
 
+## Setup — pre-commit hook (one-time per clone)
+
+The repo ships a tracked pre-commit hook at `.githooks/pre-commit` that
+refuses commits whose post-commit corpus state would render as drift
+under `agentic stories health --all` or `agentic stories audit`. Per
+story 29's enforcement contract, every clone wires it on once with:
+
+```
+git config core.hooksPath .githooks
+```
+
+The hook fails open if the `agentic` binary is not on PATH (so a fresh
+clone before `./install.sh` is not chicken-and-egg blocked), and exits
+non-zero with the offending story id named in stderr if any drift is
+detected. The hook is the structural gate that keeps the YAML status
+field and the `uat_signings` / `manual_signings` tables in sync — once
+it is wired, hand-edited promotions cannot be committed.
+
 ## Active agents
 
 - `planner/story-writer` — story and pattern curator.

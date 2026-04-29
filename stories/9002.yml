@@ -1,9 +1,0 @@
-id: 9002
-title: Test
-outcome: Test
-status: healthy
-acceptance:
-  tests:
-  - file: crates/agentic-cli/tests/health_exits_non_zero_on_error_or_unhealthy.rs
-    justification: Test
-  uat: Test
