@@ -621,8 +621,8 @@ fn main() {
                     let builder = TestBuilder::new(&repo_root);
                     match builder.record(story_id) {
                         Ok(outcome) => {
-                            for path in outcome.recorded_paths() {
-                                println!("{}", path.display());
+                            for (path, verdict) in outcome.recorded_with_verdicts() {
+                                println!("{} {}", path.display(), verdict);
                             }
                             std::process::exit(0);
                         }

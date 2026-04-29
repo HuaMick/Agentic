@@ -77,6 +77,8 @@ pub enum TestBuilderError {
 pub struct RecordOutcome {
     /// Paths of files recorded.
     recorded: Vec<PathBuf>,
+    /// Verdicts for each recorded file in order.
+    verdicts: Vec<(PathBuf, String)>,
 }
 
 impl TestBuilder {
@@ -142,7 +144,6 @@ impl TestBuilder {
     ) -> ScaffoldClassification {
         let story_id = story.id;
         let status = &story.status;
-        let scaffold_file_str = scaffold_path.to_string_lossy();
 
         // Check if this story has any prior evidence.
         let evidence_dir = self.repo_root.join(format!("evidence/runs/{story_id}"));
@@ -184,18 +185,20 @@ impl TestBuilder {
         );
 
         if yaml_is_newer {
-            // All three gates pass.
-            // Check if the scaffold is in prior evidence AND has an unchanged justification.
-            if self.scaffold_in_prior_evidence_and_unchanged(
+            // All three gates pass (Gate 1, 2, and 3).
+            // Check if the scaffold's justification has changed between the evidence commit and current story.
+            // If unchanged, preserve it (test-builder may have deliberately left it alone).
+            // If changed, it's eligible for re-authoring.
+            if self.scaffold_justification_unchanged_since_evidence(
                 story,
-                &evidence_dir,
-                &scaffold_file_str,
+                &most_recent_evidence_commit,
+                scaffold_path,
                 repo,
             ) {
-                // Scaffold is in prior evidence with unchanged justification → PRESERVE.
+                // Justification unchanged → PRESERVE.
                 ScaffoldClassification::Preserve
             } else {
-                // Scaffold is new or being re-authored → RE-AUTHOR.
+                // Justification changed → RE-AUTHOR.
                 ScaffoldClassification::ReAuthor
             }
         } else {
@@ -203,125 +206,7 @@ impl TestBuilder {
         }
     }
 
-    /// Check if a scaffold file is in the most recent prior evidence row,
-    /// AND its justification hasn't changed in the current story.
-    fn scaffold_in_prior_evidence_and_unchanged(
-        &self,
-        story: &Story,
-        evidence_dir: &Path,
-        scaffold_file: &str,
-        repo: &git2::Repository,
-    ) -> bool {
-        let most_recent = self.find_most_recent_evidence_jsonl(evidence_dir);
-        if let Some(path) = most_recent {
-            if let Ok(body) = fs::read_to_string(&path) {
-                if let Some(line) = body.lines().next() {
-                    if let Ok(row) = serde_json::from_str::<serde_json::Value>(line) {
-                        // Check if this scaffold is in the prior evidence.
-                        let in_prior = if let Some(verdicts) =
-                            row.get("verdicts").and_then(|v| v.as_array())
-                        {
-                            verdicts.iter().any(|verdict| {
-                                verdict.get("file").and_then(|f| f.as_str()) == Some(scaffold_file)
-                            })
-                        } else {
-                            false
-                        };
 
-                        if !in_prior {
-                            return false;
-                        }
-
-                        // Get the prior evidence commit.
-                        let evidence_commit =
-                            if let Some(commit_str) = row.get("commit").and_then(|c| c.as_str()) {
-                                commit_str.to_string()
-                            } else {
-                                return false;
-                            };
-
-                        // Load the story YAML from the evidence commit and check its justification.
-                        if let Some(prior_justification) = self.get_justification_from_commit(
-                            repo,
-                            story.id,
-                            &evidence_commit,
-                            scaffold_file,
-                        ) {
-                            // Find the current justification in the story.
-                            let current_justification = story
-                                .acceptance
-                                .tests
-                                .iter()
-                                .find(|test| test.file.to_string_lossy() == scaffold_file)
-                                .map(|test| test.justification.trim());
-
-                            if let Some(current) = current_justification {
-                                // Compare: if they're the same, the scaffold is unchanged.
-                                return prior_justification.trim() == current;
-                            }
-                        }
-
-                        false
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
-
-    /// Get the justification text for a scaffold from the story YAML at a given commit.
-    fn get_justification_from_commit(
-        &self,
-        repo: &git2::Repository,
-        story_id: u32,
-        commit_hash: &str,
-        scaffold_file: &str,
-    ) -> Option<String> {
-        // Parse the commit hash.
-        let oid = git2::Oid::from_str(commit_hash).ok()?;
-
-        // Get the commit object.
-        let commit = repo.find_commit(oid).ok()?;
-
-        // Get the tree.
-        let tree = commit.tree().ok()?;
-
-        // Get the story file from the tree.
-        let story_yaml_path = format!("stories/{story_id}.yml");
-        let entry = tree.get_path(std::path::Path::new(&story_yaml_path)).ok()?;
-
-        // Get the blob.
-        let blob = entry.to_object(repo).ok()?;
-        let blob = blob.as_blob()?;
-
-        // Parse the YAML.
-        let yaml_content = std::str::from_utf8(blob.content()).ok()?;
-        let parsed: serde_yaml::Value = serde_yaml::from_str(yaml_content).ok()?;
-
-        // Extract the justification from the acceptance tests.
-        let acceptance = parsed.get("acceptance")?;
-        let tests = acceptance.get("tests")?.as_sequence()?;
-
-        for test in tests {
-            if let Some(file) = test.get("file").and_then(|f| f.as_str()) {
-                if file == scaffold_file {
-                    return test
-                        .get("justification")
-                        .and_then(|j| j.as_str())
-                        .map(|s| s.to_string());
-                }
-            }
-        }
-
-        None
-    }
 
     /// Find the most recent evidence JSONL file path (without reading its contents).
     fn find_most_recent_evidence_jsonl(&self, evidence_dir: &Path) -> Option<PathBuf> {
@@ -375,6 +260,96 @@ impl TestBuilder {
             row.get("commit")?.as_str().map(|s| s.to_string())
         } else {
             None
+        }
+    }
+
+    /// Check if a scaffold's justification in the story YAML is unchanged since the evidence commit.
+    fn scaffold_justification_unchanged_since_evidence(
+        &self,
+        story: &Story,
+        evidence_commit_hash: &str,
+        scaffold_path: &Path,
+        repo: &git2::Repository,
+    ) -> bool {
+        // Parse the evidence commit hash.
+        let oid = match git2::Oid::from_str(evidence_commit_hash) {
+            Ok(o) => o,
+            Err(_) => return false,
+        };
+
+        // Get the tree at the evidence commit.
+        let evidence_tree = match repo.find_commit(oid) {
+            Ok(c) => match c.tree() {
+                Ok(t) => t,
+                Err(_) => return false,
+            },
+            Err(_) => return false,
+        };
+
+        // Get the story YAML from the evidence commit.
+        let story_id = story.id;
+        let story_yaml_path = format!("stories/{story_id}.yml");
+        let yaml_entry = match evidence_tree.get_path(std::path::Path::new(&story_yaml_path)) {
+            Ok(e) => e,
+            Err(_) => return false,
+        };
+
+        let yaml_content_string = match yaml_entry.to_object(repo) {
+            Ok(obj) => match obj.as_blob() {
+                Some(blob) => match std::str::from_utf8(blob.content()) {
+                    Ok(content) => content.to_string(),
+                    Err(_) => return false,
+                },
+                None => return false,
+            },
+            Err(_) => return false,
+        };
+
+        let yaml_content = yaml_content_string.as_str();
+
+        // Parse the historical YAML.
+        let historical_yaml: serde_yaml::Value = match serde_yaml::from_str(yaml_content) {
+            Ok(parsed) => parsed,
+            Err(_) => return false,
+        };
+
+        // Extract the justification from the historical YAML for this scaffold.
+        let scaffold_path_str = scaffold_path.to_string_lossy();
+        let historical_justification = if let Some(tests) = historical_yaml
+            .get("acceptance")
+            .and_then(|a| a.get("tests"))
+            .and_then(|t| t.as_sequence())
+        {
+            let mut found = None;
+            for test in tests {
+                if let Some(file) = test.get("file").and_then(|f| f.as_str()) {
+                    if file == scaffold_path_str {
+                        found = test
+                            .get("justification")
+                            .and_then(|j| j.as_str())
+                            .map(|s| s.trim().to_string());
+                        break;
+                    }
+                }
+            }
+            found
+        } else {
+            None
+        };
+
+        // Get the current justification from the story.
+        let current_justification = story
+            .acceptance
+            .tests
+            .iter()
+            .find(|test| test.file.to_string_lossy() == scaffold_path_str)
+            .map(|test| test.justification.trim().to_string());
+
+        // Compare: unchanged if both exist and match.
+        match (historical_justification, current_justification) {
+            (Some(hist), Some(curr)) => hist == curr,
+            (None, None) => true,  // Neither had justification (unlikely)
+            _ => false, // One exists, the other doesn't
         }
     }
 
@@ -503,6 +478,7 @@ impl TestBuilder {
 
         // Classify and probe each scaffold, collecting verdicts.
         let mut verdicts = Vec::new();
+        let mut recorded_with_verdicts = Vec::new();
         for entry in plan.iter() {
             let test_path = self.repo_root.join(&entry.file);
 
@@ -529,6 +505,13 @@ impl TestBuilder {
             // Classify the scaffold.
             let classification = self.classify_scaffold(&story, Path::new(&entry.file), &repo);
 
+            // Determine the verdict string first.
+            let verdict_string = match classification {
+                ScaffoldClassification::Preserve => "preserved".to_string(),
+                ScaffoldClassification::ReAuthor => "re-authored".to_string(),
+                ScaffoldClassification::FirstAuthoring => "red".to_string(),
+            };
+
             // Build the verdict entry based on classification.
             let verdict_entry = match classification {
                 ScaffoldClassification::Preserve => {
@@ -540,14 +523,6 @@ impl TestBuilder {
                 }
                 ScaffoldClassification::FirstAuthoring | ScaffoldClassification::ReAuthor => {
                     // First-authoring and re-author scaffolds must probe red.
-                    // Determine the verdict string: "re-authored" when re-authoring, "red" for first-authoring.
-                    let verdict_string =
-                        if matches!(classification, ScaffoldClassification::ReAuthor) {
-                            "re-authored"
-                        } else {
-                            "red"
-                        };
-
                     // Probe the scaffold.
                     let (red_path, diagnostic) =
                         probe_scaffold(&self.repo_root, &entry.target_crate, &test_path)?;
@@ -562,7 +537,7 @@ impl TestBuilder {
 
                     json!({
                         "file": entry.file,
-                        "verdict": verdict_string,
+                        "verdict": &verdict_string,
                         "red_path": red_path,
                         "diagnostic": diagnostic,
                     })
@@ -570,6 +545,7 @@ impl TestBuilder {
             };
 
             verdicts.push(verdict_entry);
+            recorded_with_verdicts.push((PathBuf::from(&entry.file), verdict_string));
         }
 
         // Write evidence atomically.
@@ -608,12 +584,10 @@ impl TestBuilder {
         fs::rename(&temp_path, &evidence_path)
             .map_err(|e| TestBuilderError::Other(e.to_string()))?;
 
-        let mut recorded = Vec::new();
-        for entry in plan {
-            recorded.push(PathBuf::from(&entry.file));
-        }
-
-        Ok(RecordOutcome { recorded })
+        Ok(RecordOutcome {
+            recorded: plan.iter().map(|e| PathBuf::from(&e.file)).collect(),
+            verdicts: recorded_with_verdicts,
+        })
     }
 }
 
@@ -621,6 +595,11 @@ impl RecordOutcome {
     /// Paths of files recorded.
     pub fn recorded_paths(&self) -> &[PathBuf] {
         &self.recorded
+    }
+
+    /// Paths and verdicts of files recorded.
+    pub fn recorded_with_verdicts(&self) -> &[(PathBuf, String)] {
+        &self.verdicts
     }
 }
 
