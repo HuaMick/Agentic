@@ -297,6 +297,22 @@ fn main() {
                 };
 
                 println!("{output}");
+
+                // Per story 3's exit-code-as-gate contract: when using --all flag,
+                // exit 2 if any rows are error or unhealthy; exit 0 otherwise.
+                if all {
+                    match dashboard.has_error_or_unhealthy() {
+                        Ok(has_issues) => {
+                            if has_issues {
+                                std::process::exit(2);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(2);
+                        }
+                    }
+                }
             }
             StoriesSubcommand::Test { selector, store } => {
                 let store_path = resolve_store_path(store);

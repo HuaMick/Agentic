@@ -515,6 +515,15 @@ impl Dashboard {
         Ok(self.format_drilldown(story, &stories))
     }
 
+    /// Check if the corpus contains any error or unhealthy rows.
+    /// Returns true if at least one story has health status `error` or `unhealthy`.
+    pub fn has_error_or_unhealthy(&self) -> Result<bool, DashboardError> {
+        let stories = self.load_and_compute_health()?;
+        Ok(stories
+            .iter()
+            .any(|s| s.health == Health::Error || s.health == Health::Unhealthy))
+    }
+
     /// Filter to frontier view: all stories on the active frontier, excluding retired.
     /// The frontier includes:
     /// - All healthy stories
