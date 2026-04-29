@@ -9,68 +9,50 @@
 # Behaviour:
 #   1. If `agentic` binary is not on PATH, emit a notice to stderr and exit 0
 #      (fail open to avoid chicken-and-egg blocks on fresh clones).
-#   2. Run `agentic stories audit`. Capture exit code.
-#   3. Run `agentic stories health --all`. Capture exit code.
-#   4. If either exited non-zero, emit a descriptive stderr message naming
-#      the offending story ids (derived from audit/health output) and exit
-#      non-zero.
-#   5. If both exited 0, exit 0 silently.
+#   2. Run `agentic stories audit`. Exit non-zero if it fails.
+#   3. Run `agentic stories health --all`. Exit non-zero if it fails.
+#   4. If both succeed, exit 0 silently.
 #
 # This hook is invoked by git with cwd set to the repository root.
 # =============================================================================
 
-set -euo pipefail
-
-# Helper: emit a message to stderr and return a code.
-emit_error() {
-  printf '%s\n' "$1" >&2
-}
-
 # Check if `agentic` is on PATH. If not, fail open (exit 0) with a message.
 if ! command -v agentic >/dev/null 2>&1; then
-  emit_error "notice: agentic binary not on PATH; skipping pre-commit hook. Install with: cargo install --path crates/agentic-cli --locked"
+  printf 'notice: agentic binary not on PATH; skipping pre-commit hook. Install with: cargo install --path crates/agentic-cli --locked\n' >&2
   exit 0
 fi
 
-# Run both audit and health commands, capturing exit codes and output.
-# We do NOT short-circuit after the first failure; a developer with
-# multiple drift sources sees all of them in one hook-blocked message.
-
+# Create temporary files for capturing output.
 audit_output=$(mktemp)
 health_output=$(mktemp)
 trap 'rm -f "$audit_output" "$health_output"' EXIT
 
-audit_exit=0
-health_exit=0
+# Run audit and health commands. Use subshells to avoid exiting on failure.
+audit_failed=0
+health_failed=0
 
-# Run audit. Capture exit code without exiting the script.
-if ! agentic stories audit >"$audit_output" 2>&1; then
-  audit_exit=$?
-fi
+# Run audit command. Capture output, check exit status.
+(agentic stories audit >"$audit_output" 2>&1) || audit_failed=1
 
-# Run health. Capture exit code without exiting the script.
-if ! agentic stories health --all >"$health_output" 2>&1; then
-  health_exit=$?
-fi
+# Run health command. Capture output, check exit status.
+(agentic stories health --all >"$health_output" 2>&1) || health_failed=1
 
-# If either command failed, emit a combined error message and exit non-zero.
-if [[ "$audit_exit" -ne 0 ]] || [[ "$health_exit" -ne 0 ]]; then
-  emit_error "pre-commit hook: aborting commit due to corpus drift"
+# If either command failed, emit error messages and exit non-zero.
+if [[ "$audit_failed" -eq 1 ]] || [[ "$health_failed" -eq 1 ]]; then
+  printf 'pre-commit hook: aborting commit due to corpus drift\n' >&2
 
-  if [[ "$audit_exit" -ne 0 ]]; then
-    emit_error ""
-    emit_error "=== agentic stories audit failures ==="
+  if [[ "$audit_failed" -eq 1 ]]; then
+    printf '\n=== agentic stories audit failures ===\n' >&2
     cat "$audit_output" >&2 || true
   fi
 
-  if [[ "$health_exit" -ne 0 ]]; then
-    emit_error ""
-    emit_error "=== agentic stories health --all failures ==="
+  if [[ "$health_failed" -eq 1 ]]; then
+    printf '\n=== agentic stories health --all failures ===\n' >&2
     cat "$health_output" >&2 || true
   fi
 
   exit 1
 fi
 
-# Both commands succeeded; permit the commit.
+# Both commands succeeded; permit the commit silently.
 exit 0
