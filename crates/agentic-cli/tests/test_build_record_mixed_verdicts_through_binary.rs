@@ -85,8 +85,8 @@ acceptance:
         First-authoring at v2: probes red and must record red.
     - file: crates/fixture-cli-mixed-crate/tests/preserved_scaffold.rs
       justification: |
-        Present since the last evidence row; classifies PRESERVE
-        because the preserved entry's justification did not change.
+        Present since the last evidence row; classifies PRESERVE at
+        v1 because the story YAML has not moved past v1.
     - file: crates/fixture-cli-mixed-crate/tests/reauthored_scaffold.rs
       justification: |
         V2 justification (AMENDED): scaffold re-probes red against
