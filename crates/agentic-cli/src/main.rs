@@ -115,6 +115,11 @@ enum StoreSubcommand {
         /// Path to the store
         #[arg(long)]
         store: Option<PathBuf>,
+
+        /// Bootstrap mode: recover cross-machine provenance loss (relaxes
+        /// green-evidence guard only; all other guards remain in force)
+        #[arg(long)]
+        bootstrap: bool,
     },
 }
 
@@ -517,6 +522,7 @@ fn main() {
                 story_id,
                 signer: _signer,
                 store,
+                bootstrap,
             } => {
                 let store_path = resolve_store_path(store);
                 eprintln!("store: {}", store_path.display());
@@ -540,8 +546,13 @@ fn main() {
                     }
                 };
 
-                // Call the backfill operation
-                match store.backfill_manual_signing(story_id, &repo_root) {
+                // Call the backfill operation with appropriate mode.
+                let mode = if bootstrap {
+                    agentic_store::BackfillMode::Bootstrap
+                } else {
+                    agentic_store::BackfillMode::Manual
+                };
+                match store.backfill_manual_signing_with_mode(story_id, &repo_root, mode) {
                     Ok(()) => {
                         // Get HEAD SHA for output
                         match get_head_sha() {

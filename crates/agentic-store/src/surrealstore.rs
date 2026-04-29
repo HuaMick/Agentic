@@ -383,12 +383,21 @@ impl Store for SurrealStore {
         story_id: u32,
         repo_root: &std::path::Path,
     ) -> Result<(), super::BackfillError> {
+        self.backfill_manual_signing_with_mode(story_id, repo_root, super::BackfillMode::Manual)
+    }
+
+    fn backfill_manual_signing_with_mode(
+        &self,
+        story_id: u32,
+        repo_root: &std::path::Path,
+        mode: super::BackfillMode,
+    ) -> Result<(), super::BackfillError> {
         // Load the story from disk to validate it exists and check its status.
         let story_file = repo_root.join("stories").join(format!("{story_id}.yml"));
         let story = agentic_story::Story::load(&story_file)
             .map_err(|_| super::BackfillError::UnknownStory { story_id })?;
 
-        // Guard 1: YAML status must be healthy.
+        // Guard 1: YAML status must be healthy (applies to both modes).
         if story.status != agentic_story::Status::Healthy {
             let status_str = match story.status {
                 agentic_story::Status::Proposed => "proposed",
@@ -403,38 +412,42 @@ impl Store for SurrealStore {
             });
         }
 
-        // Guard 2: Evidence file must exist.
+        // Guard 2: Evidence file must exist (EXCEPT in bootstrap mode, which
+        // explicitly relaxes this guard for cross-machine recovery).
         let evidence_dir = repo_root.join(format!("evidence/runs/{story_id}"));
-        let evidence_exists = std::fs::read_dir(&evidence_dir)
-            .ok()
-            .and_then(|mut dir| {
-                dir.find_map(|entry| {
-                    let entry = entry.ok()?;
-                    let path = entry.path();
-                    if path.extension().map_or(false, |ext| ext == "jsonl") {
-                        if let Some(name) = path.file_name() {
-                            if name.to_string_lossy().ends_with("-green.jsonl") {
-                                return Some(());
+        if mode == super::BackfillMode::Manual {
+            let evidence_exists = std::fs::read_dir(&evidence_dir)
+                .ok()
+                .and_then(|mut dir| {
+                    dir.find_map(|entry| {
+                        let entry = entry.ok()?;
+                        let path = entry.path();
+                        if path.extension().map_or(false, |ext| ext == "jsonl") {
+                            if let Some(name) = path.file_name() {
+                                if name.to_string_lossy().ends_with("-green.jsonl") {
+                                    return Some(());
+                                }
                             }
                         }
-                    }
-                    None
+                        None
+                    })
                 })
-            })
-            .is_some();
+                .is_some();
 
-        if !evidence_exists {
-            return Err(super::BackfillError::NoGreenEvidence {
-                story_id,
-                evidence_dir,
-            });
+            if !evidence_exists {
+                return Err(super::BackfillError::NoGreenEvidence {
+                    story_id,
+                    evidence_dir,
+                });
+            }
         }
+        // Bootstrap mode: no evidence guard check
 
         // Open the git repository to check for dirty tree and walk history.
         let repo = git2::Repository::open(repo_root)
             .map_err(|e| super::BackfillError::Io(format!("failed to open git repo: {e}")))?;
 
-        // Check that the tree is clean.
+        // Check that the tree is clean (applies to both modes).
         let mut status_opts = git2::StatusOptions::new();
         status_opts.include_untracked(true);
         let status = repo
@@ -471,7 +484,7 @@ impl Store for SurrealStore {
         let head_sha = head_oid.to_string();
         // The flip_found flag was checked above; if we get here, the flip was found.
 
-        // Check for double-attestation guards.
+        // Check for double-attestation guards (applies to both modes).
         let uat_rows = self.query("uat_signings", &|doc| {
             doc.get("story_id").and_then(|v| v.as_u64()) == Some(story_id as u64)
                 && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
@@ -502,6 +515,12 @@ impl Store for SurrealStore {
         let signer = agentic_signer::Signer::resolve(resolver)
             .map_err(|_| super::BackfillError::SignerMissing { story_id })?;
 
+        // Write the manual_signings row with appropriate source field.
+        let source_value = match mode {
+            super::BackfillMode::Manual => "manual-backfill",
+            super::BackfillMode::Bootstrap => "bootstrap-cross-machine",
+        };
+
         // Write the manual_signings row.
         let now = chrono::Utc::now();
         let row = serde_json::json!({
@@ -511,7 +530,7 @@ impl Store for SurrealStore {
             "commit": head_sha,
             "signer": signer.as_str(),
             "signed_at": now.to_rfc3339(),
-            "source": "manual-backfill",
+            "source": source_value,
         });
 
         self.append("manual_signings", row)
