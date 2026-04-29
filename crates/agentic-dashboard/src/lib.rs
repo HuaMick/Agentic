@@ -1686,6 +1686,7 @@ pub mod audit {
         pub promotion_ready: Vec<AuditEntry>,
         pub test_builder_not_started: Vec<AuditEntry>,
         pub healthy_with_failing_test: Vec<AuditEntry>,
+        pub yaml_healthy_without_signing_row: Vec<AuditEntry>,
     }
 
     #[derive(Debug, Clone)]
@@ -1701,6 +1702,7 @@ pub mod audit {
                 && self.promotion_ready.is_empty()
                 && self.test_builder_not_started.is_empty()
                 && self.healthy_with_failing_test.is_empty()
+                && self.yaml_healthy_without_signing_row.is_empty()
         }
     }
 
@@ -1749,6 +1751,15 @@ pub mod audit {
                     for test in &entry.failing_tests {
                         writeln!(f, "    {}", test)?;
                     }
+                }
+                writeln!(f)?;
+            }
+
+            // Category 5: yaml-healthy-without-signing-row
+            if !self.yaml_healthy_without_signing_row.is_empty() {
+                writeln!(f, "Yaml-healthy-without-signing-row:")?;
+                for entry in &self.yaml_healthy_without_signing_row {
+                    writeln!(f, "  {}", entry.id)?;
                 }
                 writeln!(f)?;
             }
@@ -1814,6 +1825,50 @@ pub mod audit {
             .collect()
     }
 
+    /// Check if a story has a Pass signing row in either uat_signings
+    /// or manual_signings table (the union query for category 5).
+    fn has_pass_signing(story_id: u32, store: &Arc<dyn Store>) -> bool {
+        // Check uat_signings for a Pass row
+        let uat_pass = store
+            .query("uat_signings", &|row| {
+                let matches_story = row
+                    .get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story_id as u64)
+                    .unwrap_or(false);
+                let is_pass = row
+                    .get("verdict")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase() == "pass")
+                    .unwrap_or(false);
+                matches_story && is_pass
+            })
+            .unwrap_or_default();
+
+        if !uat_pass.is_empty() {
+            return true;
+        }
+
+        // Check manual_signings for a Pass row
+        let manual_pass = store
+            .query("manual_signings", &|row| {
+                let matches_story = row
+                    .get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story_id as u64)
+                    .unwrap_or(false);
+                let is_pass = row
+                    .get("verdict")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase() == "pass")
+                    .unwrap_or(false);
+                matches_story && is_pass
+            })
+            .unwrap_or_default();
+
+        !manual_pass.is_empty()
+    }
+
     /// Check if story is "healthy-with-failing-test" by invoking the
     /// dashboard's existing unhealthy classifier for stories with
     /// status=healthy.
@@ -1864,7 +1919,7 @@ pub mod audit {
     }
 
     /// Run the audit against a stories directory and store, returning
-    /// a report of the four drift categories.
+    /// a report of the five drift categories.
     pub fn run_audit(
         stories_dir: &Path,
         repo_root: &Path,
@@ -1881,6 +1936,7 @@ pub mod audit {
         let mut cat2 = Vec::new();
         let mut cat3 = Vec::new();
         let mut cat4 = Vec::new();
+        let mut cat5 = Vec::new();
 
         // Load all story YAML files
         let entries = std::fs::read_dir(stories_dir)
@@ -1955,6 +2011,20 @@ pub mod audit {
                     failing_tests,
                 });
             }
+
+            // Category 5: status=healthy AND no Pass signing rows in either
+            // uat_signings OR manual_signings (yaml-healthy-without-signing-row).
+            // This must NOT be added if the story is already in category 4.
+            if story.status == agentic_story::Status::Healthy
+                && !has_pass_signing(story_id, &store)
+                && !is_healthy_with_failing_test(&story, &store, &head_sha)
+            {
+                cat5.push(AuditEntry {
+                    id: story_id,
+                    passing_tests: vec![],
+                    failing_tests: vec![],
+                });
+            }
         }
 
         // Sort each category by id for stable output
@@ -1962,12 +2032,14 @@ pub mod audit {
         cat2.sort_by_key(|e| e.id);
         cat3.sort_by_key(|e| e.id);
         cat4.sort_by_key(|e| e.id);
+        cat5.sort_by_key(|e| e.id);
 
         Ok(AuditReport {
             implementation_without_flip: cat1,
             promotion_ready: cat2,
             test_builder_not_started: cat3,
             healthy_with_failing_test: cat4,
+            yaml_healthy_without_signing_row: cat5,
         })
     }
 }

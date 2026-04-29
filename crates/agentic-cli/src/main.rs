@@ -396,14 +396,18 @@ fn main() {
                     }
                 };
 
-                let report =
-                    match agentic_dashboard::audit::run_audit(&stories_dir, &repo_root, store, head_sha) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            eprintln!("audit failed: {e}");
-                            std::process::exit(2);
-                        }
-                    };
+                let report = match agentic_dashboard::audit::run_audit(
+                    &stories_dir,
+                    &repo_root,
+                    store,
+                    head_sha,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("audit failed: {e}");
+                        std::process::exit(2);
+                    }
+                };
 
                 if json {
                     // Render as JSON: each category maps to an array of objects
@@ -463,6 +467,19 @@ fn main() {
                             .collect::<Vec<_>>(),
                     );
 
+                    result.insert(
+                        "yaml_healthy_without_signing_row",
+                        report
+                            .yaml_healthy_without_signing_row
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+
                     let json_obj = serde_json::json!(result);
                     println!("{}", json_obj.to_string());
                 } else {
@@ -470,7 +487,13 @@ fn main() {
                     println!("{}", report);
                 }
 
-                std::process::exit(0);
+                // Per story 25's 2026-04-29 amendment: exit 2 if any drift detected,
+                // exit 0 if clean (all categories empty).
+                if report.is_empty() {
+                    std::process::exit(0);
+                } else {
+                    std::process::exit(2);
+                }
             }
         },
         Commands::Store { subcommand } => match subcommand {
@@ -543,18 +566,11 @@ fn main() {
                         std::process::exit(2);
                     }
                     Err(agentic_store::BackfillError::NoFlipInHistory { story_id }) => {
-                        eprintln!(
-                            "no commit in history flipped story {story_id} to healthy"
-                        );
+                        eprintln!("no commit in history flipped story {story_id} to healthy");
                         std::process::exit(2);
                     }
-                    Err(agentic_store::BackfillError::AlreadyAttested {
-                        story_id,
-                        table,
-                    }) => {
-                        eprintln!(
-                            "story {story_id} already has a {table} row at HEAD"
-                        );
+                    Err(agentic_store::BackfillError::AlreadyAttested { story_id, table }) => {
+                        eprintln!("story {story_id} already has a {table} row at HEAD");
                         std::process::exit(2);
                     }
                     Err(agentic_store::BackfillError::SignerMissing { story_id }) => {
