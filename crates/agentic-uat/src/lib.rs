@@ -71,6 +71,9 @@ pub enum SignerSource {
 /// The table name for UAT signing records.
 const UAT_SIGNINGS_TABLE: &str = "uat_signings";
 
+/// The table name for manual signing records (written by story 28's backfill).
+const MANUAL_SIGNINGS_TABLE: &str = "manual_signings";
+
 /// Typed verdict from a UAT run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -152,6 +155,8 @@ pub enum AncestorUnhealthyReason {
     StatusNotHealthy,
     /// The ancestor claims `healthy` on disk but has no signing row in the store.
     NoSigningRow,
+    /// The ancestor has a signing row (in uat_signings or manual_signings), but the latest one is a fail.
+    ManualSigningLatestIsFail,
 }
 
 impl std::fmt::Display for AncestorUnhealthyReason {
@@ -165,6 +170,9 @@ impl std::fmt::Display for AncestorUnhealthyReason {
                     f,
                     "ancestor claims healthy but has no signing row in the store"
                 )
+            }
+            AncestorUnhealthyReason::ManualSigningLatestIsFail => {
+                write!(f, "ancestor's latest signing attestation is a fail verdict")
             }
         }
     }
@@ -687,33 +695,72 @@ fn is_ancestor_satisfied(
 
         match cursor.status {
             Status::Healthy => {
-                // Check if THIS link has a valid signing row.
-                let signing_rows = store
+                // Check if THIS link has a valid signing row from EITHER table.
+                // Query both uat_signings and manual_signings for this story.
+                let uat_pass_rows = store
                     .query(UAT_SIGNINGS_TABLE, &|doc| {
                         doc.get("story_id").and_then(|v| v.as_u64()) == Some(cursor.id as u64)
                             && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
                     })
                     .map_err(UatError::Store)?;
 
-                if signing_rows.is_empty() {
+                let manual_pass_rows = store
+                    .query(MANUAL_SIGNINGS_TABLE, &|doc| {
+                        doc.get("story_id").and_then(|v| v.as_u64()) == Some(cursor.id as u64)
+                            && doc.get("verdict").and_then(|v| v.as_str()) == Some("pass")
+                    })
+                    .map_err(UatError::Store)?;
+
+                // Combine the rows.
+                let mut all_pass_rows = uat_pass_rows;
+                all_pass_rows.extend(manual_pass_rows);
+
+                if !all_pass_rows.is_empty() {
+                    // We have at least one Pass row: satisfied.
+                    // Healthy with valid signing row: check its ancestors transitively.
+                    let mut visited_temp: HashSet<u32> = HashSet::new();
+                    let mut path_temp: Vec<u32> = Vec::new();
+                    for &ancestor_id in &cursor.depends_on {
+                        check_ancestor_dfs(
+                            ancestor_id,
+                            stories_by_id,
+                            store,
+                            &mut visited_temp,
+                            &mut path_temp,
+                        )?;
+                    }
+                    return Ok(());
+                }
+
+                // No Pass rows in either table. Check if there's a Fail row to
+                // distinguish from the "no row at all" case.
+                let uat_fail_rows = store
+                    .query(UAT_SIGNINGS_TABLE, &|doc| {
+                        doc.get("story_id").and_then(|v| v.as_u64()) == Some(cursor.id as u64)
+                            && doc.get("verdict").and_then(|v| v.as_str()) == Some("fail")
+                    })
+                    .map_err(UatError::Store)?;
+
+                let manual_fail_rows = store
+                    .query(MANUAL_SIGNINGS_TABLE, &|doc| {
+                        doc.get("story_id").and_then(|v| v.as_u64()) == Some(cursor.id as u64)
+                            && doc.get("verdict").and_then(|v| v.as_str()) == Some("fail")
+                    })
+                    .map_err(UatError::Store)?;
+
+                // If there's a Fail row in either table, return the ManualSigningLatestIsFail reason.
+                if !uat_fail_rows.is_empty() || !manual_fail_rows.is_empty() {
                     return Err(UatError::AncestorNotHealthy {
                         ancestor_id: cursor.id,
-                        reason: AncestorUnhealthyReason::NoSigningRow,
+                        reason: AncestorUnhealthyReason::ManualSigningLatestIsFail,
                     });
                 }
-                // Healthy with valid signing row: check its ancestors transitively.
-                let mut visited_temp: HashSet<u32> = HashSet::new();
-                let mut path_temp: Vec<u32> = Vec::new();
-                for &ancestor_id in &cursor.depends_on {
-                    check_ancestor_dfs(
-                        ancestor_id,
-                        stories_by_id,
-                        store,
-                        &mut visited_temp,
-                        &mut path_temp,
-                    )?;
-                }
-                return Ok(());
+
+                // No Pass row and no Fail row: return NoSigningRow.
+                return Err(UatError::AncestorNotHealthy {
+                    ancestor_id: cursor.id,
+                    reason: AncestorUnhealthyReason::NoSigningRow,
+                });
             }
             Status::Retired => {
                 // Follow the supersession chain.
