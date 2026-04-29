@@ -192,6 +192,48 @@ acceptance:
       catches at link time), and a future CI step that runs
       backfill on a freshly-cloned bare-bones environment would
       break for reasons unrelated to the contract.
+  - file: crates/agentic-store/tests/backfill_bootstrap_skips_green_evidence_guard.rs
+    justification: |
+      Proves the bootstrap mode at the library boundary:
+      given a clean working tree where `stories/<id>.yml`'s
+      on-disk `status` is `healthy` AND HEAD's history contains
+      a commit that flipped the YAML to `healthy` AND
+      `evidence/runs/<id>/` either does not exist or contains
+      ZERO files matching `*-green.jsonl` (i.e. the original
+      signing rows and the on-disk green-jsonl trail were lost
+      across a machine boundary), invoking the library entry
+      point in bootstrap mode (e.g.
+      `Store::backfill_manual_signing(story_id,
+      BackfillMode::Bootstrap)` or the equivalent
+      `BackfillOptions { bootstrap: true }` shape) writes
+      EXACTLY one row to `manual_signings` whose fields match
+      the manual-ritual happy-path row in every respect
+      EXCEPT that `source` is the literal string
+      `"bootstrap-cross-machine"` rather than
+      `"manual-backfill"`. The same test ALSO proves the
+      bootstrap mode remains gated on every other guard:
+      sub-cases assert that bootstrap mode still refuses with
+      `BackfillError::DirtyTree` when the tree is dirty,
+      `BackfillError::AlreadyAttested { table: "uat_signings" }`
+      when a Pass row already exists in `uat_signings`,
+      `BackfillError::AlreadyAttested { table:
+      "manual_signings" }` when a Pass row already exists in
+      `manual_signings`, `BackfillError::StatusNotHealthy`
+      when the on-disk YAML status is not `healthy`, and
+      `BackfillError::NoFlipInHistory` when HEAD's history
+      contains no YAML-flip commit. Without this test the
+      bootstrap relaxation is undefined: a future build-rust
+      pass could implement bootstrap as "skip every guard"
+      (forgery), or could write rows tagged
+      `"manual-backfill"` (collapsing the two recovery
+      shapes into one in the audit trail), or could leave
+      bootstrap unimplemented altogether (the
+      cross-machine-clone problem stays open and the audit's
+      fifth category continues to refuse every descendant of
+      a lost-provenance ancestor). The test pins the single
+      relaxation (green-jsonl-required guard only) and the
+      single distinguishing field value
+      (`source="bootstrap-cross-machine"`).
   uat: |
     Goal: convince yourself that `agentic store backfill <id>`
     refuses every guard violation, writes exactly one
@@ -410,7 +452,104 @@ guidance: |
   encourage skipping that confirmation. Operators who need
   to backfill multiple stories run the command multiple
   times. The single-id contract is pinned at the binary
-  boundary by `store_backfill_cli_rejects_all_flag.rs`.
+  boundary by `store_backfill_cli_rejects_all_flag.rs`. The
+  single-id rule is INHERITED by bootstrap mode (below): no
+  `agentic store backfill --all --bootstrap`, no
+  `agentic store backfill 11 17 23 --bootstrap`. The
+  bootstrap flag composes WITH the single-id contract; it
+  does not relax it.
+
+  Bootstrap mode (`--bootstrap`). One additional invocation
+  shape: `agentic store backfill <story-id> --bootstrap`.
+  The flag exists to handle a recovery case the manual-
+  ritual contract above does not cover — the cross-machine
+  lost-provenance shape. Stories whose ORIGINAL signing
+  rows lived in an `agentic-store` instance on a different
+  machine, and whose `evidence/runs/<id>/*-green.jsonl`
+  files were never committed to the repo (because the
+  original `agentic uat` Pass path writes the row to the
+  store and not to disk), will fail the manual-ritual
+  green-jsonl-required guard on a freshly-cloned
+  workspace even though their YAML claim, their YAML-flip
+  commit, and their healthy-status are all genuinely
+  present in git history. Such stories are visible to
+  story 25's category-5 audit (`yaml_healthy_without_signing_row`)
+  on the new machine; without bootstrap they remain
+  permanently unbackfillable, and every descendant of
+  such an ancestor is refused by story 11's gate forever.
+
+  Bootstrap mode relaxes EXACTLY one guard — the
+  no-green-evidence guard — and ONLY that guard. Every
+  other refusal remains in force: bootstrap still refuses
+  on `BackfillError::DirtyTree`, on
+  `BackfillError::StatusNotHealthy`, on
+  `BackfillError::NoFlipInHistory`, on
+  `BackfillError::AlreadyAttested { table: "uat_signings" }`,
+  on `BackfillError::AlreadyAttested { table:
+  "manual_signings" }`, and on
+  `BackfillError::SignerMissing`. The clean-tree guard is
+  load-bearing under bootstrap (the row carries a commit
+  SHA and must be reconstructible from HEAD), the YAML-
+  flip-in-history guard is load-bearing under bootstrap
+  (the `healthy` claim must be in committed history, not
+  staged), and the both-tables-empty no-double-attestation
+  guard is load-bearing under bootstrap (a story already
+  signed on the new machine has nothing to recover).
+
+  Bootstrap mode is one-shot per machine for cross-clone
+  provenance recovery only. The intent is: an operator
+  clones the repo on a new machine, finds N stories
+  whose original `agentic-store` rows did not travel
+  with the clone, runs `agentic store backfill <id>
+  --bootstrap` once per affected story to seed
+  attestations into the new machine's local store, and
+  never invokes `--bootstrap` again on that machine.
+  The flag is a recovery tool, not a workflow; an
+  operator reaching for `--bootstrap` on a story whose
+  green-jsonl IS present is using the wrong tool (the
+  manual-ritual path, no flag, is correct for that
+  shape). The two paths are deliberately distinct
+  invocations rather than auto-detected by the
+  presence/absence of the green-jsonl file because
+  auto-detection would silently let an operator
+  bootstrap-attest a story whose ritual was actually
+  incomplete (someone forgot to author the green-jsonl).
+  Requiring the explicit flag keeps the recovery
+  semantics surfaced in the operator's argv.
+
+  `source` field semantics — two recovery shapes, two
+  values. The `manual_signings.source` column carries
+  one of:
+    - `"manual-backfill"` — written by the no-flag path.
+      Indicates the operator performed the full manual
+      ritual on this machine: hand-edited the YAML to
+      `healthy`, hand-authored an
+      `evidence/runs/<id>/*-green.jsonl` file recording
+      the test results they observed, committed both,
+      and ran `agentic store backfill <id>` to record
+      the attestation row that should have been written
+      by `agentic uat` at the time. The committed
+      green-jsonl file is the audit trail's evidence-side
+      anchor for this row.
+    - `"bootstrap-cross-machine"` — written by the
+      `--bootstrap` path. Indicates the operator is
+      recovering provenance lost across a machine
+      boundary: the YAML claim and the YAML-flip commit
+      are in committed history, but the green-jsonl
+      evidence file is absent because the original
+      promotion happened on a different machine via
+      `agentic uat` (which writes to the store, not
+      the working tree). The row's audit-trail anchor
+      is the YAML-flip commit itself; there is no
+      on-disk green-jsonl file to reference.
+  An auditor or downstream reader (story 25's audit,
+  story 11's gate, story 3's dashboard) treats both
+  values as Pass attestations; the gate composition is
+  provenance-blind. The distinction exists for the
+  human reader of `manual_signings` who needs to tell
+  "manual ritual completed locally" apart from
+  "cross-clone recovery" when investigating an
+  unexpected row.
 
   `manual_signings` row contract.
     Append-only table in `agentic-store`, schemaless per
@@ -429,11 +568,17 @@ guidance: |
         unresolvable signer maps to `BackfillError::SignerMissing`
         and exit 2, mirroring the UAT gate).
       - `signed_at`: RFC3339 UTC timestamp.
-      - `source`: literal string `"manual-backfill"` so an
-        auditor can tell at a glance the row came from this
-        path (defensive — the table name already encodes it,
-        but the field makes the provenance survive a future
-        table-merge or migration).
+      - `source`: one of the two literal strings
+        `"manual-backfill"` (no-flag path; full local ritual
+        completed) or `"bootstrap-cross-machine"`
+        (`--bootstrap` path; cross-clone provenance
+        recovery). See the "`source` field semantics" section
+        above for the full distinction. The field exists so
+        an auditor can tell at a glance which recovery shape
+        wrote the row, and so the provenance survives a
+        future table-merge or migration even if the
+        manual-backfill and bootstrap-cross-machine flows
+        eventually consolidate into one table.
     The audit (story 25 category 5) and the ancestor gate
     (story 11) both query this table by `story_id` and
     `verdict=pass`. The dashboard (story 3) does NOT query
@@ -468,14 +613,22 @@ guidance: |
 
   CLI shape — argv (authoritative).
     `agentic store backfill <story-id> [--store <path>]
-                              [--signer <identity>]`
+                              [--signer <identity>]
+                              [--bootstrap]`
 
     `<story-id>` is required and must be a single positive
-    integer. `--store` inherits story 1's semantics. `--signer`
-    inherits story 18's semantics. There is no `--all`,
-    no `--allow-dirty`, no `--force`, no
-    `--skip-history-check`. Escape hatches are forbidden by
-    the same rule the UAT gate's argv obeys.
+    integer. `--store` inherits story 1's semantics.
+    `--signer` inherits story 18's semantics. `--bootstrap`
+    is the single-flag opt-in to bootstrap mode (see
+    "Bootstrap mode" above); absent flag = manual-ritual
+    path, present flag = cross-machine recovery path. There
+    is no `--all`, no `--allow-dirty`, no `--force`, no
+    `--skip-history-check`. The `--bootstrap` flag is NOT
+    an escape hatch: it relaxes a single named guard
+    (no-green-evidence) for a single named recovery shape
+    and stamps a distinguishing `source` value; the
+    forbidden-escape-hatch rule the UAT gate's argv obeys
+    is preserved.
 
   Subcommand placement under `agentic store`. The `agentic
   store` namespace is new; this story introduces it. Future
@@ -583,7 +736,7 @@ guidance: |
     `uat_signings.signer` field.
 
   Test file locations.
-    Library-level tests (eight tests) live under
+    Library-level tests (nine tests) live under
     `crates/agentic-store/tests/` as Rust integration
     tests:
     `backfill_writes_one_manual_signings_row_at_head.rs`,
@@ -593,10 +746,15 @@ guidance: |
     `backfill_refuses_with_dirty_tree.rs`,
     `backfill_refuses_when_uat_signings_already_present.rs`,
     `backfill_refuses_when_manual_signings_already_present.rs`,
-    `backfill_standalone_resilience.rs`. They construct a
-    temporary git repo via `tempfile` + `git2`, seed it
-    with a minimal story fixture and a green-jsonl
-    evidence file, and invoke the library directly.
+    `backfill_standalone_resilience.rs`,
+    `backfill_bootstrap_skips_green_evidence_guard.rs`.
+    They construct a temporary git repo via `tempfile`
+    + `git2`, seed it with a minimal story fixture (and,
+    where the test exercises the manual-ritual path, a
+    green-jsonl evidence file), and invoke the library
+    directly. The bootstrap test deliberately omits the
+    green-jsonl file in its happy-path subcase — that
+    omission IS the contract under test.
 
     Binary-level tests (three tests) live under
     `crates/agentic-cli/tests/` as Rust integration
@@ -607,7 +765,14 @@ guidance: |
     drive the compiled binary, construct a
     `tempfile::TempDir` for `--store`, and exercise the
     argv-to-library wire. They do NOT import
-    `agentic_store::Store` directly.
+    `agentic_store::Store` directly. The `--bootstrap`
+    flag's CLI plumbing (argv parsing, exit-code wiring)
+    is mechanical and is NOT separately covered by a
+    binary-level test in this story; the existing
+    `store_backfill_cli_*` tests cover the parent
+    subcommand surface, and the library-level
+    `backfill_bootstrap_skips_green_evidence_guard.rs`
+    pins the contract that matters.
 depends_on:
 - 1
 - 4
