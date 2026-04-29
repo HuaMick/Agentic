@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -118,6 +118,24 @@ acceptance:
       been explicitly pruned, defeating the lens's purpose and
       undoing the frontier filter story 10 established for the
       non-retirement statuses.
+
+      Story 10 cross-reference (2026-04-30 amendment). This test was
+      authored before story 21's retired-handling landed and the
+      filter_frontier inversion at commit 42e5d5a was discovered. Its
+      original fixture (retired + healthy-only) was paired with
+      assertions that the healthy stories render in the frontier — a
+      contract incompatible with story 10's healthy-exclusion rule. The
+      re-authored test must include a non-healthy story in the fixture so
+      the frontier has rows to render: the test then asserts (a) the
+      non-healthy story renders, (b) the retired story does not, (c) the
+      healthy stories do not, and (d) the summary denominator excludes
+      retired (no claim about whether summary counts the rendered subset
+      or the whole non-retired corpus — the original justification did
+      not require either, so the test asserts what the production code
+      emits today). The retired-exclusion contract this test pins is
+      unchanged; the new non-healthy fixture row is the minimal change
+      that lets the test exercise the contract without colliding with
+      story 10's invariant.
   - file: crates/agentic-dashboard/tests/canopy_view_shows_retired_with_era_grouping.rs
     justification: |
       Proves the canopy lens surfaces retired stories grouped by
@@ -154,6 +172,17 @@ acceptance:
       the same `superseded_by` pointers the dashboard already
       resolved — a duplication that would drift the moment the
       chain-walk algorithm evolves.
+
+      Story 10 cross-reference (2026-04-30 amendment). The original
+      fixture relied on healthy stories appearing in the frontier
+      `stories[]` array so the era_head_id assertion had rows to land
+      on. After the filter_frontier fix (story 10's healthy-exclusion
+      invariant restored), healthy stories no longer render in the
+      frontier; the re-authored test must seed a non-healthy story in
+      the fixture so the frontier `stories[]` carries the era_head_id
+      field on at least one row, and the canopy lens (which renders
+      healthy + retired together with era_head_id) carries it on every
+      row. The era_head_id contract this test pins is unchanged.
   - file: crates/agentic-cli/tests/health_exits_non_zero_on_error_or_unhealthy.rs
     justification: |
       Proves the exit-code-as-gate contract at the binary

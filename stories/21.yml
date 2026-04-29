@@ -23,10 +23,7 @@ acceptance:
       composes with story 10's healthy-exclusion rule — both must hold.
       The summary counts at the table's foot also exclude retired from
       their denominators (retired is neither healthy nor unhealthy —
-      it is off-tree); the four-status denominator
-      (`healthy + unhealthy + proposed + under_construction`) reflects
-      the WHOLE non-retired corpus, not the rendered frontier row count
-      (which is a strict subset). Without this, the dashboard's frontier
+      it is off-tree). Without this, the dashboard's frontier
       discipline (established by story 10) degrades as the corpus
       accumulates retired eras: either retired stories leak into the
       frontier (breaking story 21's pruning promise), or healthy stories
