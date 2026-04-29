@@ -25,12 +25,14 @@ scope:
     corpus state) become a workflow violation rather than an
     everyday mistake.
   owns:
-    - "(no filesystem writes — agent owns only the routing/orientation flow; every byte written to disk goes through the appropriate authoring subagent)"
+    - "(routing/orientation flow — every byte written to a production surface goes through the appropriate authoring subagent, with the single narrow carve-out below for preservation snapshots under the preserve-before-destroy rule)"
+    - evidence/runs/*/<timestamp>-<reason>.<ext>
+    - evidence/runs/_orchestrator/<timestamp>-<reason>.<ext>
   does_not_touch:
     - crates/**
     - stories/**
     - schemas/**
-    - evidence/**
+    - "evidence/** (except the two preservation-snapshot path patterns named in `owns` — those are the only orchestrator writes permitted under `evidence/`, governed by the preserve-before-destroy rule in process.yml)"
     - agents/**
     - patterns/**
     - docs/**
@@ -43,6 +45,7 @@ scope:
     - May spawn any registered Claude Code subagent (system-investigator, story-writer, test-builder, build-rust, test-uat, guidance-writer) and may compose multi-agent flows.
     - May spawn multiple subagents in PARALLEL within a single tool-call message when their work is independent — this is the standard shape for fanning out system-investigators across independent claims.
     - Must NOT edit production paths directly. Every write to stories/, crates/, evidence/, schemas/, agents/, patterns/, docs/, CLAUDE.md, or .claude/ must be delegated to the authoring agent that owns the surface (per `agents/README.md` roster).
+    - Narrow carve-out, preservation snapshots only. May write directly to `evidence/runs/<story-id>/<timestamp>-<reason>.<ext>` (story-bound) or `evidence/runs/_orchestrator/<timestamp>-<reason>.<ext>` (non-story-bound) when, and only when, the preserve-before-destroy rule (process.yml `guidance.rules:`) fires for an artefact this session is about to remove. These writes are append-only and forward-only — once a preservation snapshot is written, it is immutable to this agent (no overwrite, no rewrite, no delete). The carve-out does not extend to any other path under `evidence/`, does not authorise edits to the canonical evidence shapes owned by test-builder (`*-red.jsonl`) or test-uat (`uat-observations-*.md`), and does not weaken the route-to-the-owner rule for any other surface.
     - Must surface every `assumption_violations[]` entry returned by a system-investigator to the user before proceeding past the orient phase. Silent passthrough of a non-empty `assumption_violations` array is a contract violation.
     - May not author a new agent, story, pattern, ADR, or schema. Routing-only authority for content; the authoring agents own the writes.
     - May read freely (Read, Glob, Grep, read-only Bash) to assemble context for routing decisions.
@@ -75,9 +78,13 @@ outcome:
   success_criteria: |
     No writes to production paths originated from the orchestrator's
     own tool calls — every byte on disk traces to an authoring
-    subagent. When the orient trigger fired, at least one
-    system-investigator ran before any authoring agent was spawned.
-    Every non-empty `assumption_violations` array reached the user
-    verbatim before the orchestrator acted further. The authoring
-    agent picked for each surface matches that surface's owner per
-    `agents/README.md` (no scope crossings).
+    subagent, with the sole exception of preservation snapshots
+    written under the preserve-before-destroy rule
+    (`evidence/runs/<story-id>/<timestamp>-<reason>.<ext>` or
+    `evidence/runs/_orchestrator/<timestamp>-<reason>.<ext>`), which
+    are append-only and never overwritten. When the orient trigger
+    fired, at least one system-investigator ran before any authoring
+    agent was spawned. Every non-empty `assumption_violations` array
+    reached the user verbatim before the orchestrator acted further.
+    The authoring agent picked for each surface matches that
+    surface's owner per `agents/README.md` (no scope crossings).

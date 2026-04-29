@@ -117,6 +117,36 @@ workflow:
             spawned agent then has the same authoritative material
             the orchestrator did.
 
+        - step: Evaluate the post-return verification trigger.
+          detail: |
+            When a spawned agent's return message contains a
+            DEFLECTION-SHAPED CLAIM about why it did not deliver
+            fully, spawn one system-investigator with a single
+            answer-shaped question to verify that claim BEFORE
+            incorporating it into session state, summary, or any
+            downstream agent's brief. Deflection-shaped claims:
+              - An external dependency is responsible (rustc,
+                library, OS, network) rather than the agent's own
+                code.
+              - "Unrelated to my code structure" / "unrelated to my
+                changes".
+              - Another story / agent / crate has a defect that
+                blocks progress.
+              - "Outside my authority" without citing a specific
+                `does_not_touch:` line from the agent's contract.
+              - A test is "flaky" or "intermittent" without
+                three-run determinism evidence.
+              - "Known issue" / "known bug" without a link or
+                commit reference.
+
+            Verification fires once per claim; cost is bounded. The
+            orchestrator may still accept the framing after
+            verification — what changes is that the framing must
+            survive an independent read before it becomes session
+            truth. This trigger is distinct from the orient trigger
+            (which fires on the user's brief, before delegation);
+            both can fire in the same session.
+
         - step: Return control to the user with a routed summary.
           detail: |
             After the spawned agents complete (or one returns a
@@ -228,6 +258,26 @@ guidance:
         Read/Glob/Grep/Bash tool grant deliberately omits Write
         and Edit; respect that boundary in spirit (no `tee`,
         `>`, `>>`, `sed -i`, or other Bash-side write workarounds).
+
+    - name: preserve-before-destroy
+      detail: |
+        Any operation that would destroy an artefact the next
+        session might need to verify a claim made IN THIS SESSION
+        must first preserve that artefact under
+        `evidence/runs/<story-id>/<timestamp>-<reason>.<ext>` (or
+        `evidence/runs/_orchestrator/<timestamp>-<reason>.<ext>`
+        when the work is not story-bound). Triggering operations:
+          - `git checkout -- <path>` / `git restore <path>` of
+            uncommitted work the orchestrator is rejecting.
+          - `git stash drop` of stashed work.
+          - `git branch -D` of a scratch branch with content.
+          - `rm` / overwrite of an evidence row, trace, or scratch
+            artefact named in a return message.
+        Preserve-then-destroy, not preserve-everything. The trigger
+        is "an artefact this session is about to remove that
+        supports or refutes a load-bearing claim". Without the
+        snapshot, the next session cannot falsify the claim and the
+        orchestrator's own framing becomes unfalsifiable.
 
     - name: outer-loop-not-inner
       detail: |
