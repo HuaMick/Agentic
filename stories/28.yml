@@ -1,0 +1,618 @@
+id: 28
+title: '`agentic store backfill` records a manual ritual into manual_signings'
+outcome: |
+  An operator running `agentic store backfill <story-id>` against a story
+  whose manual promotion ritual is already complete in git history records
+  a single attestation row into `manual_signings` so the prove-it gate
+  accepts the story without forcing a synthetic UAT pass.
+status: proposed
+patterns:
+- standalone-resilient-library
+- fail-closed-on-dirty-tree
+acceptance:
+  tests:
+  - file: crates/agentic-store/tests/backfill_writes_one_manual_signings_row_at_head.rs
+    justification: |
+      Proves the happy path at the library boundary: given a clean
+      working tree at HEAD, a corpus where `stories/<id>.yml` parses,
+      its on-disk `status` is `healthy`, an `evidence/runs/<id>/*-green.jsonl`
+      file exists in the working tree at HEAD, and HEAD's history
+      contains a commit that flipped `stories/<id>.yml` from
+      `under_construction` to `healthy`, the library entry point
+      `Store::backfill_manual_signing(story_id)` writes exactly one
+      row to the `manual_signings` table whose fields are
+      `story_id=<id>`, `verdict="pass"`, `commit=<HEAD-SHA>`,
+      `signer=<resolved-via-story-18-chain>`, `signed_at=<now-rfc3339>`,
+      AND a distinguishing `source="manual-backfill"` field so an
+      auditor reading the row knows it came from the backfill path,
+      not from `agentic uat`. Zero rows are written to `uat_signings`.
+      Without this test the entire purpose of the story is unproven —
+      the row that lets the ancestor gate (story 11) and the audit
+      (story 25 category 5) accept the backfilled story is the
+      observable that distinguishes "the story is backfilled" from
+      "the story is still forged."
+  - file: crates/agentic-store/tests/backfill_refuses_when_yaml_status_not_healthy.rs
+    justification: |
+      Proves guard 1 (status guard) at the library boundary: given a
+      clean working tree where `stories/<id>.yml`'s on-disk `status`
+      is anything other than `healthy` (the test exercises both
+      `under_construction` and `proposed`; `unhealthy` and `retired`
+      are exercised by sibling tests if the test-builder pass deems
+      coverage thin), `Store::backfill_manual_signing(story_id)`
+      returns a typed `BackfillError::StatusNotHealthy { story_id,
+      observed_status }` and writes ZERO rows to `manual_signings`.
+      Without this guard, the backfill would happily attest a story
+      that was never even claimed-healthy on disk — a forging shape
+      strictly worse than the manual-ritual shape it exists to
+      legitimise. The guard's whole point is "the manual ritual is
+      complete in HEAD"; if the YAML doesn't say healthy, the ritual
+      is not complete, and the backfill must refuse.
+  - file: crates/agentic-store/tests/backfill_refuses_when_no_green_evidence_file.rs
+    justification: |
+      Proves guard 2 (evidence guard) at the library boundary: given
+      a clean working tree where `stories/<id>.yml`'s on-disk `status`
+      is `healthy` AND the YAML-flip commit exists in HEAD's history
+      AND `evidence/runs/<id>/` either does not exist on disk or
+      contains zero files matching `*-green.jsonl`,
+      `Store::backfill_manual_signing(story_id)` returns
+      `BackfillError::NoGreenEvidence { story_id, evidence_dir }` and
+      writes ZERO rows. Without this guard, the backfill would attest
+      a story whose manual ritual produced no evidence trail — there
+      would be nothing on disk to read, no record of which test
+      results the operator observed before flipping the YAML, and
+      the backfill would degrade from "legitimise a complete ritual"
+      to "rubber-stamp a YAML claim." The green-jsonl file is the
+      manual ritual's evidence-side artefact and the guard refuses
+      without it.
+  - file: crates/agentic-store/tests/backfill_refuses_when_no_yaml_flip_in_head_history.rs
+    justification: |
+      Proves guard 3 (history guard) at the library boundary: given
+      a clean working tree where `stories/<id>.yml`'s on-disk
+      `status` is `healthy` AND a green-jsonl evidence file exists,
+      but HEAD's history contains NO commit that flipped that
+      story's YAML from anything other than `healthy` to `healthy`
+      (e.g. the YAML was hand-edited in the working tree but never
+      committed, or the YAML was `healthy` from its first commit
+      with no transition recorded),
+      `Store::backfill_manual_signing(story_id)` returns
+      `BackfillError::NoFlipInHistory { story_id }` and writes ZERO
+      rows. The guard walks HEAD's commit history (depth-bounded;
+      see guidance) looking for a commit whose diff against its
+      parent moves `stories/<id>.yml`'s `status` line from a
+      non-`healthy` value to `healthy`. Without this guard, an
+      operator could set `status: healthy` in the working tree and
+      run backfill before committing — the YAML wouldn't even be in
+      git history yet, but the backfill would happily attest it.
+      The history guard is what makes the backfill correspond to a
+      *committed* ritual, not a *staged* one.
+  - file: crates/agentic-store/tests/backfill_refuses_with_dirty_tree.rs
+    justification: |
+      Proves the fail-closed-on-dirty-tree pattern at the library
+      boundary: given an otherwise valid backfill request (YAML
+      healthy, evidence present, history clean) but a dirty git
+      working tree (any uncommitted change to any tracked file or
+      any untracked non-ignored file),
+      `Store::backfill_manual_signing(story_id)` returns
+      `BackfillError::DirtyTree` and writes ZERO rows. The same
+      pattern that gates `agentic uat --verdict pass` (story 1)
+      and `agentic test-build record` (story 15) gates the
+      backfill — the row carries a commit SHA, and a row whose
+      commit cannot be reconstructed from the working tree state
+      is forgeable in exactly the same way an unsigned UAT row is
+      forgeable. The pattern's "no escape hatch" rule applies
+      verbatim; there is no `--allow-dirty` flag.
+  - file: crates/agentic-store/tests/backfill_refuses_when_uat_signings_already_present.rs
+    justification: |
+      Proves the no-double-attestation guard: given a story whose
+      `uat_signings` table ALREADY contains a Pass row at the
+      current HEAD (i.e. the story has been legitimately UAT-signed
+      by `agentic uat` and the prove-it gate is already satisfied),
+      `Store::backfill_manual_signing(story_id)` returns
+      `BackfillError::AlreadyAttested { story_id, table:
+      "uat_signings" }` and writes ZERO rows. The backfill's job is
+      to bridge stories that LACK a real signing row; backfilling on
+      top of an existing one would muddy the audit trail (the same
+      story would carry attestations in both tables for the same
+      commit) and offer no benefit to the gate (the union query is
+      already satisfied). Without this guard, an operator could
+      accidentally write a duplicate attestation by running backfill
+      on a story that was promoted via `agentic uat` between their
+      audit run and their backfill invocation.
+  - file: crates/agentic-store/tests/backfill_refuses_when_manual_signings_already_present.rs
+    justification: |
+      Proves the idempotency-via-refusal guard: given a story whose
+      `manual_signings` table already contains a Pass row at the
+      current HEAD (i.e. the backfill has already been run for this
+      story-id at this commit), a second invocation of
+      `Store::backfill_manual_signing(story_id)` returns
+      `BackfillError::AlreadyAttested { story_id, table:
+      "manual_signings" }` and writes ZERO rows. The append-only
+      contract on `manual_signings` mirrors the contract on
+      `uat_signings` (story 1): one attestation per story per
+      commit. Without this guard, a script that loops over
+      drift-flagged stories and runs backfill on each one would
+      double-write rows on the second invocation, and the audit's
+      "is this story attested?" query would over-count without
+      any correctness gain.
+  - file: crates/agentic-cli/tests/store_backfill_cli_writes_row_through_binary.rs
+    justification: |
+      Proves the happy path through the binary: `agentic store
+      backfill <id>` against a fixture corpus and store where the
+      named story is in the forged-shape (YAML healthy, evidence
+      present, history flip present, no `uat_signings` row, no
+      `manual_signings` row, clean tree) exits 0, writes exactly
+      one row to the configured store's `manual_signings` table
+      with the row shape pinned by the library happy-path test,
+      and emits stdout naming the story id and the row's commit.
+      Without this test the binary's argv-to-library wire is
+      unproven — the library could be correct while the CLI shim
+      mishandled the positional argument or constructed the
+      wrong store.
+  - file: crates/agentic-cli/tests/store_backfill_cli_rejects_all_flag.rs
+    justification: |
+      Proves the no-`--all` invariant at the binary boundary:
+      `agentic store backfill --all` (or any variant that omits a
+      positional story id) exits 2 with a stderr message naming
+      the missing positional argument; `agentic store backfill 11
+      17 23` (multiple positional ids) also exits 2 with a
+      message saying the command takes exactly one id. Zero rows
+      are written to either signing table. The single-id
+      constraint is structural: the backfill is a per-story
+      attestation that requires per-story human judgement (each
+      story's manual ritual must be confirmed individually
+      against git history) and a `--all` flag would be a
+      forging shortcut. Without this test the constraint is a
+      prose claim in guidance; the test makes it a binary-level
+      contract a future CLI refactor cannot silently relax.
+  - file: crates/agentic-cli/tests/store_backfill_cli_dirty_tree_exits_2.rs
+    justification: |
+      Proves the fail-closed contract reaches the operator via
+      the binary's exit code: with an uncommitted change in the
+      fixture repo and an otherwise valid backfill target,
+      `agentic store backfill <id>` exits 2 (not 0, not 1),
+      writes zero rows to `manual_signings`, and emits stderr
+      naming the dirty tree as the cause. Without this test, a
+      wrapper that mistranslated `BackfillError::DirtyTree` to
+      exit 1 would turn "retry after committing" into "the
+      backfill itself failed," exactly the CI-level distinction
+      the fail-closed-on-dirty-tree pattern's exit-code mapping
+      exists to preserve. Reuses the same exit-code semantics
+      story 1's `uat_dirty_tree_exits_2.rs` already pins for
+      the UAT gate.
+  - file: crates/agentic-store/tests/backfill_standalone_resilience.rs
+    justification: |
+      Proves the standalone-resilient-library claim: the backfill
+      library is driven directly with only `agentic-store`,
+      `agentic-events`, `agentic-signer`, and `git2` wired up
+      (no orchestrator, no runtime, no sandbox, no CLI crate),
+      and produces the same row shape as the binary path.
+      Without this, `agentic-store` would silently grow an
+      orchestrator dependency through the backfill code path
+      (the kind of accidental coupling the pattern's allow-list
+      catches at link time), and a future CI step that runs
+      backfill on a freshly-cloned bare-bones environment would
+      break for reasons unrelated to the contract.
+  uat: |
+    Goal: convince yourself that `agentic store backfill <id>`
+    refuses every guard violation, writes exactly one
+    `manual_signings` row when all guards pass, that the
+    ancestor gate (story 11) accepts the backfilled row, and
+    that the audit (story 25 category 5) stops flagging the
+    story afterward.
+
+    Setup:
+      1. From a clean checkout on branch `main`, run `git status
+         --porcelain` and confirm the working tree is empty.
+      2. Install the binary: `wsl bash -c "source ~/.cargo/env
+         && cd /home/code/Agentic && cargo install --path
+         crates/agentic-cli --locked"`. Confirm `command -v
+         agentic` resolves.
+      3. Choose a store location: `export AGENTIC_STORE=$(mktemp -d)`.
+         Confirm the directory is empty.
+      4. Identify a target story id `<target-id>` whose YAML on
+         disk says `status: healthy`, whose
+         `evidence/runs/<target-id>/*-green.jsonl` file exists in
+         the working tree at HEAD, and whose HEAD history
+         contains a commit that flipped its YAML to `healthy`.
+         Stories 11, 17, and 23 satisfy this shape historically;
+         pick one (the walkthrough below uses 11). Confirm the
+         expected on-disk shape with:
+           - `grep '^status:' stories/<target-id>.yml` shows
+             `healthy`.
+           - `ls evidence/runs/<target-id>/*-green.jsonl` returns
+             at least one path.
+           - `git log --oneline -- stories/<target-id>.yml` shows
+             a commit whose message references the promotion.
+
+    Guard-fires walkthrough (refusal cases):
+      5. Pick a non-target story id `<non-healthy-id>` whose YAML
+         currently says `status: under_construction`. Run
+         `agentic store backfill <non-healthy-id> --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 2.
+           - stderr names the status guard with the observed
+             status.
+           - Zero rows are written to `manual_signings`
+             (`agentic stories audit --store "$AGENTIC_STORE"
+             --json | jq '.yaml_healthy_without_signing_row'`
+             returns the same array as before — including
+             `<non-healthy-id>` if it would have been there;
+             the backfill did not change the audit's view).
+      6. With the same target story, introduce a dirty tree:
+         `echo x >> README.md`. Run `agentic store backfill
+         <target-id> --store "$AGENTIC_STORE"`. Observe:
+           - Process exits 2.
+           - stderr names the dirty tree as the cause.
+           - Zero rows are written.
+         Restore the tree: `git restore README.md`. Confirm
+         clean.
+
+    Happy-path walkthrough:
+      7. Run `agentic stories audit --store "$AGENTIC_STORE"`
+         BEFORE backfill. Observe:
+           - Process exits 2 (drift detected, per story 25's
+             revised exit-code contract).
+           - The `<target-id>` appears under
+             `yaml-healthy-without-signing-row`.
+      8. Run `agentic store backfill <target-id> --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 0.
+           - stdout includes `<target-id>`, the resolved signer,
+             and the HEAD short SHA.
+           - Exactly one new row exists in `manual_signings` for
+             `<target-id>` with `verdict=pass`, `commit=<HEAD>`,
+             and a non-empty `signer`.
+           - Zero new rows in `uat_signings`.
+      9. Re-run `agentic stories audit --store "$AGENTIC_STORE"`
+         AFTER backfill. Observe:
+           - Process exits 0 (assuming `<target-id>` was the
+             only drift; otherwise exits 2 but the
+             `yaml-healthy-without-signing-row` array no longer
+             contains `<target-id>`).
+     10. Re-run `agentic stories health --store "$AGENTIC_STORE"
+         --all`. Observe:
+           - The `<target-id>` row no longer renders with health
+             `error`; it renders as `healthy` with a `Healthy at`
+             cell showing the HEAD SHA and the signer.
+
+    Idempotency walkthrough:
+     11. Re-run `agentic store backfill <target-id> --store
+         "$AGENTIC_STORE"` (the second invocation). Observe:
+           - Process exits 2.
+           - stderr names the existing `manual_signings` row as
+             the reason.
+           - The row count in `manual_signings` is unchanged —
+             still exactly one for `<target-id>` at HEAD.
+
+    Ancestor-gate composition walkthrough (the story 11 link):
+     12. Identify a descendant story `<descendant-id>` whose
+         `depends_on` includes `<target-id>` AND whose other
+         ancestors are all healthy-with-valid-signings. (If no
+         such descendant exists in the corpus naturally, this
+         step may be skipped — but the corpus must contain at
+         least one for the gate composition to be exercisable.)
+     13. Run `agentic uat <descendant-id> --verdict pass --store
+         "$AGENTIC_STORE"`. Observe:
+           - Process exits 0.
+           - The story is promoted to `healthy`.
+           - A new `uat_signings.verdict=pass` row exists for
+             `<descendant-id>`.
+         The ancestor gate accepted the `manual_signings` row
+         for `<target-id>` exactly as it would accept a
+         `uat_signings` row.
+
+    No-`--all` walkthrough:
+     14. Run `agentic store backfill --store "$AGENTIC_STORE"`
+         (no positional id). Observe: exit 2, stderr names the
+         missing positional argument.
+     15. Run `agentic store backfill 11 17 23 --store
+         "$AGENTIC_STORE"` (three positional ids). Observe:
+         exit 2, stderr names the single-id constraint.
+
+    Cleanup:
+     16. `rm -rf "$AGENTIC_STORE"` to clear the synthetic store.
+     17. If you promoted `<descendant-id>` in step 13 and want
+         to revert: `git restore stories/<descendant-id>.yml`.
+     18. If you want the installed binary gone: `cargo
+         uninstall agentic-cli`.
+guidance: |
+  This story adds ONE new CLI verb — `agentic store backfill
+  <story-id>` — and ONE new store table — `manual_signings` — so
+  that stories promoted via the manual ritual (a hand-edited YAML
+  flip plus a written-by-hand `evidence/runs/<id>/*-green.jsonl`)
+  can be brought into compliance with the prove-it gate without
+  forcing them through a synthetic UAT pass. The library is
+  standalone-resilient-library-shaped (the row it writes is on
+  the prove-it path; the library must work when the rest of the
+  system is in flames). The gate is fail-closed-on-dirty-tree
+  (the row carries a commit SHA; a forgeable row is worse than
+  no row).
+
+  Why a separate table, not a column on `uat_signings`. The
+  audit-trail distinction between "real CLI signing" and "after-
+  the-fact backfill of a manual ritual" is corpus-load-bearing.
+  An auditor reading `uat_signings` should be able to trust that
+  every row was written by the real `agentic uat` Pass path —
+  that is what the table's name promises. Conflating the two
+  paths in one table by adding a `source` column would let a
+  future operator forge a `source="agentic-uat"` row by hand
+  and lose the distinction the table's name encodes. Two tables
+  cost nothing in storage (schemaless per ADR-0002), preserve
+  the provenance fact at the table level (queryable without
+  filter logic), and keep `uat_signings` semantically clean.
+  Story 11's ancestor gate composes both tables via UNION (see
+  story 11's "Two-table signing-row composition" guidance); the
+  gate's pass/fail decision is provenance-blind, but the
+  preserved-at-the-table-level provenance lets every other
+  reader (audit, dashboard, future analytics) tell the two
+  apart.
+
+  Why the manual ritual must be COMPLETE IN GIT HISTORY before
+  backfill. The three guards (status-healthy on disk,
+  green-jsonl evidence file present, YAML-flip committed in
+  HEAD's history) together encode "the operator already
+  performed the ritual; this command is just recording the
+  attestation row that should have been written at the time."
+  Each guard refuses a different forging shape:
+    - Status-not-healthy guard: refuses backfilling a story
+      whose YAML never even claimed healthy. Without it, the
+      backfill becomes "promote-and-attest," collapsing the
+      manual ritual's two-step (flip + evidence) into one
+      command and re-opening the forging surface the original
+      `agentic uat` gate exists to close.
+    - No-green-evidence guard: refuses backfilling a story
+      with no on-disk record of the test results that
+      justified the manual flip. Without it, the backfill
+      becomes "rubber-stamp the YAML claim," and the
+      `evidence/runs/` tree's role as the manual ritual's
+      audit trail evaporates.
+    - No-flip-in-history guard: refuses backfilling a story
+      whose YAML claim has not been committed yet (or has
+      always been healthy, with no recorded transition).
+      Without it, an operator could set `status: healthy` in
+      their working tree and run backfill before committing
+      — the row would be written against a HEAD that did
+      not yet contain the YAML claim, and the backfill would
+      attest a state that does not yet exist in the project
+      history.
+  Together, the three guards make backfill *retroactive* by
+  construction: it can only attest a state that already
+  exists in the committed history.
+
+  History guard implementation. The history guard walks
+  HEAD's commit log (depth-bounded — recommended starting
+  bound: 1024 commits or the lifetime of the story file,
+  whichever is shorter) looking for a commit whose diff
+  against its parent shows `stories/<id>.yml`'s `status:`
+  line moving from a non-`healthy` value to `healthy`. The
+  walk uses `git2`'s `Revwalk` and `Tree::diff_to_tree`.
+  Implementation hint: read the YAML at the commit and at
+  its parent; compare the `status:` field's value across the
+  two trees. The traversal stops on the first matching
+  commit (not the first match found by depth, but the first
+  encountered along the walk — the commit that introduced
+  the healthy claim). If the bound is exhausted without
+  finding such a commit, return `BackfillError::NoFlipInHistory`.
+  The bound exists to keep the guard's runtime predictable;
+  a story whose flip is older than the bound is a corner
+  case the system can handle by extending the bound (a
+  config flag may be added later, but is NOT in this
+  story's scope; default is sufficient for the corpus's
+  current size).
+
+  No `--all` flag. The CLI accepts EXACTLY one positional
+  story id per invocation. A `--all` flag would be a forging
+  shortcut: each story's manual ritual must be confirmed
+  individually against git history (the operator reads the
+  evidence file, confirms the YAML-flip commit message
+  matches the story's UAT walkthrough, decides the story is
+  legitimately backfilled-shape) and a batch flag would
+  encourage skipping that confirmation. Operators who need
+  to backfill multiple stories run the command multiple
+  times. The single-id contract is pinned at the binary
+  boundary by `store_backfill_cli_rejects_all_flag.rs`.
+
+  `manual_signings` row contract.
+    Append-only table in `agentic-store`, schemaless per
+    ADR-0002. Each successful backfill writes one row; no
+    upsert, no delete. Minimum fields:
+      - `id`: ULID or UUIDv7 (sortable by time).
+      - `story_id`: integer, matches `stories/<id>.yml`.
+      - `verdict`: `"pass"` (only — the backfill never writes
+        a Fail row; a Fail row in this table is a corruption
+        shape story 11's
+        `uat_refuses_ancestor_with_manual_fail_row.rs` defends
+        against).
+      - `commit`: full git SHA of HEAD at backfill time.
+      - `signer`: non-empty identity string resolved by
+        `agentic-signer` (story 18's four-tier chain;
+        unresolvable signer maps to `BackfillError::SignerMissing`
+        and exit 2, mirroring the UAT gate).
+      - `signed_at`: RFC3339 UTC timestamp.
+      - `source`: literal string `"manual-backfill"` so an
+        auditor can tell at a glance the row came from this
+        path (defensive — the table name already encodes it,
+        but the field makes the provenance survive a future
+        table-merge or migration).
+    The audit (story 25 category 5) and the ancestor gate
+    (story 11) both query this table by `story_id` and
+    `verdict=pass`. The dashboard (story 3) does NOT query
+    it directly — the dashboard composes via the same union
+    logic the ancestor gate uses, exposed as a shared
+    `health_of(story)` helper if duplication proves
+    fragile (see story 11's note).
+
+  Exit-code contract for `agentic store backfill`.
+    0  = exactly one row written; the manual ritual is now
+         attested.
+    1  = reserved for "real failure of the operation"
+         (currently unused; future table-corruption recovery
+         flows might use it).
+    2  = could not write a row. Triggers (all map to exit 2):
+         dirty tree (`DirtyTree`), unknown story id
+         (`UnknownStory`), status-not-healthy
+         (`StatusNotHealthy`), no green evidence
+         (`NoGreenEvidence`), no flip in history
+         (`NoFlipInHistory`), uat-row-already-present
+         (`AlreadyAttested { table: "uat_signings" }`),
+         manual-row-already-present (`AlreadyAttested {
+         table: "manual_signings" }`), unresolvable signer
+         (`SignerMissing`), missing positional id
+         (argv-validation), more than one positional id
+         (argv-validation), store unreachable, IO error.
+         The blanket-exit-2 mapping is consistent with the
+         UAT gate (story 1) and the audit (story 25 revised);
+         all three CLIs share the "exit 2 means retry after
+         addressing the prerequisite" semantic the
+         fail-closed-on-dirty-tree pattern established.
+
+  CLI shape — argv (authoritative).
+    `agentic store backfill <story-id> [--store <path>]
+                              [--signer <identity>]`
+
+    `<story-id>` is required and must be a single positive
+    integer. `--store` inherits story 1's semantics. `--signer`
+    inherits story 18's semantics. There is no `--all`,
+    no `--allow-dirty`, no `--force`, no
+    `--skip-history-check`. Escape hatches are forbidden by
+    the same rule the UAT gate's argv obeys.
+
+  Subcommand placement under `agentic store`. The `agentic
+  store` namespace is new; this story introduces it. Future
+  store-related verbs (e.g. backup, restore, vacuum) would
+  live as siblings (`agentic store backup`, `agentic store
+  restore`). The namespace exists because the backfill is
+  semantically a STORE operation (it writes to a store table)
+  rather than a story operation (which would route through
+  `agentic stories ...`) or a UAT operation (which would
+  route through `agentic uat`). Naming it `agentic stories
+  backfill` would have been confusing — the audit subcommand
+  lives there and the audit READS the manual_signings table;
+  putting both reader and writer under the same noun would
+  blur the read/write boundary stories 25 and 28 deliberately
+  separate.
+
+  Allowed dependencies for the backfill code path (inside
+  `agentic-store`). `agentic-events`, `agentic-signer`,
+  `git2`, plus whatever `agentic-store` already pulls in for
+  its existing trait/impl. The backfill does NOT depend on
+  `agentic-uat`, `agentic-dashboard`, `agentic-cli`,
+  `agentic-orchestrator`, `agentic-runtime`, or
+  `agentic-sandbox`. The standalone-resilience test
+  (`backfill_standalone_resilience.rs`) enforces this.
+
+  Why this lives inside `agentic-store`, not in a new
+  `agentic-backfill` crate. The backfill is a writer that
+  targets `manual_signings`, a table the same crate already
+  owns (alongside `uat_signings`, `test_runs`, etc.). A
+  separate crate would either re-export the `Store` trait
+  (a circular dep shape) or duplicate the trait surface
+  (a maintenance trap). Putting the backfill entry point on
+  the existing `Store` trait — `Store::backfill_manual_signing`
+  — is the cleanest seam: the trait grows by one method,
+  every impl (MemStore, SurrealStore, future CloudSurrealStore)
+  picks up the same contract, and the CLI shim is a thin
+  caller of an existing crate's expanded surface. This is
+  the same shape story 4's `snapshot_for_story` /
+  `restore` extension took for story 20.
+
+  Schema flag. This story does NOT propose any change to
+  `schemas/story.schema.json`. The `manual_signings` table
+  is schemaless per ADR-0002 and lives entirely inside
+  `agentic-store`. Schema validation is enforced by Rust
+  types at the trait boundary, not by JSON Schema. If the
+  story-writer or the orchestrator decides a JSON-Schema
+  representation of the row is later useful (e.g. for
+  cross-impl validation), that is a separate amendment to
+  ADR-0002's "schema added per-table only when justified"
+  clause, not part of this story's scope.
+
+  Relationship to story 1.
+    Story 1 owns `uat_signings`. Story 28 owns
+    `manual_signings`. The two tables are independent at
+    the storage layer; the join happens in
+    `has_valid_signing` (story 11's helper, see "Two-table
+    signing-row composition" in story 11's guidance). There
+    is no runtime ordering constraint between the two
+    paths — `agentic uat` does not read `manual_signings`,
+    and `agentic store backfill` does not read
+    `uat_signings` (except for the no-double-attestation
+    guard, which is read-only).
+
+  Relationship to story 11 (UAT ancestor gate).
+    Story 11's `is_ancestor_satisfied` consumes the
+    `manual_signings` table via the union query
+    documented in its guidance. This story (28) ships the
+    writer; story 11 ships the reader. Their amendments
+    sequence eventually-consistently per the
+    docs/research/story_tree/13-existing-stories-impact.md
+    posture: neither story declares a back-edge on the
+    other; both sit red until the pipeline converges.
+
+  Relationship to story 25 (`agentic stories audit`).
+    Story 25's category-5 query
+    (`yaml_healthy_without_signing_row`) is
+    `(uat_signings UNION manual_signings).is_empty(
+    story_id, verdict=pass)`. A backfilled story's
+    `manual_signings` row removes it from category 5;
+    that is the contract that closes the audit's gate.
+    Story 25 ships the reader for the audit-trail
+    surface; this story (28) ships the writer.
+
+  Relationship to story 29 (pre-commit hook).
+    Story 29's hook runs `agentic stories audit` and
+    `agentic stories health --all` and refuses the
+    commit on non-zero exit. Backfill is what gives an
+    operator a path from "audit non-zero because of
+    forged stories 11/17/23" to "audit zero, commit
+    permitted" without lying about a UAT verdict.
+    Without backfill, the only way to clear the
+    pre-commit gate for the existing forged stories
+    would be to retire them or hand-edit them back to
+    `under_construction` — both worse than the
+    backfill path.
+
+  Relationship to story 18 (signer composition).
+    The backfill resolves a signer via the same four-
+    tier chain (`--signer` flag → `AGENTIC_SIGNER` env
+    → `git config user.email` → typed
+    `BackfillError::SignerMissing`). The signer string
+    is stamped onto the `manual_signings` row alongside
+    `commit` so an auditor can tell who attested the
+    backfill. Symmetric with story 1's
+    `uat_signings.signer` field.
+
+  Test file locations.
+    Library-level tests (eight tests) live under
+    `crates/agentic-store/tests/` as Rust integration
+    tests:
+    `backfill_writes_one_manual_signings_row_at_head.rs`,
+    `backfill_refuses_when_yaml_status_not_healthy.rs`,
+    `backfill_refuses_when_no_green_evidence_file.rs`,
+    `backfill_refuses_when_no_yaml_flip_in_head_history.rs`,
+    `backfill_refuses_with_dirty_tree.rs`,
+    `backfill_refuses_when_uat_signings_already_present.rs`,
+    `backfill_refuses_when_manual_signings_already_present.rs`,
+    `backfill_standalone_resilience.rs`. They construct a
+    temporary git repo via `tempfile` + `git2`, seed it
+    with a minimal story fixture and a green-jsonl
+    evidence file, and invoke the library directly.
+
+    Binary-level tests (three tests) live under
+    `crates/agentic-cli/tests/` as Rust integration
+    tests, driven via `assert_cmd`:
+    `store_backfill_cli_writes_row_through_binary.rs`,
+    `store_backfill_cli_rejects_all_flag.rs`,
+    `store_backfill_cli_dirty_tree_exits_2.rs`. They
+    drive the compiled binary, construct a
+    `tempfile::TempDir` for `--store`, and exercise the
+    argv-to-library wire. They do NOT import
+    `agentic_store::Store` directly.
+depends_on:
+- 1
+- 4
+- 6
+- 18
+related_files:
+- crates/agentic-store/src/**
+- crates/agentic-cli/src/**
