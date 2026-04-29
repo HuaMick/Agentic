@@ -4,7 +4,7 @@ outcome: |
   A developer runs `agentic stories health` and sees a single table
   showing every story's current health so unhealthy stories cannot hide
   behind unrelated work.
-status: healthy
+status: under_construction
 patterns: []
 acceptance:
   tests:
@@ -154,6 +154,40 @@ acceptance:
       the same `superseded_by` pointers the dashboard already
       resolved — a duplication that would drift the moment the
       chain-walk algorithm evolves.
+  - file: crates/agentic-cli/tests/health_exits_non_zero_on_error_or_unhealthy.rs
+    justification: |
+      Proves the exit-code-as-gate contract at the binary
+      boundary: `agentic stories health --all` against a fixture
+      corpus containing at least one row whose computed health is
+      `error` (e.g. a story whose YAML says `status: healthy` but
+      whose store carries no `uat_signings.verdict=pass` row —
+      the status-evidence-mismatch shape) exits non-zero (exit
+      code 2 — could-not-attest, mirroring the
+      fail-closed-on-dirty-tree pattern's mapping); the same
+      command against a fixture where at least one row computes
+      to `unhealthy` (fell-from-grace) also exits non-zero;
+      against a corpus where every row is `healthy`, `proposed`,
+      or `under_construction` the command exits 0; and across
+      every case the rendered output (table OR `--json`)
+      contains the same row data the existing health tests pin —
+      the exit code is purely additive to the rendered payload.
+      Without this test the dashboard's detection of forged
+      promotions and fell-from-grace stories remains a silent
+      observation: the rendering shows `error` / `unhealthy` to
+      a human reader, but a pre-commit hook (story 29) wrapping
+      the command sees only exit 0 and would have to scrape the
+      payload to learn the corpus is broken. The exit code is
+      what makes this command an enforceable gate rather than a
+      cosmetic inspector — it is the structural complement to
+      the prove-it gate, denying any commit whose post-commit
+      state would render as `error` or `unhealthy`. The mapping
+      to exit 2 (not exit 1) is deliberate: exit 1 is reserved
+      for "real failure of the operation itself" and the audit
+      surface (story 25) reuses the same convention; exit 2
+      means "the command ran successfully and detected a
+      condition the operator must address before retrying," the
+      same semantic the UAT gate's dirty-tree refusal already
+      uses.
   uat: |
     Goal: convince yourself the dashboard correctly classifies the four
     statuses, surfaces `unhealthy` first, drills down on a specific
@@ -407,15 +441,52 @@ guidance: |
     story 10 (dag-primary-lens epic), not pinned here.
 
   Exit-code contract for `agentic stories health`.
-    0 = rendered successfully (including the case where the
-        dashboard marks a row as `error` because of malformed
-        YAML — that is inside this story's tolerance). In
-        drilldown mode, an unknown `<id>` exits non-zero with a
-        clear message (stderr names the missing id);
-        `DashboardError::UnknownStory` carries the right shape.
-        Non-zero is also acceptable for the failure modes this
-        story declines to tolerate (store unreachable, stories/
-        directory missing).
+    0 = rendered successfully AND every row classified as
+        `proposed`, `under_construction`, or `healthy`. In other
+        words, the corpus is in a state the prove-it gate
+        already attests to. Malformed YAML still routes to an
+        `error` row in the rendered output (this story's render-
+        does-not-crash tolerance is intact), but the exit code
+        now treats `error` rows as a gate failure — see below.
+    2 = rendered successfully AND at least one row classified as
+        `error` OR `unhealthy`. The render is correct (the
+        operator sees the table and the offending rows) and the
+        process exits non-zero so a wrapping pre-commit hook
+        (story 29) can refuse the commit on detection. This is
+        the gate-half of the dashboard: detection without
+        enforcement is silent, so the same exit-code mapping the
+        UAT gate uses for "could not attest" applies here for
+        "the corpus is in a state the prove-it gate cannot
+        attest to." `error` covers the status-evidence-mismatch
+        shape — YAML says `healthy` but no `uat_signings`
+        (or `manual_signings` per story 28) row backs it — which
+        is the forged-promotion class story 29's hook exists to
+        block. `unhealthy` covers the fell-from-grace shape
+        story 3 already classifies. The amendment landed
+        2026-04-29 alongside stories 25 (audit's parallel
+        category) and 29 (the hook that consumes the exit
+        code).
+    Non-zero is also returned for the failure modes this story
+    declines to tolerate (store unreachable, stories/ directory
+    missing, unparseable flag) — those exit non-zero with a
+    clear message; the rendered-output paths exit 0 or 2 per
+    the rules above. In drilldown mode, an unknown `<id>` exits
+    non-zero with a clear message (stderr names the missing
+    id); `DashboardError::UnknownStory` carries the right shape.
+
+    Why exit 2 and not exit 1. Exit 1 is reserved across the
+    CLI for "real failure of the underlying operation" — a Fail
+    UAT verdict (story 1), a real test red. Exit 2 is the
+    "could-not-attest / retry after addressing the
+    prerequisite" code, established by the
+    fail-closed-on-dirty-tree pattern and reused by story 11's
+    ancestor-refusal exit code. The dashboard's gate-half is
+    semantically the same: the operator must address the
+    `error` or `unhealthy` row before the commit can land; it
+    is not "the dashboard itself failed." A pre-commit hook
+    that ran into exit 1 would conflate `agentic stories health`
+    with a Fail UAT verdict — the same CI distinction the
+    dirty-tree mapping exists to preserve.
 
   CLI-wide decisions inherited from story 1.
     The parser choice, the full `agentic-cli` allowed-dependency
