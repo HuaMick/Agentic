@@ -400,6 +400,46 @@ guidance: |
          audit-trail value); on green, `ScaffoldNotRed`.
        - Any gate fails → classify `preserved`: emit the
          `preserved` verdict with no probe.
+
+    Per-scaffold justification-text refinement (refines item 2's
+    "all three gates pass" branch). The three gates above are
+    evaluated ONCE per record invocation against story-level signals
+    (story status, the most recent evidence row's commit, working-
+    tree state); they are not per-scaffold. When all three fire, the
+    classifier consults ONE additional per-scaffold signal before
+    routing each scaffold through the re-author probe path. For each
+    scaffold named in `acceptance.tests[]`, it reads the historical
+    story YAML at the most recent evidence row's `commit` field
+    (same git-native source the per-story gates use — the YAML blob
+    accessed via `git2::Tree::get_path` against that commit's tree)
+    and compares the per-scaffold `justification:` text, trimmed,
+    BYTE-FOR-BYTE against the current on-disk YAML's per-scaffold
+    `justification:` text for the same `acceptance.tests[].file`
+    entry. If the two strings are byte-identical, the scaffold
+    classifies as `preserved` without a probe — the per-story gates
+    fired because some OTHER scaffold's justification was amended at
+    that commit, not this one, and the unchanged scaffold inherits
+    the preserved verdict from its untouched contract. If the two
+    strings differ at any byte, the scaffold is eligible for re-
+    authoring under the per-story gates: probe it; on red, classify
+    `re-authored`; on green, `ScaffoldNotRed` per item 2's existing
+    rule. Comparison is byte-for-byte after a leading/trailing
+    whitespace trim — explicitly NOT a normalised compare (no YAML
+    canonicalisation, no whitespace folding, no quote-style
+    rewriting), because the historical blob and the current blob
+    both come out of the same git object store and a future
+    maintainer must not introduce a normalisation step that would
+    silently reclassify a scaffold whose justification changed only
+    in formatting. The signal carries no new forgery axis (it reads
+    the same git-native source the per-story gates already trust)
+    and adds no new YAML field. This per-scaffold refinement is
+    what lets a single record invocation against an amended story
+    produce a mixed-verdict row: the per-story gates fire once, but
+    only the scaffolds whose justification text actually moved
+    between the evidence commit and HEAD route through the probe;
+    the rest classify `preserved` and the row carries both
+    verdicts side by side in declaration order.
+
     3. Grandfathered-bridge case (resolves ADR-0005 sub-amendment's
        declaration-shape punt). Detection is exactly two predicates
        ANDed: the story has NO `evidence/runs/<id>/*.jsonl` row at
