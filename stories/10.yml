@@ -6,7 +6,7 @@ outcome: |
   showing its DAG depth and how many downstream stories it blocks, so
   the dashboard points at what can be started right now instead of
   listing the whole corpus.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -176,6 +176,21 @@ acceptance:
       matching the row set the story-3 dashboard used to emit by
       default. Without this the escape hatch exists in the library
       but not at the hand operators and scripts type on.
+
+      Cross-story exit-code dependency (story 3 amendment, 2026-04-29,
+      commit `efabc6c`). After story 3's amendment, `agentic stories
+      health` (with or without `--all`) exits 2 when at least one
+      rendered row is `error`-class or `unhealthy`, and exits 0 only
+      on a clean corpus. This test's fixture deliberately constructs
+      a story marked `healthy` in YAML with no signing evidence in the
+      ephemeral store — which the four-status classifier resolves to
+      an `error`-class row by design (forged-promotion shape). The
+      exit-code assertion in this test must therefore expect exit 2,
+      not exit 0; the rendering assertions (the `stories[]` array
+      contains every fixture id, length is 4, `view == "all"`) are
+      unchanged. The test is propagating story 3's exit-code contract
+      through the binary boundary, not weakening the `--all` flat-
+      list contract this story owns.
   - file: crates/agentic-cli/tests/health_selectors_via_binary.rs
     justification: |
       Proves the selector argv reaches the library through the binary:
@@ -716,6 +731,24 @@ guidance: |
     `under_construction` per the system design, which is correct
     behaviour. Pre-editing story 3 at this story's authoring time
     would re-open story 3 prematurely.
+
+    Story 3 exit-code amendment cascade (2026-04-29, commit `efabc6c`,
+    impl `0898bac`). Story 3 amended its exit-code contract: `agentic
+    stories health` now exits 2 when at least one rendered row is
+    `error`-class or `unhealthy`, and exits 0 only on a clean corpus.
+    That contract change is read-shared with this story's `--all`
+    invocation: `agentic stories health --all` walks the same render
+    pipeline and inherits the same exit-code mapping. This story's
+    `health_all_flag_renders_flat_list` acceptance test was authored
+    under the prior "always exit 0" contract and constructs a fixture
+    with a `healthy`-claiming-but-unsigned story (which classifies as
+    `error`-class by design); under the new contract that fixture
+    must exit 2, not 0. The test's exit-code assertion is the only
+    line that needs to flip — its rendering assertions remain valid.
+    No new acceptance test is added by this cascade; the cascade is
+    mechanical, propagating the upstream contract change. The status
+    auto-revert from `healthy` to `under_construction` is by design
+    and triggers re-UAT after test-builder updates the assertion.
 
   Relationship to story 6.
     This story relies on story 6's DAG check at load time for its
