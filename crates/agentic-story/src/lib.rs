@@ -736,11 +736,10 @@ fn detect_superseded_by_cycles(stories: &[Story]) -> Result<(), StoryError> {
 /// decision 3, this validation runs only at directory-load time, not
 /// at single-file load time.
 fn validate_asset_paths(stories: &[Story]) -> Result<(), StoryError> {
-    // Find the repo root by walking up from the current executable's location.
-    let mut repo_root = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
+    // Find the repo root by walking up from the current working directory.
+    // This ensures discovery works correctly whether the binary is run as an
+    // installed binary at ~/.cargo/bin/ or from the source tree directly.
+    let mut repo_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     // Walk up until we find a .git directory.
     while !repo_root.join(".git").exists() {
