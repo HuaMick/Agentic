@@ -214,3 +214,4 @@ __marimo__/
 # Claude Code — per-project local overrides (regenerated per session)
 .claude/settings.local.json
 .claude/worktrees/
+.claude/handoff_*.md
