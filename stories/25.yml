@@ -5,7 +5,7 @@ outcome: |
   structured report naming every story whose declared status disagrees with
   its actual implementation state, so drift between authored intent and
   shipped state is visible without manual cross-referencing.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -99,6 +99,48 @@ acceptance:
       composition with `manual_signings` is what lets the backfill
       (story 28) bring stories 11, 17, and 23 into compliance without
       forcing them through a synthetic UAT pass.
+  - file: crates/agentic-dashboard/tests/audit_flags_signing_with_stale_related_files.rs
+    justification: |
+      Proves category 6 (signing-with-stale-related-files): given a
+      fixture corpus containing one story whose YAML has `status: healthy`
+      AND `agentic-store` carries a Pass row in `uat_signings` (or
+      `manual_signings`) at commit C0 AND the story's `related_files: [...]`
+      glob set intersects the file-set changed between C0 and HEAD, the
+      audit report names that story id under a category-6 heading
+      `signing_with_stale_related_files`, the report's `is_empty()`
+      returns false, and the audit's exit-code mapping treats the
+      non-empty category as drift (exit 2 via the gate-mode contract).
+      The intersection signal MUST source from the same `git diff`
+      walk and the same glob-matching predicate the dashboard's
+      classifier already uses for story-9's
+      `not_healthy_reason: ["own_files"]` rule (see `classify_health`
+      in `crates/agentic-dashboard/src/lib.rs`); a parallel
+      reimplementation in the audit is exactly the second-source-of-
+      truth drift category 4 already exists to prevent. A story whose
+      YAML says `status: healthy` AND has a Pass signing AND whose
+      `related_files` is empty (or absent) does NOT route to category
+      6 (the absent-related_files-is-permissive rule from story 9 is
+      inherited verbatim). A story whose `related_files` set does not
+      intersect the C0..HEAD diff also does NOT route to category 6.
+      A story without ANY signing row routes to category 5, not
+      category 6 — the two categories are mutually exclusive on the
+      attestation axis (no signing vs stale signing). Fixture shape:
+      a real `git init` tempdir with at least two commits where the
+      second modifies a path matching the fixture story's
+      `related_files` glob; the store carries a `uat_signings` row
+      pinned to C0 (the first commit); `run_audit(stories_dir,
+      repo_root, store, head_sha=C1)` is invoked. The pattern mirrors
+      the existing
+      `audit_flags_yaml_healthy_without_signing_row.rs` scaffold but
+      replaces the in-memory-only fixture with a real git tempdir
+      because the new check uses `git2::Repository` to compute the
+      C0..HEAD diff. Without this test, the structural asymmetry
+      that motivated this amendment persists: the dashboard says
+      stories 6, 9, 12, 13, 16, 17, 18, 25, 27 are unhealthy via
+      `own_files`, the audit says "no drift," and the pre-commit
+      hook (story 29) sees the audit's clean signal even though the
+      dashboard sees rot. Audit and dashboard MUST agree on what
+      counts as drift; the absence of this category is the gap.
   - file: crates/agentic-dashboard/tests/audit_clean_corpus_reports_no_drift.rs
     justification: |
       Proves the empty-report happy path: given a fixture corpus where
@@ -221,6 +263,61 @@ acceptance:
              drifted story ids visible in the human-readable run from
              step 5.
 
+    Stale-related-files walkthrough (category 6, added 2026-04-30):
+      6a. With the live store at the repo root and the corpus at
+          HEAD `8ba186e` (or any later HEAD where the dashboard
+          reports `own_files` for at least one story), run
+          `agentic stories audit` against the real corpus (no
+          `--store "$AGENTIC_STORE"` override). Observe:
+            - The report includes a `signing-with-stale-related-files`
+              section listing every story id whose YAML says
+              `status: healthy`, has a Pass row in
+              `uat_signings ∪ manual_signings` at some commit C0,
+              and whose declared `related_files` globs intersect the
+              file-set changed between C0 and HEAD. At HEAD `8ba186e`
+              this set includes stories 6, 9, 12, 13, 16, 17, 18, 25,
+              27 (the dashboard's `own_files` cohort).
+            - The exit code is 2 (drift detected). Use the heredoc
+              form to capture it correctly:
+                ```
+                wsl bash << 'EOSH'
+                cd /home/code/Agentic
+                agentic stories audit
+                echo "exit: $?"
+                EOSH
+                ```
+              The naive `agentic stories audit; echo $?` form via
+              outer-shell substitution silently corrupts `$?` to 0
+              and is NOT a valid evidence path.
+            - `agentic stories audit --json | jq .` includes a
+              top-level `signing_with_stale_related_files: [...]`
+              array whose entries' `id` values match the
+              human-readable section. Each entry includes at minimum
+              `id` and the `stale_related_files` glob list (the
+              same per-story signal the dashboard already exposes
+              under `not_healthy_reason: ["own_files"]`); category-6
+              entries MAY include the `signing_commit` (C0) for
+              operator drilldown but the field is not contractually
+              required.
+            - The set of ids in `signing_with_stale_related_files`
+              equals the set of ids the dashboard
+              (`agentic stories health --all`) flags with
+              `not_healthy_reason: ["own_files"]`. Audit and
+              dashboard MUST agree on this set; any divergence is
+              a regression in this category's contract.
+
+      6b. Resolve drift for at least one of the listed stories by
+          re-running UAT at HEAD: `agentic uat <id>
+          --verdict pass`. Re-run `agentic stories audit`. Observe
+          that story id is no longer in
+          `signing_with_stale_related_files` (the new Pass signing
+          row carries the current HEAD as its commit, so the C0..
+          HEAD diff is now empty by construction). The remediation
+          path for the rest of the cohort is the same: re-UAT each
+          at HEAD. Doing the full cohort sweep is OUT OF SCOPE for
+          this story's UAT — the contract here is "the audit
+          surfaces them"; the operator decides when to re-attest.
+
     Clean-corpus walkthrough:
       7. Either repair every drift in the fixture (flip statuses,
          remove fixture stories whose tests are absent) or point the
@@ -292,7 +389,39 @@ guidance: |
   asks "what drifted?") is unchanged: the report payload is the
   same, the human just sees a non-zero exit alongside it now.
 
-  The five drift categories.
+  2026-04-30 amendment — sixth drift category
+  (signing-with-stale-related-files). Empirically at HEAD `8ba186e`
+  the audit's five categories said "no drift" while
+  `agentic stories health --all` flagged stories 6, 9, 12, 13, 16,
+  17, 18, 25, 27 as unhealthy with
+  `not_healthy_reason: ["own_files"]`. The dashboard already
+  detected the file-staleness drift (per story-9's classifier in
+  `crates/agentic-dashboard/src/lib.rs` lines 1252–1281 and 1318–
+  1336), but the audit's structured report had no place to surface
+  it — the closest existing category, `healthy_with_failing_test`,
+  reads only `test_runs.verdict` and is blind to file-set drift
+  between the signing commit and HEAD. The result was a
+  structural disagreement between two surfaces over the same
+  evidence, which is exactly the asymmetry category 5 was added in
+  2026-04-29 to fix at the no-signing-row axis: extending the same
+  fix to the stale-signing-row axis is the corresponding
+  amendment. The sixth category is named
+  `signing_with_stale_related_files` in JSON output and
+  `signing-with-stale-related-files` in the human-readable
+  report; its detection logic delegates to the dashboard's
+  existing `own_files` predicate (the `check_related_files_
+  intersection` walk and the `compute_git_diff` git2 call), with
+  the audit holding only the wrap-as-drift-category seam — no
+  parallel reimplementation of glob matching or git2 diffing.
+  The remediation path for affected stories is to re-UAT each at
+  HEAD (`agentic uat <id> --verdict pass`); the new signing row
+  inherits HEAD as its commit and the C0..HEAD diff becomes
+  empty by construction. The cohort sweep is OUT OF SCOPE for
+  this amendment — surfaced separately so the operator can
+  schedule it deliberately rather than as a side-effect of this
+  story's promotion.
+
+  The six drift categories.
 
     1. Implementation-without-flip. `status: proposed` AND every path
        in `acceptance.tests[].file` exists on disk AND each test
@@ -371,6 +500,36 @@ guidance: |
        story would still appear as category-5 forever and the
        gate would block the same commits it claims to permit.
 
+    6. Signing-with-stale-related-files. `status: healthy` AND
+       a Pass row exists in `uat_signings UNION manual_signings`
+       at some commit C0 AND the story's `related_files: [...]`
+       glob set is non-empty AND the file-set changed in
+       `git diff C0..HEAD` intersects that glob set. This is
+       the stale-attestation shape: the prove-it gate fired at
+       C0 against a corpus that has since drifted in exactly
+       the files the story declared as load-bearing. Story 9
+       owns the `related_files`-staleness rule end-to-end (the
+       semantics of "what counts as a related file," the
+       absent-list-is-permissive default, the glob-matching
+       predicate, and the C0..HEAD diff via `git2`); category
+       6 is the audit's structured-report twin of the
+       dashboard's `not_healthy_reason: ["own_files"]` row
+       under that rule. The detection logic MUST delegate to
+       the dashboard's predicate; a parallel walk inside the
+       audit is exactly the deduplication trap category 4
+       exists to prevent, only on the file-staleness axis. A
+       healthy story with empty `related_files` does NOT route
+       to category 6 (story 9's permissive default is
+       inherited verbatim; absence of the field is not drift).
+       A healthy story with no signing row in either table
+       routes to category 5, not category 6 — the two
+       categories are mutually exclusive on the attestation
+       axis (no signing vs stale signing). The remediation
+       action is `agentic uat <id> --verdict pass` at HEAD,
+       which writes a fresh signing row whose commit equals
+       HEAD and removes the story from the category by making
+       the C0..HEAD diff empty.
+
   Why the boundary with `agentic stories health` is explicit. Story
   3's dashboard classifies stories into `proposed`, `under_construction`,
   `healthy`, `unhealthy`, `error`. The dashboard's job is to answer
@@ -378,14 +537,20 @@ guidance: |
   different: "where does the declared status disagree with reality?"
   Categories 1, 2, 3 are not visible to the dashboard at all
   (the dashboard takes the YAML status as authoritative for proposed
-  and under_construction); only category 4 overlaps. The
-  deduplication contract is that the audit DELEGATES category 4
-  detection to the dashboard's existing classifier rather than
-  reimplementing it. Build-rust may share code via a library entry
-  point on `agentic-dashboard`; what build-rust must NOT do is
-  introduce a second cargo-test-walking codepath inside the audit
-  that could disagree with the dashboard's view of the same
-  evidence rows.
+  and under_construction); categories 4 and 6 overlap with the
+  dashboard's `unhealthy` classification (red tests for category 4,
+  `own_files` staleness for category 6); category 5 overlaps with
+  the dashboard's `error` row (status-evidence mismatch). The
+  deduplication contract is that the audit DELEGATES every
+  overlapping signal to the dashboard's existing classifier rather
+  than reimplementing it: category 4 reuses the red-test predicate;
+  category 6 reuses story-9's `own_files` predicate (the
+  `check_related_files_intersection` glob walk and the
+  `compute_git_diff` git2 diff). Build-rust may share code via
+  library entry points on `agentic-dashboard`; what build-rust
+  must NOT do is introduce a second cargo-test-walking codepath
+  or a second git-diffing codepath inside the audit that could
+  disagree with the dashboard's view of the same evidence rows.
 
   Pass/fail signal for tests. The audit determines whether a story's
   acceptance tests pass via the same evidence the dashboard reads:
@@ -445,6 +610,32 @@ guidance: |
     JSON outputs cleanly). Empty arrays are emitted as `[]`, not
     omitted, so consumers don't have to distinguish "missing key"
     from "no entries."
+
+    The 2026-04-29 amendment added a fifth key
+    `yaml_healthy_without_signing_row` (pinned at the binary
+    boundary by `audit_yaml_healthy_without_signing_row_via_
+    binary.rs`); the 2026-04-30 amendment adds a sixth key
+    `signing_with_stale_related_files`. Both join the original
+    four under the same `[]`-on-empty rule. Category-6 entries
+    include at minimum `id` and `stale_related_files: ["<glob>",
+    ...]` (the same per-story signal the dashboard exposes
+    under `not_healthy_reason: ["own_files"]`); they MAY
+    include the `signing_commit` (C0) for operator drilldown
+    but the field is not contractually required and consumers
+    must accept its absence. The library-level pin for category
+    6 lives at
+    `crates/agentic-dashboard/tests/audit_flags_signing_with_
+    stale_related_files.rs` (parallel to the original five
+    library tests). A separate binary-boundary pin is NOT
+    added in this amendment: category 5's binary test
+    (`audit_yaml_healthy_without_signing_row_via_binary.rs`)
+    already exercises the gate-mode exit code on a non-empty
+    new-category array, and the JSON-shape contract for any
+    category newly introduced inherits that proof
+    transitively. If a future regression demonstrates the
+    library/binary gap reopens for category 6 specifically, a
+    dedicated binary test amends this story per the
+    defects-amend-the-owning-story rule.
 
   Exit-code contract (revised 2026-04-29).
     0 = audit ran successfully AND every category's array is
@@ -583,14 +774,31 @@ guidance: |
     - Story 3 (`agentic stories health` dashboard) — hard
       prerequisite AND deduplication target. The audit's
       category-4 classifier delegates to the dashboard's
-      existing fell-from-grace logic. Without the dashboard,
-      the audit has nothing to ask "is this test red?" without
-      reimplementing the dashboard. With it, the audit becomes
-      a thin layer over already-proven primitives. Story 3
-      and story 25 also share the 2026-04-29 exit-code shift
-      (exit 2 on detected drift / `error` / `unhealthy`); the
-      mapping is identical so the pre-commit hook in story 29
-      can wrap both with one rule.
+      existing fell-from-grace logic; the audit's category-6
+      classifier (added 2026-04-30) delegates to the
+      dashboard's `own_files` predicate from story 9. Without
+      the dashboard, the audit has nothing to ask "is this
+      test red?" or "does this story's signing commit lag the
+      file-set?" without reimplementing both rules. With it,
+      the audit becomes a thin layer over already-proven
+      primitives. Story 3 and story 25 also share the
+      2026-04-29 exit-code shift (exit 2 on detected drift /
+      `error` / `unhealthy`); the mapping is identical so the
+      pre-commit hook in story 29 can wrap both with one rule.
+    - Story 9 (`related_files` staleness rule) — hard
+      prerequisite for category 6 specifically (added
+      2026-04-30). Story 9 owns the semantics of "what counts
+      as a related file," the absent-list-is-permissive
+      default, the glob-matching predicate, and the
+      `git2`-driven C0..HEAD diff. The audit's category-6
+      query is `dashboard::classify(story).not_healthy_reason
+      contains "own_files"` filtered to stories whose on-disk
+      YAML still says `status: healthy`. Per the eventual-
+      consistency posture, story 25's `depends_on` does NOT
+      add a back-edge onto story 9 — the dependency is
+      capability-shaped (the dashboard already exposes the
+      predicate; story 25's amendment is the wrap layer), not
+      story-shaped.
     - Story 2 (`agentic-ci-record`) — provides the `test_runs`
       row shape the audit consumes via the dashboard's reads.
       The audit does NOT directly read `test_runs`; it reads
@@ -626,14 +834,16 @@ guidance: |
       add a back-edge onto story 29.
 
   Test file locations.
-    Library-level tests (six tests — five from the original
+    Library-level tests (seven tests — five from the original
     2026-04-19 contract plus one added by the 2026-04-29
-    fifth-category amendment:
+    fifth-category amendment plus one added by the 2026-04-30
+    sixth-category amendment:
     `audit_flags_implementation_without_status_flip.rs`,
     `audit_flags_promotion_ready_under_construction.rs`,
     `audit_flags_test_builder_not_started.rs`,
     `audit_flags_healthy_with_failing_test.rs`,
     `audit_flags_yaml_healthy_without_signing_row.rs`,
+    `audit_flags_signing_with_stale_related_files.rs`,
     `audit_clean_corpus_reports_no_drift.rs`) live under
     `crates/agentic-dashboard/tests/` as Rust integration
     tests. They use a `MemStore` from `agentic-store`, seed
@@ -642,7 +852,14 @@ guidance: |
     point the audit at a temporary `stories/` directory with
     fixture YAMLs whose statuses and test files are arranged
     to exercise each category, and assert on the structured
-    report value.
+    report value. The category-6 test is the only one of the
+    seven that requires a real git tempdir (`git init` plus
+    two commits where the second modifies a file matching
+    the fixture story's `related_files` glob), because the
+    new check uses `git2::Repository` to compute the C0..
+    HEAD diff via the dashboard's `compute_git_diff` entry
+    point. The other six tests use synthetic store rows only
+    and do not touch git.
 
     Binary-level tests (two tests — one from the original
     2026-04-19 contract plus one added by the 2026-04-29
