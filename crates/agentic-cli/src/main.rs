@@ -501,6 +501,19 @@ fn main() {
                             .collect::<Vec<_>>(),
                     );
 
+                    result.insert(
+                        "signing_with_stale_related_files",
+                        report
+                            .signing_with_stale_related_files
+                            .iter()
+                            .map(|e| {
+                                serde_json::json!({
+                                    "id": e.id,
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+
                     let json_obj = serde_json::json!(result);
                     println!("{}", json_obj.to_string());
                 } else {

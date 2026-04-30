@@ -1723,7 +1723,7 @@ pub mod audit {
     use agentic_story::Story;
     use serde_json::Value;
 
-    use crate::{DashboardError, Store};
+    use crate::{Dashboard, DashboardError, Store};
 
     #[derive(Debug, Clone)]
     pub struct AuditReport {
@@ -1732,6 +1732,7 @@ pub mod audit {
         pub test_builder_not_started: Vec<AuditEntry>,
         pub healthy_with_failing_test: Vec<AuditEntry>,
         pub yaml_healthy_without_signing_row: Vec<AuditEntry>,
+        pub signing_with_stale_related_files: Vec<AuditEntry>,
     }
 
     #[derive(Debug, Clone)]
@@ -1748,6 +1749,7 @@ pub mod audit {
                 && self.test_builder_not_started.is_empty()
                 && self.healthy_with_failing_test.is_empty()
                 && self.yaml_healthy_without_signing_row.is_empty()
+                && self.signing_with_stale_related_files.is_empty()
         }
     }
 
@@ -1804,6 +1806,15 @@ pub mod audit {
             if !self.yaml_healthy_without_signing_row.is_empty() {
                 writeln!(f, "Yaml-healthy-without-signing-row:")?;
                 for entry in &self.yaml_healthy_without_signing_row {
+                    writeln!(f, "  {}", entry.id)?;
+                }
+                writeln!(f)?;
+            }
+
+            // Category 6: signing-with-stale-related-files
+            if !self.signing_with_stale_related_files.is_empty() {
+                writeln!(f, "Signing-with-stale-related-files:")?;
+                for entry in &self.signing_with_stale_related_files {
                     writeln!(f, "  {}", entry.id)?;
                 }
                 writeln!(f)?;
@@ -1914,6 +1925,55 @@ pub mod audit {
         !manual_pass.is_empty()
     }
 
+    /// Get the latest Pass signing row from either uat_signings or
+    /// manual_signings (the union, latest by signed_at).
+    fn get_latest_pass_signing(story_id: u32, store: &Arc<dyn Store>) -> Option<Value> {
+        // Check uat_signings for Pass rows
+        let uat_pass = store
+            .query("uat_signings", &|row| {
+                let matches_story = row
+                    .get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story_id as u64)
+                    .unwrap_or(false);
+                let is_pass = row
+                    .get("verdict")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase() == "pass")
+                    .unwrap_or(false);
+                matches_story && is_pass
+            })
+            .unwrap_or_default();
+
+        // Check manual_signings for Pass rows
+        let manual_pass = store
+            .query("manual_signings", &|row| {
+                let matches_story = row
+                    .get("story_id")
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id == story_id as u64)
+                    .unwrap_or(false);
+                let is_pass = row
+                    .get("verdict")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase() == "pass")
+                    .unwrap_or(false);
+                matches_story && is_pass
+            })
+            .unwrap_or_default();
+
+        // Merge both, sort by signed_at, return latest
+        let mut all = Vec::new();
+        all.extend(uat_pass);
+        all.extend(manual_pass);
+        all.sort_by(|a, b| {
+            let a_signed_at = a.get("signed_at").and_then(|v| v.as_str()).unwrap_or("");
+            let b_signed_at = b.get("signed_at").and_then(|v| v.as_str()).unwrap_or("");
+            a_signed_at.cmp(b_signed_at)
+        });
+        all.pop()
+    }
+
     /// Check if story is "healthy-with-failing-test" by invoking the
     /// dashboard's existing unhealthy classifier for stories with
     /// status=healthy.
@@ -1964,7 +2024,7 @@ pub mod audit {
     }
 
     /// Run the audit against a stories directory and store, returning
-    /// a report of the five drift categories.
+    /// a report of the six drift categories.
     pub fn run_audit(
         stories_dir: &Path,
         repo_root: &Path,
@@ -1977,11 +2037,20 @@ pub mod audit {
             });
         }
 
+        // Construct a transient Dashboard for git/glob helpers
+        let dashboard = Dashboard {
+            store: store.clone(),
+            stories_dir: stories_dir.to_path_buf(),
+            head_sha: head_sha.clone(),
+            repo_root: Some(repo_root.to_path_buf()),
+        };
+
         let mut cat1 = Vec::new();
         let mut cat2 = Vec::new();
         let mut cat3 = Vec::new();
         let mut cat4 = Vec::new();
         let mut cat5 = Vec::new();
+        let mut cat6 = Vec::new();
 
         // Load all story YAML files
         let entries = std::fs::read_dir(stories_dir)
@@ -2070,6 +2139,46 @@ pub mod audit {
                     failing_tests: vec![],
                 });
             }
+
+            // Category 6: status=healthy AND has a Pass signing at commit C0
+            // AND related_files is non-empty AND the C0..HEAD diff intersects
+            // related_files (signing-with-stale-related-files). This MUST NOT
+            // be added if the story is already in category 5 (they are mutually
+            // exclusive on the attestation axis: no signing vs stale signing).
+            if story.status == agentic_story::Status::Healthy
+                && !is_healthy_with_failing_test(&story, &store, &head_sha)
+            {
+                // Must have a Pass signing
+                if let Some(pass_row) = get_latest_pass_signing(story_id, &store) {
+                    // Must have related_files declared
+                    if !story.related_files.is_empty() {
+                        // Get the commit the signing is pinned to
+                        let pass_commit = pass_row
+                            .get("commit")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+
+                        if let Some(pass_commit) = pass_commit {
+                            // Compute the diff from the signing commit to HEAD
+                            if let Ok(changed_files) = dashboard.compute_git_diff(&pass_commit, &head_sha) {
+                                // Check if any changed files intersect the related_files globs
+                                let matched = dashboard.check_related_files_intersection(
+                                    &story.related_files,
+                                    &changed_files,
+                                );
+                                if !matched.is_empty() {
+                                    // Non-empty intersection: add to category 6
+                                    cat6.push(AuditEntry {
+                                        id: story_id,
+                                        passing_tests: vec![],
+                                        failing_tests: vec![],
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Sort each category by id for stable output
@@ -2078,6 +2187,7 @@ pub mod audit {
         cat3.sort_by_key(|e| e.id);
         cat4.sort_by_key(|e| e.id);
         cat5.sort_by_key(|e| e.id);
+        cat6.sort_by_key(|e| e.id);
 
         Ok(AuditReport {
             implementation_without_flip: cat1,
@@ -2085,6 +2195,7 @@ pub mod audit {
             test_builder_not_started: cat3,
             healthy_with_failing_test: cat4,
             yaml_healthy_without_signing_row: cat5,
+            signing_with_stale_related_files: cat6,
         })
     }
 }
