@@ -16,6 +16,9 @@
 # This hook is invoked by git with cwd set to the repository root.
 # =============================================================================
 
+# Self-discover agentic in standard cargo install dirs before checking PATH.
+export PATH="${HOME:-/root}/.cargo/bin:/usr/local/cargo/bin:${PATH}"
+
 # Check if `agentic` is on PATH. If not, fail open (exit 0) with a message.
 if ! command -v agentic >/dev/null 2>&1; then
   printf 'notice: agentic binary not on PATH; skipping pre-commit hook. Install with: cargo install --path crates/agentic-cli --locked\n' >&2
