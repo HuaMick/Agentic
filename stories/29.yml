@@ -6,7 +6,7 @@ outcome: |
   `error` or `unhealthy` rows in `agentic stories health` or non-empty
   arrays in `agentic stories audit`, because the pre-commit hook
   refuses the commit with a message naming the offending story.
-status: healthy
+status: under_construction
 patterns:
 - standalone-resilient-library
 acceptance:
@@ -102,6 +102,50 @@ acceptance:
       to bypass the hook (no `--no-verify`, no `core.hooksPath
       ""`, no environment variable) — escape hatches in
       documentation are escape hatches in policy.
+  - file: scripts/verify/githooks_pre_commit_finds_agentic_when_installed_via_cargo.sh
+    justification: |
+      Proves the hook discovers an `agentic` binary that is
+      installed at the standard cargo location even when git's
+      pre-commit hook environment strips `~/.cargo/bin` from
+      PATH. The verifier (a) confirms `agentic` resolves on
+      the developer's interactive PATH and lives at
+      `${HOME:-/root}/.cargo/bin/agentic` (the default
+      `cargo install` target); (b) invokes
+      `.githooks/pre-commit` directly with PATH explicitly
+      set to git's typical hook environment
+      (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      i.e. NO `~/.cargo/bin`); (c) asserts the hook DOES NOT
+      print the `skipping pre-commit hook` notice, i.e. the
+      hook self-discovered the binary and proceeded into the
+      audit + health checks. Without this test, the hook
+      retains the fail-open silent-bypass shape discovered on
+      2026-04-30 against HEAD `919745b`: `command -v agentic`
+      returned non-zero under git's stripped PATH, the hook
+      printed the skipping notice, exited 0, and let
+      drift-laden commits land unchallenged on developed
+      clones — the structural enforcement story 29 exists to
+      provide was decorative.
+
+      Fix shape (for build-rust). Inside `.githooks/pre-commit`,
+      BEFORE the `command -v agentic` check, prepend the
+      standard cargo install directory to PATH:
+      `export PATH="${HOME:-/root}/.cargo/bin:${PATH}"` (and
+      optionally `/usr/local/cargo/bin` for system-wide
+      installs). Then the existing `command -v agentic` check
+      finds the binary on developed clones and proceeds into
+      the audit + health gate. The fail-open branch is
+      preserved unchanged for the genuinely-missing-binary
+      case (fresh clone before `cargo install`): if the
+      directory does not exist, or exists but contains no
+      `agentic`, `command -v` still returns non-zero and the
+      existing `exit 0 with notice` path keeps its bootstrap
+      role intact. Direct lookup at a hard-coded path
+      (`if [[ -x "${HOME}/.cargo/bin/agentic" ]]; then ...`)
+      is an acceptable alternative shape; PATH-prepend is
+      preferred because it composes cleanly with the existing
+      `command -v` check and lets the same pattern absorb
+      future cargo-install location variants without further
+      hook surgery.
   uat: |
     Goal: convince yourself that a clone with
     `core.hooksPath` configured permits clean commits, refuses
@@ -184,6 +228,38 @@ acceptance:
          Confirm no instruction to bypass the hook
          (`--no-verify`, etc.) appears in the same section.
 
+    Hook-finds-cargo-installed-binary walkthrough:
+     12. Confirm `agentic` is installed at the standard
+         cargo location: `ls -l "$HOME/.cargo/bin/agentic"`
+         shows the executable and `command -v agentic`
+         returns that path on the interactive shell.
+     13. Pick a story currently in `under_construction` and
+         hand-edit its `status:` to `healthy` WITHOUT driving
+         `agentic uat` (forged-promotion shape from step 7,
+         re-used here as the trip-wire). Stage the change.
+     14. Invoke the hook directly with git's typical hook PATH
+         (which omits `~/.cargo/bin`):
+           `env -i HOME="$HOME" PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" .githooks/pre-commit`
+         Observe:
+           - The hook does NOT print
+             `skipping pre-commit hook` (it found the binary
+             via its self-discovery path).
+           - The hook prints the rendered drift output (audit
+             and/or health table) naming the story id from
+             step 13.
+           - The hook exits non-zero.
+     15. Repeat the invocation but with `agentic` truly absent
+         (e.g. point HOME at an empty tempdir:
+         `env -i HOME="$(mktemp -d)" PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" .githooks/pre-commit`).
+         Observe:
+           - The hook DOES print the
+             `skipping pre-commit hook` notice and exits 0.
+             The fresh-clone bootstrap path is intact —
+             fail-open is reserved for the genuinely-missing
+             case, not the stripped-PATH case.
+     16. Revert the forged YAML edit from step 13: `git
+         restore stories/<uc-id>.yml`. Confirm tree clean.
+
     Cleanup:
      12. Reset `core.hooksPath` to the default if you want
          the hook gone from your local clone: `git config
@@ -202,6 +278,29 @@ guidance: |
   drift) become enforcement only when something refuses commits
   whose post-commit state would produce that exit code. The hook
   is that something.
+
+  2026-04-30 amendment — fail-open regression on developed clones.
+    Discovered against HEAD `919745b` on `main`: when `agentic` is
+    installed via `cargo install --path crates/agentic-cli
+    --locked` (default target `~/.cargo/bin/agentic`) but git's
+    pre-commit hook environment runs with PATH stripped to
+    `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+    (no `~/.cargo/bin`), the existing `command -v agentic` check
+    at `.githooks/pre-commit:20` returns non-zero, the hook
+    prints `notice: agentic binary not on PATH; skipping
+    pre-commit hook` and exits 0. The gate is silently bypassed.
+    Empirical proof: a probe with the stripped PATH did not
+    resolve `agentic`; the same probe with `PATH="$HOME/.cargo/bin:$PATH"`
+    prefixed did. README + UAT-promotion commits at and before
+    `919745b` landed without hook enforcement on this clone. The
+    new acceptance test
+    `githooks_pre_commit_finds_agentic_when_installed_via_cargo.sh`
+    pins the corrected behaviour: hook self-discovers the binary
+    at the standard cargo location, fail-open is reserved for
+    truly-missing-binary scenarios (fresh clone before install).
+    Fix shape: prepend `${HOME:-/root}/.cargo/bin` to PATH inside
+    the hook before the `command -v` check; preserves the
+    bootstrap fail-open branch for the genuinely-absent case.
 
   Why pre-commit, not pre-push.
     Pre-commit blocks the smaller unit (one commit) at the
@@ -264,22 +363,35 @@ guidance: |
 
   Hook script behaviour.
     On every invocation:
-      1. Locate the `agentic` binary. The hook's `PATH`
-         expectation is the developer's standard `PATH`
-         (the binary should be installed via
-         `cargo install --path crates/agentic-cli` per
-         the repo's existing convention). If the binary
-         is not on `PATH`, the hook emits a stderr message
+      1. Locate the `agentic` binary. The hook MUST first
+         self-discover the binary at the standard cargo
+         install location BEFORE consulting PATH: prepend
+         `${HOME:-/root}/.cargo/bin` to PATH inside the
+         hook (and any other well-known cargo install
+         dirs the team agrees on, e.g.
+         `/usr/local/cargo/bin`) so that
+         `command -v agentic` resolves on developed
+         clones even when git invokes the hook with PATH
+         stripped to its minimal default. If after this
+         self-discovery step the binary is still not
+         resolvable, the hook emits a stderr message
          saying so and exits 0 (DO NOT block commits when
-         the binary is missing — that would be a chicken-
-         and-egg failure mode for fresh clones that have
-         not yet built; the build itself is also gated by
-         the hook would create a stuck-loop). The "binary
-         missing" case is expected to be vanishingly rare
-         in steady state and surfaces a clear stderr
+         the binary is genuinely missing — that would be a
+         chicken-and-egg failure mode for fresh clones that
+         have not yet built; the build itself is also gated
+         by the hook would create a stuck-loop). The
+         "binary missing" case is expected to be vanishingly
+         rare in steady state and surfaces a clear stderr
          message that tells the developer how to fix it
          (`cargo install --path crates/agentic-cli
-         --locked`).
+         --locked`). Critical: the fail-open path is for
+         the genuinely-missing case ONLY. A stripped-PATH
+         developed clone where `agentic` is installed at
+         `~/.cargo/bin/agentic` MUST proceed into the audit
+         + health gate, not fail open. See the 2026-04-30
+         amendment block above and the
+         `githooks_pre_commit_finds_agentic_when_installed_via_cargo.sh`
+         acceptance test.
       2. Run `agentic stories audit`. If exit non-zero,
          emit a stderr message naming the audit's drift
          output (or the JSON `--json` representation,
@@ -384,13 +496,14 @@ guidance: |
     construction.
 
   Test file locations.
-    All five acceptance tests are shell verifiers under
+    All six acceptance tests are shell verifiers under
     `scripts/verify/`:
       - `githooks_pre_commit_exists_and_executable.sh`
       - `githooks_pre_commit_passes_on_clean_corpus.sh`
       - `githooks_pre_commit_blocks_forged_promotion.sh`
       - `githooks_pre_commit_blocks_unhealthy_inducement.sh`
       - `githooks_setup_documented_in_readme.sh`
+      - `githooks_pre_commit_finds_agentic_when_installed_via_cargo.sh`
     Shell verifiers are the right shape because: (a) the
     contract is whole-process behavioural (git commit
     refused / permitted) which a Rust integration test
@@ -476,3 +589,4 @@ related_files:
 - scripts/verify/githooks_pre_commit_blocks_forged_promotion.sh
 - scripts/verify/githooks_pre_commit_blocks_unhealthy_inducement.sh
 - scripts/verify/githooks_setup_documented_in_readme.sh
+- scripts/verify/githooks_pre_commit_finds_agentic_when_installed_via_cargo.sh
